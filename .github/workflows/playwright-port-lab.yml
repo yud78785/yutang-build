@@ -1,0 +1,101 @@
+name: Locked Playwright alpha - Edge fixed-port vs default pipe (NO EXE)
+
+on:
+  pull_request:
+    paths:
+      - 'tools/playwright_port_lab.cjs'
+      - '.github/workflows/playwright-port-lab.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  comparison:
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - name: Checkout audited lab only (no persisted Git credentials)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Obtain exact pinned upstream source and lockfile
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          git -c core.autocrlf=false clone --no-checkout https://github.com/LockyBee/dsh-douyin-agent.git upstream
+          if($LASTEXITCODE -ne 0) {throw 'Pinned upstream clone failed'}
+          git -C upstream config core.autocrlf false
+          git -C upstream checkout --detach 912873e2556d16a088d81dcbc6f7c0060614dd58
+          if($LASTEXITCODE -ne 0) {throw 'Exact upstream checkout failed'}
+          $actual=(git -C upstream rev-parse HEAD).Trim()
+          if($actual -ne '912873e2556d16a088d81dcbc6f7c0060614dd58') {throw 'Source identity mismatch'}
+          node --version
+          $locked=Get-Content -LiteralPath 'upstream/pnpm-lock.yaml' -Raw
+          $version='1.64.0-alpha-1790635538000'
+          $expectedIntegrity='sha512-pNwaXirhXMRLaRQs4NQ18EpTdtDoFwyPH9FOaaDC7YXG4hpwE2xmwCic/1srbuExVQC7zT9LJSJpDBAru+Vo9A=='
+          if(-not $locked.Contains("playwright-core@$version") -or -not $locked.Contains($expectedIntegrity)) {throw 'Locked Playwright identity not present in pinned source'}
+          $packDir=Join-Path $env:RUNNER_TEMP 'yutang-locked-playwright-tarball'
+          [void][System.IO.Directory]::CreateDirectory($packDir)
+          $jsonOutput=@(npm pack "playwright-core@$version" --ignore-scripts --pack-destination $packDir --json)
+          if($LASTEXITCODE -ne 0) {throw 'Exact locked Playwright tarball unavailable'}
+          $packed=($jsonOutput -join [Environment]::NewLine | ConvertFrom-Json)
+          if($packed.Count -ne 1) {throw 'Unexpected package count'}
+          $tarball=Join-Path $packDir $packed[0].filename
+          if(-not (Test-Path -LiteralPath $tarball -PathType Leaf)) {throw 'Locked tarball missing'}
+          $hashHex=(Get-FileHash -LiteralPath $tarball -Algorithm SHA512).Hash
+          $integrity='sha512-'+[Convert]::ToBase64String([Convert]::FromHexString($hashHex))
+          if($integrity -ne $expectedIntegrity) {throw 'SHA-512 mismatch with immutable upstream lock; package untrusted'}
+          $install=Join-Path $env:RUNNER_TEMP 'yutang-playwright-isolated-package'
+          [void][System.IO.Directory]::CreateDirectory($install)
+          npm --prefix $install install --offline --ignore-scripts --no-save --no-package-lock $tarball
+          if($LASTEXITCODE -ne 0) {throw 'Offline-only local package extraction failed'}
+          $package=(Get-Content -LiteralPath (Join-Path $install 'node_modules/playwright-core/package.json') -Raw | ConvertFrom-Json)
+          if($package.version -ne $version) {throw 'Installed package version differs from upstream lock'}
+          "YUTANG_LOCKED_PLAYWRIGHT_ROOT=$install" | Out-File -LiteralPath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host 'LOCKED_PLAYWRIGHT_SHA512: PASS; one exact archive from frozen upstream lock; no lifecycle scripts executed.'
+          node --check tools/playwright_port_lab.cjs
+      - name: Block outbound access from valid Microsoft Edge in disposable VM
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $candidates=@((Join-Path $env:ProgramFiles 'Microsoft\Edge\Application\msedge.exe'),(Join-Path ([Environment]::GetFolderPath('ProgramFilesX86')) 'Microsoft\Edge\Application\msedge.exe'))
+          $edge=@($candidates | Where-Object {Test-Path -LiteralPath $_ -PathType Leaf})
+          if($edge.Count -ne 1) {throw 'Expected exactly one Microsoft Edge binary'}
+          if((Get-AuthenticodeSignature -LiteralPath $edge[0]).Status -ne 'Valid') {throw 'Microsoft Edge signing unverified'}
+          $rule=New-NetFirewallRule -DisplayName 'YuTangLockedPlaywrightLabBlockOutbound' -Direction Outbound -Program $edge[0] -Action Block -Profile Any -ErrorAction Stop
+          if($rule.Enabled -ne 'True' -or $rule.Action -ne 'Block') {throw 'Outbound protection failed; no browser tests'}
+          Write-Host 'EDGE_OUTBOUND_BLOCK_VERIFIED: yes; no real Douyin or user account involved.'
+      - name: Execute pipe and fixed-port options in independent child processes
+        shell: pwsh
+        env:
+          YUTANG_EDGE_FIREWALL_CONFIRMED: 'yes'
+        run: |
+          $ErrorActionPreference='Stop'
+          $script=(Resolve-Path 'tools/playwright_port_lab.cjs').Path
+          $states=[ordered]@{}
+          foreach($mode in @('pipe','fixed')) {
+            $out=Join-Path $env:RUNNER_TEMP "yutang-$mode-stdout.txt"
+            $err=Join-Path $env:RUNNER_TEMP "yutang-$mode-stderr.txt"
+            $node=(Get-Command node).Source
+            $proc=Start-Process -FilePath $node -ArgumentList @($script,$mode) -PassThru -NoNewWindow -RedirectStandardOutput $out -RedirectStandardError $err
+            if(-not $proc) {throw "Node $mode probe did not start"}
+            $finished=$proc.WaitForExit(42000)
+            if(-not $finished) {
+              try {$proc.Kill()} catch {}
+              $states[$mode]='TIMEOUT'
+              Write-Host "LAB_RESULT mode=$mode launch=TIMEOUT_AFTER_42_SEC"
+              continue
+            }
+            $lines=@(Get-Content -LiteralPath $out -ErrorAction SilentlyContinue | Where-Object {$_ -like 'LAB_RESULT *'})
+            if($lines.Count -ne 1) {
+              $states[$mode]='INFRA_FAILURE'
+              Write-Host "LAB_RESULT mode=$mode launch=NO_PARSEABLE_REPORT exit=$($proc.ExitCode)"
+              continue
+            }
+            $record=$lines[0].Substring(11) | ConvertFrom-Json
+            $states[$mode]=[string]$record.launch
+            Write-Host $lines[0]
+          }
+          Write-Host "LAB_COMPARISON_FINISHED pipe=$($states['pipe']) fixed=$($states['fixed'])."
+          Write-Host 'RESULTS ARE DIAGNOSTIC ONLY: no candidate EXE was launched, no Douyin video watched, no API key used.'
+          if($states['pipe'] -eq 'INFRA_FAILURE' -or $states['fixed'] -eq 'INFRA_FAILURE') {throw 'Lab could not produce both scoped evidence records'}
