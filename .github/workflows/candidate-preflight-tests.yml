@@ -1,0 +1,35 @@
+name: Candidate preflight unit tests (offline, no EXE execution)
+
+on:
+  pull_request:
+    paths:
+      - 'tools/verify_candidate.py'
+      - 'tests/test_verify_candidate.py'
+      - '.github/workflows/candidate-preflight-tests.yml'
+  push:
+    branches:
+      - 'audit/offline-candidate-identity-20261111'
+    paths:
+      - 'tools/verify_candidate.py'
+      - 'tests/test_verify_candidate.py'
+      - '.github/workflows/candidate-preflight-tests.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  preflight-units:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout exact reviewed commit (no stored credentials)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Check local Python availability
+        run: |
+          python3 --version
+          python3 -m compileall -q tools/verify_candidate.py tests/test_verify_candidate.py
+      - name: Run synthetic archive regression tests (no candidate download or execution)
+        run: python3 -m unittest discover -s tests -v
