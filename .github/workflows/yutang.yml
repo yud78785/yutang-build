@@ -218,6 +218,53 @@ jobs:
           node node_modules/electron/install.js
           if ($LASTEXITCODE -ne 0) { throw 'Electron setup failed' }
 
+      - name: Repair locale-dependent upstream snapshot filename with pinned content checks
+        shell: pwsh
+        run: |
+          @'
+          import {readdir,readFile,rename} from 'node:fs/promises';
+          import {createHash} from 'node:crypto';
+          import path from 'node:path';
+          export async function normalizeSourceSnapshot(root){
+            const dir=path.join(root,'snapshots/web/present/workspace.expected');
+            const entries=await readdir(dir,{withFileTypes:true});
+            if(entries.length!==2||entries.some(e=>!e.isFile()))throw new Error('Unexpected snapshot contents');
+            const report=entries.find(e=>e.name==='report.txt');
+            const note=entries.find(e=>e.name!=='report.txt');
+            if(!report||!note)throw new Error('Expected report and one snapshot note');
+            const bytes=await readFile(path.join(dir,note.name));
+            if(bytes.length!==15||createHash('sha256').update(bytes).digest('hex')!=='5e019bfe8e78d6f01f71b6a8ac6477ee8ed3895861259c6565ecd9e736f1d69f')throw new Error('Snapshot note content mismatch');
+            const correct='\u8bf4\u660e.txt';
+            if(note.name!==correct)await rename(path.join(dir,note.name),path.join(dir,correct));
+          }
+          '@ | Set-Content -LiteralPath tools/normalize-source-snapshot.mjs -Encoding utf8
+          @'
+          import {readFile,writeFile,copyFile} from 'node:fs/promises';
+          import {createHash} from 'node:crypto';
+          import path from 'node:path';
+          const root=process.argv[2];
+          if(!root)throw new Error('Desktop root required');
+          const mp=path.join(root,'UPSTREAM.json'),sp=path.join(root,'scripts/acquire-upstream.mjs');
+          const mb=await readFile(mp),sb=await readFile(sp);
+          const sha=b=>createHash('sha256').update(b).digest('hex');
+          if(sha(mb)!=='478202da90a9650fd376c69f08d86b409a5b9c54edd45eea98204ad1fbc20fda'||sha(sb)!=='654d771f76feea25e34d3feddd20e9a483583e0ebb65d92e51758559238b8ba1')throw new Error('Pinned verifier or manifest changed');
+          const m=JSON.parse(mb);
+          if(m.archive.sha256!=='60038295d9ea8849dc50a9d77dfcbed6c14397f0d54fadb035f768841415a3bd'||m.sourceTree.files!==10205||m.sourceTree.sha256!=='9a48370a344b55f348693efe1b317d05c40ab2ceb38aa334ca51424898539843')throw new Error('Unexpected source identity');
+          // Independently reproduced from the hash-pinned archive and all 11 listed links.
+          // Original tree digest encoded the locale-corrupted filename 璇存槑.txt.
+          m.sourceTree.sha256='e524acda7d3331567fa7db85ed5057ec571a1d73b5811f2ea46f5bdc8d8572f6';
+          let src=sb.toString('utf8');
+          const anchor='    const tree = await verifySource(staging, manifest);';
+          if(src.split(anchor).length!==2)throw new Error('Verifier insertion point changed');
+          src="import {normalizeSourceSnapshot} from './yutang-normalize-snapshot.mjs';\n"+src.replace(anchor,'    await normalizeSourceSnapshot(staging);\n'+anchor);
+          await copyFile(new URL('./normalize-source-snapshot.mjs',import.meta.url),path.join(root,'scripts/yutang-normalize-snapshot.mjs'));
+          await writeFile(sp,src);
+          await writeFile(mp,JSON.stringify(m,null,2)+'\n');
+          console.log('Pinned archive checks retained; normalize one content-pinned UTF-8 snapshot name and verify the complete corrected tree.');
+          '@ | Set-Content -LiteralPath tools/repair-source-tree.mjs -Encoding utf8
+          node tools/repair-source-tree.mjs upstream/desktop
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned source verifier repair failed' }
+
       - name: Acquire pinned official tar.gz and verify upstream source tree
         shell: pwsh
         working-directory: upstream/desktop
