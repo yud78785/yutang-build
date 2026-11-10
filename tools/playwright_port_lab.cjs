@@ -9,7 +9,8 @@ if (!['pipe','fixed'].includes(mode) || process.platform!=='win32' || process.en
   console.error('LAB_REFUSED: must run in guarded ephemeral Windows CI with mode=pipe|fixed');
   process.exit(2);
 }
-const source = path.resolve(process.cwd(),'upstream');
+const source = process.env.YUTANG_LOCKED_PLAYWRIGHT_ROOT;
+assert.ok(source && path.isAbsolute(source), 'Exact installed package root must be supplied by gated CI');
 const pkg = require(path.join(source,'node_modules','playwright-core','package.json'));
 assert.equal(pkg.version,'1.64.0-alpha-1790635538000');
 const {chromium} = require(path.join(source,'node_modules','playwright-core'));

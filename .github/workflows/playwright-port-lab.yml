@@ -30,15 +30,29 @@ jobs:
           $actual=(git -C upstream rev-parse HEAD).Trim()
           if($actual -ne '912873e2556d16a088d81dcbc6f7c0060614dd58') {throw 'Source identity mismatch'}
           node --version
-          npm install --global pnpm@10.20.0 --no-fund --no-audit
-          if($LASTEXITCODE -ne 0) {throw 'Pinned pnpm unavailable'}
-          Push-Location upstream
-          try {
-            pnpm install --frozen-lockfile --ignore-scripts
-            if($LASTEXITCODE -ne 0) {throw 'Locked dependencies unavailable'}
-          } finally {Pop-Location}
-          $package=Get-Content -LiteralPath 'upstream/node_modules/playwright-core/package.json' -Raw | ConvertFrom-Json
-          if($package.version -ne '1.64.0-alpha-1790635538000') {throw 'Unexpected Playwright runtime'}
+          $locked=Get-Content -LiteralPath 'upstream/pnpm-lock.yaml' -Raw
+          $version='1.64.0-alpha-1790635538000'
+          $expectedIntegrity='sha512-pNwaXirhXMRLaRQs4NQ18EpTdtDoFwyPH9FOaaDC7YXG4hpwE2xmwCic/1srbuExVQC7zT9LJSJpDBAru+Vo9A=='
+          if(-not $locked.Contains("playwright-core@$version") -or -not $locked.Contains($expectedIntegrity)) {throw 'Locked Playwright identity not present in pinned source'}
+          $packDir=Join-Path $env:RUNNER_TEMP 'yutang-locked-playwright-tarball'
+          [void][System.IO.Directory]::CreateDirectory($packDir)
+          $jsonOutput=@(npm pack "playwright-core@$version" --ignore-scripts --pack-destination $packDir --json)
+          if($LASTEXITCODE -ne 0) {throw 'Exact locked Playwright tarball unavailable'}
+          $packed=($jsonOutput -join [Environment]::NewLine | ConvertFrom-Json)
+          if($packed.Count -ne 1) {throw 'Unexpected package count'}
+          $tarball=Join-Path $packDir $packed[0].filename
+          if(-not (Test-Path -LiteralPath $tarball -PathType Leaf)) {throw 'Locked tarball missing'}
+          $hashHex=(Get-FileHash -LiteralPath $tarball -Algorithm SHA512).Hash
+          $integrity='sha512-'+[Convert]::ToBase64String([Convert]::FromHexString($hashHex))
+          if($integrity -ne $expectedIntegrity) {throw 'SHA-512 mismatch with immutable upstream lock; package untrusted'}
+          $install=Join-Path $env:RUNNER_TEMP 'yutang-playwright-isolated-package'
+          [void][System.IO.Directory]::CreateDirectory($install)
+          npm --prefix $install install --offline --ignore-scripts --no-save --no-package-lock $tarball
+          if($LASTEXITCODE -ne 0) {throw 'Offline-only local package extraction failed'}
+          $package=(Get-Content -LiteralPath (Join-Path $install 'node_modules/playwright-core/package.json') -Raw | ConvertFrom-Json)
+          if($package.version -ne $version) {throw 'Installed package version differs from upstream lock'}
+          "YUTANG_LOCKED_PLAYWRIGHT_ROOT=$install" | Out-File -LiteralPath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host 'LOCKED_PLAYWRIGHT_SHA512: PASS; one exact archive from frozen upstream lock; no lifecycle scripts executed.'
           node --check tools/playwright_port_lab.cjs
       - name: Block outbound access from valid Microsoft Edge in disposable VM
         shell: pwsh
