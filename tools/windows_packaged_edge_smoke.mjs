@@ -115,6 +115,7 @@ async function run(exeFile) {
     assert.equal(path.resolve(ready.memoryFolder).toLowerCase(),path.resolve(memory).toLowerCase(),'unexpected memory folder');
     assert.match(ready.origin,/^http:\/\/127\.0\.0\.1:\d{4,5}$/);
     report.desktopReady=true;
+    console.log('PHASE_EXE_DESKTOP_READY: true; isolated memory and no model key confirmed');
     const bootstrap=await (await fetch(ready.origin+'/api/bootstrap',{signal:AbortSignal.timeout(5000)})).json();
     assert.equal(typeof bootstrap.token,'string');assert.ok(bootstrap.token.length>10);
     let openStatus=null;
@@ -125,6 +126,7 @@ async function run(exeFile) {
       openStatus=response.status;
     } catch(e) {openStatus=e.name==='TimeoutError'?'HTTP_TIMEOUT':`HTTP_${e.name}`;}
     report.browserOpenHttpStatus=openStatus;
+    console.log('PHASE_OPEN_BROWSER_REQUEST: '+String(openStatus));
     const state=await until(async()=>{const x=await readJSON(control);return x.ready===true?x:null;},20000,'dedicated browser ready state');
     assert.equal(path.resolve(state.profile).toLowerCase(),path.resolve(profile).toLowerCase(),'Dedicated browser profile not isolated');
     assert.equal(state.port,PORT);
@@ -139,6 +141,24 @@ async function run(exeFile) {
     Object.assign(report,ownership,{browserReady:true,cdpResponded:true,notProven:['Effective renderer sandbox integrity','Douyin video playback','Model reasoning','Long-term autonomy','General user PC safety']});
     console.log('PASS_WINDOWS_PACKAGED_EXE_TO_EDGE_OWNERSHIP '+JSON.stringify(report));
     return report;
+  } catch (error) {
+    // Explicitly allowlisted facts only; never log file bodies, tokens, full paths or process command lines.
+    let state = null;
+    try { state = await readJSON(control); } catch {}
+    let edgeProcessCount=null, hostAlive=null, debugListenerCount=null;
+    try { edgeProcessCount=ps('Get-Process -Name msedge -ErrorAction SilentlyContinue | Measure-Object | Select-Object -ExpandProperty Count'); } catch {}
+    if(Number.isSafeInteger(state?.pid)&&state.pid>0) {
+      try { hostAlive=ps(`Get-Process -Id ${state.pid} -ErrorAction SilentlyContinue | Measure-Object | Select-Object -ExpandProperty Count`)>0; } catch {}
+    }
+    try { debugListenerCount=ps('Get-NetTCPConnection -LocalPort 9227 -State Listen -ErrorAction SilentlyContinue | Measure-Object | Select-Object -ExpandProperty Count'); } catch {}
+    console.error('FAIL_CLOSED_DIAGNOSTICS '+JSON.stringify({
+      desktopReady:report.desktopReady===true, browserOpenHttpStatus:report.browserOpenHttpStatus??null,
+      hostStatePresent:Boolean(state), hostReady:state?.ready===true,
+      hostFailureCode:typeof state?.launchFailure?.code==='string'?state.launchFailure.code.slice(0,80):null,
+      hostAlive, edgeProcessCount, debugListenerCount,
+      phaseErrorCode:typeof error?.code==='string'?error.code.slice(0,80):null
+    }));
+    throw error;
   } finally {
     // The GitHub-hosted VM is discarded. Never terminate any unrelated Edge or user browser process.
     try {child.kill();}catch{}
