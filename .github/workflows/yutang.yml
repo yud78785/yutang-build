@@ -215,6 +215,13 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'pnpm installation failed' }
           pnpm --ignore-workspace install --ignore-scripts --frozen-lockfile
           if ($LASTEXITCODE -ne 0) { throw 'desktop dependencies failed' }
+          # The packaged smoke verifier imports ../../playwright-runtime.mjs.
+          # Install the root's locked verifier dependencies as well as desktop dependencies.
+          Push-Location ..
+          try {
+            pnpm --ignore-workspace install --ignore-scripts --frozen-lockfile
+            if ($LASTEXITCODE -ne 0) { throw 'Root verification dependencies failed' }
+          } finally { Pop-Location }
           node node_modules/electron/install.js
           if ($LASTEXITCODE -ne 0) { throw 'Electron setup failed' }
 
