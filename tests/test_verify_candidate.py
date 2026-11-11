@@ -34,8 +34,8 @@ def candidate(tmp, names=None, exe=None, result=None, compression=zipfile.ZIP_DE
         "PINNED COMMIT: " + source,
         "FILE: " + exename,
         "SHA256: " + esha,
-        "NOT PROVEN: actual packaged EXE controls Windows Edge without --no-sandbox on user machine",
-        "NOT PROVEN: Douyin playback, model reasoning, continuous autonomy, memory synchronization",
+        "NOT PROVEN: real Douyin playback, model reasoning, continuous autonomy, memory synchronization, signed release trust",
+        "NOT PROVEN: real Douyin playback, model reasoning, continuous autonomy, memory synchronization, signed release trust",
     ])
     p = Path(tmp) / "sample.zip"
     with zipfile.ZipFile(p, "w", compression=compression) as z:
