@@ -685,6 +685,29 @@ async function run(exeFile) {
       publicVideoProbe.readyState=Number.isInteger(pageState?.video?.readyState)?pageState.video.readyState:null;
       publicVideoProbe.initialPaused=typeof pageState?.video?.paused==='boolean'?pageState.video.paused:null;
       publicVideoProbe.durationSeconds=Number.isFinite(pageState?.video?.duration)?pageState.video.duration:null;
+
+      // The public page may expose metadata before the first decodable frame.
+      // Poll read-only state for at most 15 seconds; never click, seek or bypass a gate.
+      const readinessStarted=Date.now(),readinessDeadline=readinessStarted+15_000;
+      while(Date.now()<readinessDeadline&&!publicVideoProbe.loginRequired&&!publicVideoProbe.verificationRequired&&!publicVideoProbe.unsupportedPage
+        &&currentOrigin==='https://www.douyin.com'
+        &&(!publicVideoProbe.actualVideoId||publicVideoProbe.actualVideoId===PUBLIC_VIDEO_ID)
+        &&!(publicVideoProbe.actualVideoId===PUBLIC_VIDEO_ID&&Number.isInteger(publicVideoProbe.readyState)&&publicVideoProbe.readyState>=2)){
+        await delay(250);
+        pageState=await verificationController.state({record:false});
+        currentUrl=verificationController.page?.url()||'';
+        try{const parsed=new URL(currentUrl);currentOrigin=parsed.origin;currentPath=parsed.pathname;}catch{currentOrigin=null;currentPath=null;}
+        publicVideoProbe.pageOrigin=currentOrigin;
+        publicVideoProbe.pagePath=currentPath;
+        publicVideoProbe.loginRequired=pageState?.loginRequired===true;
+        publicVideoProbe.verificationRequired=pageState?.verificationRequired===true;
+        publicVideoProbe.unsupportedPage=pageState?.unsupportedPage===true;
+        publicVideoProbe.actualVideoId=typeof pageState?.video?.id==='string'?pageState.video.id:null;
+        publicVideoProbe.readyState=Number.isInteger(pageState?.video?.readyState)?pageState.video.readyState:null;
+        publicVideoProbe.initialPaused=typeof pageState?.video?.paused==='boolean'?pageState.video.paused:null;
+        publicVideoProbe.durationSeconds=Number.isFinite(pageState?.video?.duration)?pageState.video.duration:null;
+      }
+      publicVideoProbe.readinessWaitMs=Date.now()-readinessStarted;
       if(publicVideoProbe.loginRequired) publicVideoProbe.outcome='safe_stop_login_required';
       else if(publicVideoProbe.verificationRequired) publicVideoProbe.outcome='safe_stop_verification_required';
       else if(publicVideoProbe.unsupportedPage||currentOrigin!=='https://www.douyin.com') publicVideoProbe.outcome='safe_stop_unsupported_or_redirected';
