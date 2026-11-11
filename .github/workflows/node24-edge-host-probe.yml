@@ -52,8 +52,14 @@ jobs:
           $sha=(Get-FileHash -LiteralPath $tarball -Algorithm SHA512).Hash
           $actualIntegrity='sha512-'+[Convert]::ToBase64String([Convert]::FromHexString($sha))
           if($actualIntegrity -ne $integrity) { throw 'Playwright SHA512 does not match candidate lock' }
-          npm --prefix upstream install --offline --ignore-scripts --no-save --no-package-lock $tarball
-          if($LASTEXITCODE -ne 0) { throw 'Offline Playwright extraction failed' }
+          $extract=Join-Path $packDir 'extract'
+          New-Item -ItemType Directory -Force -Path $extract | Out-Null
+          tar -xzf $tarball -C $extract
+          if($LASTEXITCODE -ne 0) { throw 'Playwright archive extraction failed' }
+          $moduleDir=Join-Path $extract 'package'
+          if(-not (Test-Path -LiteralPath (Join-Path $moduleDir 'package.json') -PathType Leaf)) { throw 'Extracted Playwright package missing' }
+          New-Item -ItemType Directory -Force -Path 'upstream/node_modules' | Out-Null
+          Copy-Item -LiteralPath $moduleDir -Destination 'upstream/node_modules/playwright-core' -Recurse -Force
           $installed=Get-Content -LiteralPath 'upstream/node_modules/playwright-core/package.json' -Raw | ConvertFrom-Json
           if($installed.version -ne $version) { throw 'Installed Playwright version mismatch' }
           node --check tools/node24_edge_host_probe.mjs
