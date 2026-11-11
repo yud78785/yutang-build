@@ -83,9 +83,11 @@ jobs:
           node tools/windows_packaged_edge_smoke.mjs '${{ steps.prepare.outputs.exe }}'
           if ($LASTEXITCODE -ne 0) { throw 'CANDIDATE RUNTIME GATE FAILED; not a release.' }
 
-      - name: Keep release blocked until actual renderer sandbox/model tests
+      - name: Keep release blocked until Douyin playback and model reasoning are proven
         if: always()
         shell: pwsh
         run: |
           Write-Host 'CANDIDATE_ONLY: no personal accounts, no model key, no posting, no data export, no Windows user PC.'
-          Write-Host 'NOT_PROVEN: effective renderer sandbox, Douyin playback, model reasoning, long-term autonomy.'
+          Write-Host 'RENDERER_SANDBOX: verified by edge://sandbox; RendererAppContainer, Lockdown, Untrusted integrity and Lowbox/AppContainer SID.'
+          Write-Host 'LIMITATION: Edge reports NetworkServiceSandbox disabled; this remains a separate hardening item.'
+          Write-Host 'NOT_PROVEN: real Douyin video playback, model reasoning, long-term autonomy, general user PC safety.'
