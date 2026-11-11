@@ -3,6 +3,7 @@
 // Not a Douyin test. No model, account, API credential, or external network.
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
@@ -121,7 +122,6 @@ try {
       }
     }
     video.pause();
-    URL.revokeObjectURL(video.src);
     return {mime,encodedBytes:blob.size,videoWidth:video.videoWidth,videoHeight:video.videoHeight,
       videoDuration:Number.isFinite(video.duration)?video.duration:null,
       playbackTime:video.currentTime,paused:video.paused,frames};
@@ -133,6 +133,66 @@ try {
   assert.ok(proof.playbackTime>1.7,'Video playback never advanced sufficiently.');
   const frameDigests=proof.frames.map(x=>createHash('sha256').update(x.jpeg).digest('hex'));
   assert.equal(new Set(frameDigests).size,3,'Decoded frame image digests did not change.');
+
+  // Call the production Core native capture method on the same decoded local WebM.
+  // Video identity is synthetic and explicitly does NOT represent Douyin.
+  const core=await import(pathToFileURL(path.join(runtime,'core.mjs')).href);
+  assert.equal(typeof core.BrowserController,'function');
+  assert.equal(typeof core.verifySharedVideoFrameProof,'function');
+  const fixtureId='1234567890123456789';
+  const controller=Object.create(core.BrowserController.prototype);
+  controller.source='verification';
+  controller.page=page;
+  controller.checkVideoLimits=async()=>{};
+  controller.currentVideo=async()=>page.locator('video');
+  controller.state=async()=>{
+    const state=await page.evaluate(()=>{
+      const v=document.getElementById('fixture');
+      return {paused:v.paused,readyState:v.readyState,time:v.currentTime,duration:v.duration};
+    });
+    return {video:{id:fixtureId,...state},videoSelection:{identityConflict:false},
+      loginRequired:false,verificationRequired:false,privateChatVisible:false,unsupportedPage:false};
+  };
+  await page.evaluate(async()=>{
+    const v=document.getElementById('fixture');
+    const reset=new Promise(resolve=>v.addEventListener('seeked',resolve,{once:true}));
+    v.currentTime=0;
+    await reset;
+    await v.play();
+  });
+  const observed=await controller.captureSharedFrames(2.2);
+  assert.equal(observed.frames.length,3,'Native Core must capture three real video frames.');
+  assert.equal(observed.observation.captureMethod,'video-canvas-jpeg-v1');
+  assert.equal(core.verifySharedVideoFrameProof(observed,fixtureId),true,'Native Core frame proof was rejected.');
+  assert.equal(core.verifySharedVideoFrameProof(structuredClone(observed),fixtureId),false,'Copied proof must be rejected.');
+  const coreFrames=[];
+  for(let i=0;i<observed.frames.length;i++){
+    const fr=observed.frames[i];
+    const px=await page.evaluate(async data=>{
+      const img=new Image();img.src='data:image/jpeg;base64,'+data;
+      await img.decode();
+      const cv=document.createElement('canvas');cv.width=img.width;cv.height=img.height;
+      const g=cv.getContext('2d',{willReadFrequently:true});
+      g.drawImage(img,0,0);
+      return Array.from(g.getImageData(128,65,1,1).data).slice(0,3);
+    },fr.data);
+    const color=['red','green','blue'][i];
+    assert.ok(px[i]>px[(i+1)%3]+55&&px[i]>px[(i+2)%3]+55,
+      'Core '+color+' pixel does not match decoded video at '+fr.time+' sec: '+px.join(','));
+    coreFrames.push({color,time:fr.time,pixel:px,method:fr.captureMethod,sha256:createHash('sha256').update(fr.data).digest('hex')});
+  }
+  assert.ok(observed.observation.playbackProgressSeconds>1.5,'Native Core did not verify playback progress.');
+  await page.evaluate(()=>document.getElementById('fixture').pause());
+  await assert.rejects(controller.captureSharedFrames(0.2),/分享|视频|播放|采样/);
+  console.log('YUTANG_CORE_NATIVE_VIDEO_CAPTURE_RESULT '+JSON.stringify({
+    verdict:'PASS_CORE_NATIVE_FRAME_CAPTURE_ON_LOCAL_WEBM',fixture:'synthetic local WebM, not Douyin',
+    frameCount:observed.frames.length,captureMethod:observed.observation.captureMethod,
+    playbackProgressSeconds:observed.observation.playbackProgressSeconds,
+    actualWallSeconds:observed.observation.actualWallSeconds,originalProofVerified:true,
+    serializedCopyProofRejected:true,pausedVideoRejected:true,frames:coreFrames,
+    notProven:['Full YuTang desktop-to-Core invocation','Real public Douyin video','Model understands frames']
+  }));
+  await page.evaluate(()=>URL.revokeObjectURL(document.getElementById('fixture').src));
   console.log('YUTANG_DECODED_VIDEO_FRAME_RESULT '+JSON.stringify({
     verdict:'PASS_REAL_DECODED_LOCAL_VIDEO',node:process.versions.node,
     playwright:require('playwright-core/package.json').version,
@@ -141,7 +201,7 @@ try {
     encodedBytes:proof.encodedBytes,videoWidth:proof.videoWidth,videoHeight:proof.videoHeight,
     videoDuration:proof.videoDuration,playbackTime:proof.playbackTime,
     frames:proof.frames.map((x,i)=>({color:x.color,time:x.time,pixel:x.pixel,decodedFrames:x.decodedFrames,sha256:frameDigests[i]})),
-    notProven:['YuTang Core integrated capture','Public Douyin playback','Model understands these pictures','Network Service native Windows token restrictions']
+    notProven:['Full YuTang desktop-to-Core integration','Public Douyin playback','Model understands these pictures','Network Service native Windows token restrictions']
   }));
 } finally {
   if(context)await context.close();
