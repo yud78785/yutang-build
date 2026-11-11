@@ -10,6 +10,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
+import { createRequire } from 'node:module';
 
 export const EXPECTED_EXE = 'c334971b305caaf5a6335f74bcf6111045013637e91bd7a02f1ceeeb0f4705f9';
 export const PUBLIC_VIDEO_URL = 'https://www.douyin.com/video/7577614489533680959';
@@ -562,6 +563,7 @@ async function run(exeFile) {
       assert.equal(runtimeEntries.length,1,'Expected exactly one prepared private runtime for this candidate.');
       const runtime=path.join(runtimeBase,runtimeEntries[0]);
       const {BrowserController,verifySharedVideoFrameProof}=await import(pathToFileURL(path.join(runtime,'core.mjs')).href);
+      const {ApiAgent}=await import(pathToFileURL(path.join(runtime,'api-agent.mjs')).href);
       verificationController=new BrowserController({
         source:'verification',
         memory:{recordVideo(){}},
@@ -615,7 +617,49 @@ async function run(exeFile) {
             }
             if(new Set(publicVideoProbe.frameHashes).size!==3)throw new Error('Public video did not produce three distinct frame images.');
             if(!(publicVideoProbe.frameTimes[0]<publicVideoProbe.frameTimes[1]&&publicVideoProbe.frameTimes[1]<publicVideoProbe.frameTimes[2]))throw new Error('Public video playback timestamps did not advance.');
-            publicVideoProbe.outcome='PASS_PUBLIC_VIDEO_CORE_CAPTURE';
+
+            // Exercise the production multimodal ApiAgent request builder with an offline provider stub.
+            // The stub validates that real captured frames become model-facing image_url parts; it never calls the network.
+            let modelInputReport=null;
+            const apiAgent=new ApiAgent({
+              controller:verificationController,
+              config:{apiKey:'',baseUrl:'https://api.deepseek.com',model:'deepseek-flash'},
+              fetchImpl:async()=>{throw new Error('Live model HTTP calls are forbidden in the credential-free CI probe.');}
+            });
+            const offlineDecision=await apiAgent.decideWatch({
+              observation:observed,
+              context:'',
+              watchOptions:{mode:'recommend',topics:[],exclude:[]},
+              decisionProvider:async({messages})=>{
+                const userContent=messages.find(message=>message.role==='user')?.content;
+                const imageParts=Array.isArray(userContent)?userContent.filter(part=>part?.type==='image_url'):[];
+                const textPart=Array.isArray(userContent)?userContent.find(part=>part?.type==='text')?.text:'';
+                assert.ok(imageParts.length>=1&&imageParts.length<=3,'Production ApiAgent must pass one storyboard or the original sampled images.');
+                assert.ok(imageParts.every(part=>typeof part.image_url?.url==='string'&&part.image_url.url.startsWith('data:image/jpeg;base64,')),'Model-facing frames must be inline JPEG image_url data.');
+                assert.ok(String(textPart).includes(PUBLIC_VIDEO_ID),'Model-facing text must bind frames to the verified public video ID.');
+                const manifest=apiAgent.lastVisualPacking?.manifest;
+                modelInputReport={
+                  provider:'offline-test-stub-no-network',
+                  model:'deepseek-flash',
+                  imageParts:imageParts.length,
+                  inputImages:manifest?.inputImages??null,
+                  outputImages:manifest?.outputImages??imageParts.length,
+                  storyboardStatus:manifest?.status??'unknown',
+                  allImagePartsAreInlineJpeg:true,
+                  videoIdentityInText:String(textPart).includes(PUBLIC_VIDEO_ID)
+                };
+                return{
+                  text:JSON.stringify({action:'stop',reason:'Offline payload-path test only; no live model inference.',topics:[],reflection:'The production adapter received the verified sampled frames.'}),
+                  usage:{prompt_tokens:1,completion_tokens:1,total_tokens:2}
+                };
+              }
+            });
+            assert.equal(offlineDecision.decision.action,'stop');
+            assert.ok(modelInputReport?.allImagePartsAreInlineJpeg===true);
+            publicVideoProbe.modelInputPayloadVerified=true;
+            publicVideoProbe.modelInferencePerformed=false;
+            publicVideoProbe.modelInput=modelInputReport;
+            publicVideoProbe.outcome='PASS_PUBLIC_VIDEO_CORE_CAPTURE_AND_MODEL_INPUT_PACKING';
             publicVideoProbe.proofValid=true;
             report.videoPlaybackTested=true;
           }
@@ -717,7 +761,7 @@ async function run(exeFile) {
     report.lifecycle=lifecycle;
     report.cleanupVerified=true;
     report.notProven=['Network Service Windows token restrictions (only Edge sandbox type is checked)','Model reasoning','Long-term autonomy','Memory synchronization','Signed release trust','General user PC safety'];
-    if(publicVideoProbe.outcome!=='PASS_PUBLIC_VIDEO_CORE_CAPTURE')report.notProven.unshift('Public Douyin video playback and Core frame capture (safe-stop outcome: '+publicVideoProbe.outcome+')');
+    if(publicVideoProbe.outcome!=='PASS_PUBLIC_VIDEO_CORE_CAPTURE_AND_MODEL_INPUT_PACKING')report.notProven.unshift('Public Douyin video playback and Core frame capture (safe-stop outcome: '+publicVideoProbe.outcome+')');
     console.log('PASS_WINDOWS_PACKAGED_EXE_RESTART_AND_CLEANUP '+JSON.stringify(report));
     return report;
   } catch (error) {
