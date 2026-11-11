@@ -280,8 +280,6 @@ function sanitizedEnvironment(base, paths) {
   assert.ok(Object.keys(env).some(key => /^programfiles\(x86\)$/i.test(key)), 'The Edge x86 installation root must be retained in the isolated environment.');
   Object.assign(env, {
     HOME: paths.home,
-    TEMP: paths.temp,
-    TMP: paths.temp,
     DSH_HOME: path.join(paths.home, '.dsh'),
     DOUYIN_DESKTOP_USER_DATA: paths.userData,
     DOUYIN_RUNTIME_LOCATION_FILE: paths.locationFile,
@@ -617,7 +615,7 @@ async function main() {
       report.browserOpenStatus === 200 && report.browserOpenResult?.opened === true && report.browserOpenResult?.mode === 'prepare' && report.browserOpenResult?.paused === true && report.localFixturePageCount === 1 && report.backendRestarted === true &&
       report.browserState.profileMatches && report.browserState.port === 9227 &&
       ownership.hostFound && ownership.hostIsNode && ownership.hostParentIsApiWorker &&
-      ownership.edgeDescendantCount > 0 && ownership.edgeWithProfileCount > 0 &&
+      ownership.edgeDescendantCount > 0 && ownership.edgeWithProfileCount === ownership.edgeDescendantCount &&
       ownership.edgeWithPortArgCount > 0 && ownership.edgeWithLoopbackArgCount > 0 &&
       ownership.edgeNoSandboxArgCount === 0 && ownership.listenerOwnersAreEdgeDescendants &&
       ownership.listenersLoopbackOnly && report.hostPidMatchesBackendLog;
