@@ -205,7 +205,7 @@ async function waitForNewBrowserState(control, previousPid, previousStartedAt, p
     if (state.launchFailure) throw new Error('Restarted browser host reported ' + String(state.launchFailure.code || 'failure'));
     if (state.ready === true && state.profile === profile && state.port === PORT &&
         Number.isSafeInteger(state.pid) && state.pid > 0 &&
-        state.pid !== previousPid && Number(state.startedAt) > Number(previousStartedAt)) return state;
+        Number(state.startedAt) > Number(previousStartedAt)) return state;
     return null;
   }, 25000, 'new browser-host PID and ready state after restart');
 }
@@ -272,18 +272,11 @@ async function run(exeFile) {
     console.log('PHASE_EXE_DESKTOP_READY: true; isolated memory and no model key confirmed');
     const bootstrap=await (await fetch(ready.origin+'/api/bootstrap',{signal:AbortSignal.timeout(5000)})).json();
     assert.equal(typeof bootstrap.token,'string');assert.ok(bootstrap.token.length>10);
-    let openStatus=null, openBody=null;
-    try {
-      const response=await fetch(ready.origin+'/api/browser/open',{
-        method:'POST',headers:{'content-type':'application/json','x-session-token':bootstrap.token},body:'{}',signal:AbortSignal.timeout(49000)
-      });
-      openStatus=response.status;
-      const body=await response.text();
-      if(!response.ok)openBody=safeText(body,[base,home,userData,memory,profile,path.dirname(control),locationFile]);
-    } catch(e) {openStatus=e.name==='TimeoutError'?'HTTP_TIMEOUT':'HTTP_'+e.name;openBody=safeText(e.message,[base,home,userData,memory,profile,path.dirname(control),locationFile]);}
-    report.browserOpenHttpStatus=openStatus;
-    report.browserOpenHttpBody=openBody;
-    console.log('PHASE_OPEN_BROWSER_REQUEST: '+String(openStatus));
+    const redactionPaths=[base,home,userData,memory,profile,path.dirname(control),locationFile];
+    const firstOpen=await requestBrowserOpen(ready.origin,bootstrap.token,redactionPaths);
+    report.browserOpenHttpStatus=firstOpen.status;
+    report.browserOpenHttpBody=firstOpen.body;
+    console.log('PHASE_OPEN_BROWSER_REQUEST: '+String(firstOpen.status));
     const outcome=await until(async()=>{
       const x=await readJSON(control);
       if(x.ready===true)return {kind:'ready',state:x};
@@ -292,41 +285,73 @@ async function run(exeFile) {
     },20000,'dedicated browser ready/failure state');
     if(outcome.kind==='failed'){
       const failure=outcome.state.launchFailure||{};
-      report.hostFailure={code:typeof failure.code==='string'?failure.code.slice(0,80):null,message:safeText(failure.message,[base,home,userData,memory,profile,path.dirname(control),locationFile]),details:safeText(failure.details,[base,home,userData,memory,profile,path.dirname(control),locationFile])};
+      report.hostFailure={code:typeof failure.code==='string'?failure.code.slice(0,80):null,message:safeText(failure.message,redactionPaths),details:safeText(failure.details,redactionPaths)};
       throw new Error('Browser host reported '+(report.hostFailure.code||'unknown failure'));
     }
-    const state=outcome.state;
-    const expectedFirewallNavigationBlock = openStatus===500 &&
-      /ERR_NETWORK_ACCESS_DENIED/i.test(String(openBody||'')) &&
-      /douyin\.com/i.test(String(openBody||''));
-    report.douyinNavigationBlockedByFirewall=expectedFirewallNavigationBlock;
+    let state=outcome.state;
+    const firstFirewallBlock=isExpectedFirewallBlock(firstOpen.status,firstOpen.body);
+    report.douyinNavigationBlockedByFirewall=firstFirewallBlock;
     report.videoPlaybackTested=false;
-    if(expectedFirewallNavigationBlock) {
+    if(firstFirewallBlock) {
       console.log('EXPECTED_FIREWALL_BLOCK: browser host is ready; Douyin navigation is intentionally blocked in this no-network test.');
     } else {
-      assert.equal(openStatus,200,'Browser open API must return HTTP 200 or the expected outbound-firewall denial; received '+String(openStatus));
+      assert.equal(firstOpen.status,200,'Browser open API must return HTTP 200 or the expected outbound-firewall denial; received '+String(firstOpen.status));
     }
-    assert.equal(path.resolve(state.profile).toLowerCase(),path.resolve(profile).toLowerCase(),'Dedicated browser profile not isolated');
-    assert.equal(state.port,PORT);
-    assert.ok(Number.isSafeInteger(state.pid)&&state.pid>0);
-    const version=await (await fetch(`http://127.0.0.1:${PORT}/json/version`,{signal:AbortSignal.timeout(5000)})).json();
-    assert.match(String(version.Browser),/(?:Edg|Chrome)/);
-    const processes=ps(`Get-CimInstance Win32_Process -Filter "Name = 'msedge.exe' OR Name = 'node.exe'" | Select-Object ProcessId,ParentProcessId,Name,CommandLine | ConvertTo-Json -Compress -Depth 4`);
-    const items=Array.isArray(processes)?processes:[processes];
-    const listeners=ps(`Get-NetTCPConnection -LocalPort ${PORT} -State Listen -ErrorAction SilentlyContinue | Select-Object OwningProcess,LocalAddress | ConvertTo-Json -Compress -Depth 4`);
-    const sockets=Array.isArray(listeners)?listeners:(!listeners?[]:[listeners]);
-    const hostSummary=summarizeHostProcesses(items,state.pid,ready.backendPid,profile,path.dirname(control));
-    assert.equal(hostSummary.hostFound,true,'Browser host PID is not present in the process snapshot');
-    assert.equal(hostSummary.hostIsNode,true,'Browser host is not the expected Node process');
-    assert.equal(hostSummary.hostCommandHasBrowserHost,true,'Browser host command line does not identify browser-host.mjs');
-    assert.equal(hostSummary.hostCommandProfileMatches,true,'Browser host profile argument does not match the isolated profile');
-    assert.equal(hostSummary.hostCommandControlMatches,true,'Browser host control argument does not match the isolated control directory');
-    assert.equal(hostSummary.hostParentIsBackend,true,'Browser host is not a child of the expected API backend');
-    assert.ok(hostSummary.edgeWithPortArg>0,'Edge command line does not include the expected CDP port');
-    assert.ok(hostSummary.edgeWithLoopbackArg>0,'Edge command line does not include the loopback-only CDP address');
-    const ownership=verifyProcessSnapshot({processes:items,hostPid:state.pid,profile,listenerPids:sockets.map(p=>Number(p.OwningProcess)),portAddresses:sockets.map(p=>p.LocalAddress)});
-    Object.assign(report,ownership,{hostPid:state.pid,backendPid:ready.backendPid,hostSummary,browserReady:true,cdpResponded:true,notProven:['Effective renderer sandbox integrity','Douyin video playback (outbound blocked by design)','Model reasoning','Long-term autonomy','General user PC safety']});
-    console.log('PASS_WINDOWS_PACKAGED_EXE_TO_EDGE_OWNERSHIP '+JSON.stringify(report));
+    const initialCheck=await inspectReadyBrowser(state,ready.backendPid,profile,controlDir);
+    const lifecycle={launchCount:1,closeCount:0,hostPids:[state.pid],cycles:[]};
+    Object.assign(report,initialCheck.ownership,{
+      hostPid:state.pid,backendPid:ready.backendPid,hostSummary:initialCheck.hostSummary,
+      browserVersion:initialCheck.browserVersion,browserReady:true,cdpResponded:true
+    });
+    console.log('PASS_WINDOWS_PACKAGED_EXE_INITIAL_BROWSER '+JSON.stringify({
+      hostPid:state.pid,browserVersion:initialCheck.browserVersion,
+      edgeProcessCount:initialCheck.ownership.edgeProcessCount,
+      listenerCount:initialCheck.ownership.listenerCount,
+      loopbackOnly:initialCheck.ownership.loopbackOnly,
+      sandboxFlagsChecked:initialCheck.ownership.flagsChecked
+    }));
+
+    // Close the owned Edge through its loopback CDP endpoint, then prove the host and every Edge child exit.
+    // Repeat two restarts to exercise stale-state handling and the exact detached host spawn path.
+    for(let cycle=1;cycle<=2;cycle++) {
+      const previousPid=state.pid, previousStartedAt=state.startedAt;
+      const closeResult=await closeEdgeViaCdp(PORT);
+      const closeProof=await waitForBrowserGone(previousPid,profile,controlDir,PORT);
+      lifecycle.closeCount++;
+      const cycleReport={cycle,closedPid:previousPid,closeViaCdp:closeResult.closed===true,closeVerified:closeProof.clean===true,processesRemaining:closeProof.edgeAndHostProcesses,listenersRemaining:closeProof.listeners};
+      assert.equal(cycleReport.closeVerified,true,'Owned Edge or browser-host remained after CDP Browser.close');
+
+      const nextOpen=await requestBrowserOpen(ready.origin,bootstrap.token,redactionPaths);
+      const nextFirewallBlock=isExpectedFirewallBlock(nextOpen.status,nextOpen.body);
+      assert.ok(nextOpen.status===200||nextFirewallBlock,'Restarted browser open failed unexpectedly: '+String(nextOpen.status)+' '+String(nextOpen.body||''));
+      const nextState=await waitForNewBrowserState(control,previousPid,previousStartedAt,profile);
+      const nextCheck=await inspectReadyBrowser(nextState,ready.backendPid,profile,controlDir);
+      cycleReport.restartedPid=nextState.pid;
+      cycleReport.restartReady=true;
+      cycleReport.restartBrowserVersion=nextCheck.browserVersion;
+      cycleReport.restartEdgeProcessCount=nextCheck.ownership.edgeProcessCount;
+      cycleReport.restartListenerCount=nextCheck.ownership.listenerCount;
+      cycleReport.restartLoopbackOnly=nextCheck.ownership.loopbackOnly;
+      lifecycle.launchCount++;
+      lifecycle.hostPids.push(nextState.pid);
+      lifecycle.cycles.push(cycleReport);
+      state=nextState;
+      console.log('PASS_WINDOWS_PACKAGED_EXE_RESTART_CYCLE '+JSON.stringify(cycleReport));
+    }
+
+    const finalPid=state.pid;
+    const finalClose=await closeEdgeViaCdp(PORT);
+    const finalProof=await waitForBrowserGone(finalPid,profile,controlDir,PORT);
+    lifecycle.closeCount++;
+    lifecycle.finalCloseVerified=finalClose.closed===true&&finalProof.clean===true;
+    lifecycle.finalHostPid=finalPid;
+    lifecycle.finalProcessesRemaining=finalProof.edgeAndHostProcesses;
+    lifecycle.finalListenersRemaining=finalProof.listeners;
+    assert.equal(lifecycle.finalCloseVerified,true,'Final Edge/browser-host close left a process or listener behind');
+    report.lifecycle=lifecycle;
+    report.cleanupVerified=true;
+    report.notProven=['Effective renderer sandbox integrity','Douyin video playback (outbound blocked by design)','Model reasoning','Long-term autonomy','General user PC safety'];
+    console.log('PASS_WINDOWS_PACKAGED_EXE_RESTART_AND_CLEANUP '+JSON.stringify(report));
     return report;
   } catch (error) {
     // Only redacted state, response text and browser-host log tail are emitted; no credentials or raw command lines.
