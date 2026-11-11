@@ -127,21 +127,22 @@ if (mode === 'direct') {
 } else {
   const { mkdir, writeFile } = await import('node:fs/promises');
   const home = path.resolve(profile, '..', '..', '..');
-  const base = path.dirname(home);
-  const locationFile = path.join(base, 'runtime-location.json');
-  const mediaRoot = path.join(base, 'media');
-  const memoryDir = path.join(base, 'memory');
-  const userData = path.join(base, 'user-data');
+  const common = path.join(home, '.dsh', 'douyin-browser');
+  const locationFile = path.join(common, 'runtime-location.json');
+  const mediaRoot = path.join(common, 'media');
+  const memoryDir = path.join(common, 'memory');
+  const userData = path.join(common, 'user-data');
   const paths = {
-    stateDir: path.join(base, 'state'),
+    stateDir: path.join(common, 'state'),
     memoryDir,
     memoryDbPath: path.join(memoryDir, 'shared.sqlite'),
     mediaEnvFile: path.join(mediaRoot, '.env'),
     mediaSettingsFile: path.join(mediaRoot, 'settings.local.json'),
     mediaRuntimeRoot: mediaRoot,
-    mediaModelsDir: path.join(mediaRoot, 'models'),
+    mediaModelsDir: path.join(mediaRoot, '.models'),
   };
   await Promise.all([
+    mkdir(common, { recursive: true }),
     mkdir(path.dirname(locationFile), { recursive: true }),
     mkdir(controlDir, { recursive: true }),
     mkdir(profile, { recursive: true }),
@@ -149,9 +150,9 @@ if (mode === 'direct') {
     mkdir(paths.memoryDir, { recursive: true }),
     mkdir(mediaRoot, { recursive: true }),
     mkdir(userData, { recursive: true }),
-    mkdir(path.join(base, 'app-data'), { recursive: true }),
-    mkdir(path.join(base, 'local-app-data'), { recursive: true }),
-    mkdir(path.join(base, 'temp'), { recursive: true }),
+    mkdir(path.join(home, 'app-data'), { recursive: true }),
+    mkdir(path.join(home, 'local-app-data'), { recursive: true }),
+    mkdir(path.join(home, 'temp'), { recursive: true }),
   ]);
   await writeFile(locationFile, JSON.stringify({ version: 1, ...paths }, null, 2) + '\n', { flag: 'wx' });
   await writeFile(paths.mediaEnvFile, '', { flag: 'wx' });
@@ -162,8 +163,8 @@ if (mode === 'direct') {
   const homePath = home.slice(homeDrive.length);
   Object.assign(childEnv, {
     HOME: home, USERPROFILE: home, HOMEDRIVE: homeDrive, HOMEPATH: homePath, SystemDrive: homeDrive,
-    APPDATA: path.join(base, 'app-data'), LOCALAPPDATA: path.join(base, 'local-app-data'),
-    TEMP: path.join(base, 'temp'), TMP: path.join(base, 'temp'), DSH_HOME: path.join(home, '.dsh'),
+    APPDATA: path.join(home, 'app-data'), LOCALAPPDATA: path.join(home, 'local-app-data'),
+    TEMP: path.join(home, 'temp'), TMP: path.join(home, 'temp'), DSH_HOME: path.join(home, '.dsh'),
     DOUYIN_DESKTOP_USER_DATA: userData,
     DOUYIN_RUNTIME_LOCATION_FILE: locationFile,
     DEEPSEEK_SHARED_MEMORY_DB: paths.memoryDbPath,
@@ -228,7 +229,7 @@ if (mode === 'direct') {
     await new Promise(resolve => setTimeout(resolve, 250));
   }
   let hostLogTail = '';
-  try { hostLogTail = (await readFile(logFile, 'utf8')).slice(-8000).replaceAll(home, '[isolated-home]').replaceAll(base, '[isolated-base]'); } catch {}
+  try { hostLogTail = (await readFile(logFile, 'utf8')).slice(-8000).replaceAll(home, '[isolated-home]').replaceAll(common, '[isolated-common]'); } catch {}
   emit('host-result', {
     started: ready, ready: state?.ready === true, cdp, pid: hostPid,
     browserVersion: String(browser?.Browser || '').slice(0, 100),
