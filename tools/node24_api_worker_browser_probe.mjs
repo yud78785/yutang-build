@@ -134,6 +134,7 @@ function inspectOwnership(processes, hostPid, backendPid, profile, listeners) {
     edgeWithPortArgCount: edge.filter(item => /--remote-debugging-port=9227/.test(String(item.CommandLine || ''))).length,
     edgeWithLoopbackArgCount: edge.filter(item => /--remote-debugging-address=127\.0\.0\.1/.test(String(item.CommandLine || ''))).length,
     edgeNoSandboxArgCount: edge.filter(item => /--no-sandbox|--disable-setuid-sandbox/i.test(String(item.CommandLine || ''))).length,
+    edgeWithNetworkSandboxArgCount: edge.filter(item => String(item.CommandLine || '').includes('--enable-features=NetworkServiceSandbox')).length,
     listenerCount: listeners.length,
     listenerOwnersAreEdgeDescendants: listenerRows.length > 0 && listenerRows.every(item => item.ownerIsEdgeDescendant),
     listenersLoopbackOnly: listenerRows.length > 0 && listenerRows.every(item => item.loopback),
@@ -541,6 +542,7 @@ async function main() {
       report.backendRestart.hostReady && report.backendRestart.cdp &&
       report.backendRestart.browserHostProcessCount === 1 &&
       report.backendRestart.edgeDescendantCount > 0 &&
+      (restartOwnership?.edgeWithNetworkSandboxArgCount || 0) > 0 &&
       report.backendRestart.listenerOwnedByEdge && report.backendRestart.listenerLoopbackOnly &&
       report.backendRestart.pageTargetCount === 1 && report.backendRestart.localFixturePageCount === 1;
 
@@ -580,7 +582,7 @@ async function main() {
         Boolean(thirdVersion) && thirdPages.length === 1 && thirdPages[0].url === fixtureUrl &&
         thirdOwnership.hostFound && thirdOwnership.hostParentIsApiWorker &&
         thirdOwnership.edgeDescendantCount > 0 && thirdOwnership.listenerOwnersAreEdgeDescendants &&
-        thirdOwnership.listenersLoopbackOnly && thirdOwnership.edgeNoSandboxArgCount === 0;
+        thirdOwnership.listenersLoopbackOnly && thirdOwnership.edgeNoSandboxArgCount === 0 && thirdOwnership.edgeWithNetworkSandboxArgCount > 0;
       report.gracefulCloseCycles.push({
         phase: 'relaunch-after-graceful-close',
         httpStatus: thirdOpenResponse.status,
@@ -617,7 +619,7 @@ async function main() {
       ownership.hostFound && ownership.hostIsNode && ownership.hostParentIsApiWorker &&
       ownership.edgeDescendantCount > 0 && ownership.edgeWithProfileCount === ownership.edgeDescendantCount &&
       ownership.edgeWithPortArgCount > 0 && ownership.edgeWithLoopbackArgCount > 0 &&
-      ownership.edgeNoSandboxArgCount === 0 && ownership.listenerOwnersAreEdgeDescendants &&
+      ownership.edgeNoSandboxArgCount === 0 && ownership.edgeWithNetworkSandboxArgCount > 0 && ownership.listenerOwnersAreEdgeDescendants &&
       ownership.listenersLoopbackOnly && report.hostPidMatchesBackendLog;
   } finally {
     if (openAbort && !openAbort.signal.aborted) openAbort.abort(new Error('Diagnostic cleanup.'));
