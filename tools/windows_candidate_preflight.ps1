@@ -6,8 +6,8 @@ param(
 )
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
-$expectedZip='9ad557a2b7a41efd942f413694a96cbacebc56ba0c65a2635722a14ed699e42f'
-$expectedExe='84321ec6c827de90e95d0d03b76a693444f8ea8c22c9c71c709e2e496bde753a'
+$expectedZip='b5febe43b2e947a86feda01484fbbc475776649ed7687d8d984f5992af6370e9'
+$expectedExe='e9f07dbed400bd77a8ab6350ea3a54d338d02d7a8f0c04d87cc621e148160290'
 $expectedName='Dafeiyu-Douyin-API-1.4.6-win-x64.exe'
 if (-not (Test-Path -LiteralPath $Archive -PathType Leaf)) {throw 'Missing immutable Actions artifact ZIP'}
 $zipHash=(Get-FileHash -LiteralPath $Archive -Algorithm SHA256).Hash.ToLowerInvariant()
