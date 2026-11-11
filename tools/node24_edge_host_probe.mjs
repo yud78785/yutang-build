@@ -104,7 +104,7 @@ if (mode === 'direct') {
   }
 } else {
   const { mkdir, writeFile } = await import('node:fs/promises');
-  const home = path.resolve(profile, '..', '..', '..', '..');
+  const home = path.resolve(profile, '..', '..', '..');
   const base = path.dirname(home);
   const common = path.join(home, '.dsh', 'douyin-browser');
   const locationFile = path.join(common, 'runtime-location.json');
