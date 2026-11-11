@@ -1,7 +1,7 @@
 {
   "verdict": "PASS_FILE_IDENTITY_ONLY",
-  "zip_sha256": "9ad557a2b7a41efd942f413694a96cbacebc56ba0c65a2635722a14ed699e42f",
-  "exe_sha256": "84321ec6c827de90e95d0d03b76a693444f8ea8c22c9c71c709e2e496bde753a",
+  "zip_sha256": "b5febe43b2e947a86feda01484fbbc475776649ed7687d8d984f5992af6370e9",
+  "exe_sha256": "e9f07dbed400bd77a8ab6350ea3a54d338d02d7a8f0c04d87cc621e148160290",
   "exe_bytes": 124736935,
   "zip_bytes": 124753117,
   "pe": {
@@ -10,7 +10,7 @@
     "note": "PE certificate table presence is not cryptographic Authenticode validation"
   },
   "source_commit": "912873e2556d16a088d81dcbc6f7c0060614dd58",
-  "actions_run": 42815316953,
+  "actions_run": 42942891622,
   "proven": [
     "two exact ZIP members",
     "CRC and size checked by decompression",
@@ -23,5 +23,13 @@
     "code signing trust",
     "running EXE-to-Edge sandbox behavior",
     "Douyin and model end-to-end behavior"
-  ]
+  ],
+  "artifact_id": 13822230296,
+  "artifact_name": "YuTang-Windows-CANDIDATE-NOT-RELEASE",
+  "zip_size": 124753189,
+  "exe_size": 124737042,
+  "runner_commit": "74fae764b9c510f745b4a9f45fad88b662bd00d3",
+  "expires_at": "2026-11-18T02:05:10Z",
+  "signature_status": "NotSigned",
+  "status": "Candidate only; packaged Edge cold-start, renderer sandbox, Network Service sandbox, lifecycle and video observation verification pending."
 }
