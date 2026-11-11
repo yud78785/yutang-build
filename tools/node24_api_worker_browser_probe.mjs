@@ -294,6 +294,7 @@ async function main() {
   let openAbort = null;
   let openPromise = null;
   let hostPid = null;
+  let pass = false;
   try {
     let started;
     try { started = await backend.start(config, { htmlFile, staticRoot: publicRoot }); }
@@ -375,10 +376,9 @@ async function main() {
     report.backendStderrTail = redact(backend.stderr);
     report.browserHostLogTail = await tail(logFile);
     report.hostPid = hostPid;
-    process.stdout.write('YUTANG_API_WORKER_BROWSER_HOST_RESULT ' + JSON.stringify(report) + '\n');
 
     const ownership = report.processOwnership || {};
-    const pass = report.backendStarted && report.browserState?.ready === true && report.cdp &&
+    pass = report.backendStarted && report.browserState?.ready === true && report.cdp &&
       report.browserOpenStatus === 200 && report.browserOpenResult?.opened === true && report.browserOpenResult?.mode === 'prepare' && report.browserOpenResult?.paused === true && report.localFixturePageCount === 1 &&
       report.browserState.profileMatches && report.browserState.port === 9227 &&
       ownership.hostFound && ownership.hostIsNode && ownership.hostParentIsApiWorker &&
@@ -386,13 +386,33 @@ async function main() {
       ownership.edgeWithPortArgCount > 0 && ownership.edgeWithLoopbackArgCount > 0 &&
       ownership.edgeNoSandboxArgCount === 0 && ownership.listenerOwnersAreEdgeDescendants &&
       ownership.listenersLoopbackOnly && report.hostPidMatchesBackendLog;
-    if (!pass) process.exitCode = 1;
   } finally {
     if (openAbort && !openAbort.signal.aborted) openAbort.abort(new Error('Diagnostic cleanup.'));
-    if (hostPid) await killTree(hostPid);
+    try { await backend.stop(); } catch (error) { report.backendStopError = redact(error?.message || error); }
+    let cleanup = null;
+    for (let attempt = 0; attempt < 24; attempt++) {
+      let processes = [], listeners = [];
+      try {
+        processes = powershellJson("Get-CimInstance Win32_Process -Filter \\\"Name = 'msedge.exe' OR Name = 'node.exe'\\\" | Select-Object ProcessId,ParentProcessId,Name,CommandLine | ConvertTo-Json -Compress -Depth 4");
+        listeners = powershellJson('Get-NetTCPConnection -LocalPort 9227 -State Listen -ErrorAction SilentlyContinue | Select-Object OwningProcess,LocalAddress | ConvertTo-Json -Compress -Depth 4');
+      } catch {}
+      const hostStillAlive = processes.some(item => Number(item.ProcessId) === Number(hostPid));
+      const profileEdges = processes.filter(item => /msedge\\.exe$/i.test(String(item.Name)) && String(item.CommandLine || '').toLowerCase().includes(profile.toLowerCase()));
+      cleanup = { hostProcessExited: hostPid ? !hostStillAlive : null, profileEdgeProcessCount: profileEdges.length, port9227ListenerCount: listeners.length };
+      if (!hostStillAlive && profileEdges.length === 0 && listeners.length === 0) break;
+      await delay(250);
+    }
+    report.cleanup = cleanup;
+    report.cleanupClean = !report.backendStopError && cleanup?.hostProcessExited === true && cleanup.profileEdgeProcessCount === 0 && cleanup.port9227ListenerCount === 0;
+    pass = pass && report.cleanupClean;
+    if (hostPid && cleanup?.hostProcessExited !== true) await killTree(hostPid);
     await killProfileProcesses(profile);
-    await backend.stop().catch(() => {});
+    report.backendStderrTail = redact(backend.stderr);
+    report.browserHostLogTail = await tail(logFile);
+    report.pass = pass;
+    process.stdout.write('YUTANG_API_WORKER_BROWSER_HOST_RESULT ' + JSON.stringify(report) + '\n');
     await fs.rm(base, { recursive: true, force: true }).catch(() => {});
+    if (!pass) process.exitCode = 1;
   }
 }
 main().catch(error => {
