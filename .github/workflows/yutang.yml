@@ -45,7 +45,7 @@ jobs:
           export const ORIGINAL_BLOB = 'a1c8522365f4e02d9ef83a6f6700ebe93acba2f6';
           export const CALL = 'chromiumImpl.launchPersistentContext(profile, {';
           export const BEFORE = "channel: 'msedge', headless: false, viewport: null, ignoreDefaultArgs: ['--mute-audio'],";
-          export const AFTER = "channel: 'msedge', headless: false, viewport: null, chromiumSandbox: true, ignoreDefaultArgs: ['--mute-audio'],";
+          export const AFTER = "channel: 'msedge', headless: false, viewport: null, chromiumSandbox: true, timeout: 20_000, ignoreDefaultArgs: ['--mute-audio'],";
           export const ARGS_BEFORE = "args: [`--remote-debugging-port=${port}`, '--remote-debugging-address=127.0.0.1', '--autoplay-policy=no-user-gesture-required'],";
           export const ARGS_AFTER = "args: [`--remote-debugging-port=${port}`, '--remote-debugging-address=127.0.0.1', '--autoplay-policy=no-user-gesture-required', '--enable-features=NetworkServiceSandbox'],";
           
@@ -61,7 +61,7 @@ jobs:
             if (!s.includes(CALL) || s.split(CALL).length !== 2) throw Error('Expected exactly one dedicated Edge launch.');
             if (s.split(BEFORE).length !== 2) throw Error('Expected exact known v1.4.6 Edge options once.');
             if (s.split(ARGS_BEFORE).length !== 2) throw Error('Expected exact known v1.4.6 Edge args once.');
-            if (s.includes('chromiumSandbox: true') || s.includes('--enable-features=NetworkServiceSandbox')) throw Error('Already modified: unexpected source for pinned commit.');
+            if (s.includes('chromiumSandbox: true') || s.includes('timeout: 20_000') || s.includes('--enable-features=NetworkServiceSandbox')) throw Error('Already modified: unexpected source for pinned commit.');
             const start = s.indexOf(CALL);
             const location = s.indexOf(BEFORE);
             const argsLocation = s.indexOf(ARGS_BEFORE);
@@ -70,6 +70,7 @@ jobs:
             const patched = s.replace(BEFORE, AFTER).replace(ARGS_BEFORE, ARGS_AFTER);
             const launch = patched.slice(start, start + 900);
             if (!launch.includes('chromiumSandbox: true')) throw Error('Postpatch renderer sandbox check failed.');
+            if (!launch.includes('timeout: 20_000')) throw Error('Postpatch bounded browser launch timeout missing.');
             if (!launch.includes('--enable-features=NetworkServiceSandbox')) throw Error('Postpatch Network Service sandbox flag missing.');
             if (launch.includes('--no-sandbox') || launch.includes('--disable-setuid-sandbox')) throw Error('Unsafe flag present near Edge launch.');
             if (patched.replace(ARGS_AFTER, ARGS_BEFORE).replace(AFTER, BEFORE) !== s) throw Error('Patch changed content beyond the two reviewed launch options.');
@@ -88,7 +89,7 @@ jobs:
               await rename(tmp, target);
             } finally { await rm(tmp, { force: true }).catch(() => {}); }
             console.log(`PASS original v1.4.6 Git blob: ${originalId}`);
-            console.log(`PASS inserted chromiumSandbox:true exactly once; patched SHA256: ${patchedSha256}`);
+            console.log(`PASS inserted chromiumSandbox:true and bounded browser launch timeout exactly once; patched SHA256: ${patchedSha256}`);
             console.log('NOTE source patch only: does not prove the packaged Windows browser sandbox is effective.');
           }
           const invoked = process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href;
@@ -101,7 +102,7 @@ jobs:
           if (files.length < 2) { console.error('Usage: node verify-propagation.mjs source copied-file [packaged-file]'); process.exit(1); }
           const originals = files.map(f => { if (!fs.existsSync(f)) throw Error(`Missing file ${f}`); return fs.readFileSync(f); });
           const digest = b => crypto.createHash('sha256').update(b).digest('hex');
-          if (!originals.every(b => b.includes(Buffer.from('chromiumSandbox: true')) && b.includes(Buffer.from('--enable-features=NetworkServiceSandbox')))) throw Error('One or more copies lack the renderer or Network Service sandbox option.');
+          if (!originals.every(b => b.includes(Buffer.from('chromiumSandbox: true')) && b.includes(Buffer.from('timeout: 20_000')) && b.includes(Buffer.from('--enable-features=NetworkServiceSandbox')))) throw Error('One or more copies lack the renderer or Network Service sandbox option.');
           if (!originals.slice(1).every(b => b.equals(originals[0]))) throw Error('Source / staged / packaged copies differ.');
           console.log(`PASS ${files.length} byte-for-byte identical patched source copies; sha256=${digest(originals[0])}`);
           console.log('NOTE This is a packaged-source check, not proof of sandbox runtime behavior.');
@@ -156,6 +157,7 @@ jobs:
           const { patched, patchedSha256 } = applyPatch(fixture, hash);
           assert.equal(patched, fixture.replace(BEFORE, AFTER).replace(ARGS_BEFORE, ARGS_AFTER));
           assert.ok(patched.includes('chromiumSandbox: true'));
+          assert.ok(patched.includes('timeout: 20_000'));
           assert.ok(patched.includes('--enable-features=NetworkServiceSandbox'));
           assert.match(patchedSha256,/^[a-f0-9]{64}$/);
           assert.throws(()=>applyPatch(fixture, '0000000000000000000000000000000000000000'),/blob mismatch/);
@@ -181,7 +183,7 @@ jobs:
           const script = fileURLToPath(new URL('../tools/verify-propagation.mjs', import.meta.url));
           try {
             const a = path.join(base,'original.mjs'), b=path.join(base,'staged.mjs'), c=path.join(base,'packed.mjs');
-            const value = "const browser = { chromiumSandbox: true, args: ['--enable-features=NetworkServiceSandbox'] };";
+            const value = "const browser = { chromiumSandbox: true, timeout: 20_000, args: ['--enable-features=NetworkServiceSandbox'] };";
             for (const p of [a,b,c]) writeFileSync(p,value);
             const pass = execFileSync(process.execPath,[script,a,b,c],{encoding:'utf8'});
             assert.match(pass,/PASS 3 byte-for-byte identical/);
@@ -202,6 +204,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Propagation fail-closed controls failed' }
           node tools/patch-startup-ready.mjs --self-test
           if ($LASTEXITCODE -ne 0) { throw 'Renderer startup patch safety checks failed' }
+          node --check tools/patch-isolated-candidate-state.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Isolated profile/memory patch syntax failed' }
 
       - name: Checkout exact upstream release commit and verify source identity
         shell: pwsh
@@ -221,8 +225,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Pinned renderer startup patch failed' }
           node --check upstream/desktop/src/startup-navigation.mjs
           if ($LASTEXITCODE -ne 0) { throw 'Patched renderer source syntax failed' }
+          node tools/patch-isolated-candidate-state.mjs (Resolve-Path upstream/runtime-paths.mjs).Path (Resolve-Path upstream/desktop/src/prepare-api-runtime.mjs).Path (Resolve-Path upstream/desktop/src/main.mjs).Path
+          if ($LASTEXITCODE -ne 0) { throw 'Candidate profile, memory and settings isolation patch failed' }
+          foreach ($entry in @('upstream/runtime-paths.mjs', 'upstream/desktop/src/prepare-api-runtime.mjs', 'upstream/desktop/src/main.mjs')) {
+            node --check $entry
+            if ($LASTEXITCODE -ne 0) { throw "Patched candidate source failed syntax check: $entry" }
+          }
           $changed = @(git -C upstream diff --name-only)
-          if ($changed.Count -ne 2 -or $changed -notcontains 'browser-host.mjs' -or $changed -notcontains 'desktop/src/startup-navigation.mjs') { throw 'Unexpected source differences' }
+          if ($changed.Count -ne 5 -or $changed -notcontains 'browser-host.mjs' -or $changed -notcontains 'runtime-paths.mjs' -or $changed -notcontains 'desktop/src/prepare-api-runtime.mjs' -or $changed -notcontains 'desktop/src/main.mjs' -or $changed -notcontains 'desktop/src/startup-navigation.mjs') { throw 'Unexpected source differences' }
 
       - name: Install pinned pnpm and repository dependencies
         shell: pwsh
@@ -308,13 +318,20 @@ jobs:
           node scripts/stage-api-runtime.mjs
           if ($LASTEXITCODE -ne 0) { throw 'API runtime stage failed' }
           node ../../tools/verify-propagation.mjs ../browser-host.mjs .cache/api-runtime/browser-host.mjs
-          if ($LASTEXITCODE -ne 0) { throw 'Sandbox fix was not staged into runtime' }
+          if ($LASTEXITCODE -ne 0) { throw 'Sandbox or timeout fix was not staged into runtime' }
+          if ((Get-FileHash -Algorithm SHA256 -LiteralPath '../runtime-paths.mjs').Hash -ne (Get-FileHash -Algorithm SHA256 -LiteralPath '.cache/api-runtime/runtime-paths.mjs').Hash) { throw 'Private YuTang runtime path defaults did not propagate to the staged runtime' }
           node scripts/build-api-desktop.mjs
           if ($LASTEXITCODE -ne 0) { throw 'Desktop application build failed' }
           $source=(Get-FileHash -Algorithm SHA256 -LiteralPath 'src/startup-navigation.mjs').Hash
           $copied=(Get-FileHash -Algorithm SHA256 -LiteralPath 'app/startup-navigation.mjs').Hash
           if ($source -ne $copied) { throw 'Renderer startup patch not copied into desktop app' }
           Write-Host 'PASS renderer startup patch is byte-identical in desktop application entry.'
+          foreach ($entry in @('main.mjs','prepare-api-runtime.mjs')) {
+            $original=(Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path 'src' $entry)).Hash
+            $staged=(Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path 'app' $entry)).Hash
+            if ($original -ne $staged) { throw "Candidate state isolation source was not copied into Electron app: $entry" }
+          }
+          Write-Host 'PASS new candidate has isolated Electron settings, shared state and Edge profile defaults.'
 
       - name: Run independent Edge sandbox process probe on Windows
         shell: pwsh
@@ -330,6 +347,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Unpacked Windows build failed' }
           node ../../tools/verify-propagation.mjs ../browser-host.mjs .cache/api-runtime/browser-host.mjs release-api/win-unpacked/resources/api-runtime/browser-host.mjs
           if ($LASTEXITCODE -ne 0) { throw 'Packaged source did not contain verified patch' }
+          if ((Get-FileHash -Algorithm SHA256 -LiteralPath '../runtime-paths.mjs').Hash -ne (Get-FileHash -Algorithm SHA256 -LiteralPath 'release-api/win-unpacked/resources/api-runtime/runtime-paths.mjs').Hash) { throw 'Packaged runtime did not retain isolated browser profile, memory and control defaults' }
           pnpm package:portable
           if ($LASTEXITCODE -ne 0) { throw 'Portable Windows packaging failed' }
           # Verify with the same locked Playwright runtime already staged and probed above.
@@ -347,8 +365,8 @@ jobs:
             "PINNED COMMIT: $env:FIXED_COMMIT"
             "FILE: $($exe[0].Name)"
             "SHA256: $hash"
-            'PASSED: pinned source patch, upstream tar.gz/tree verification, staged/packaged source, packaged API smoke, renderer AppContainer sandbox, NetworkServiceSandbox feature'
-            'NOT PROVEN: real Douyin playback, model reasoning, continuous autonomy, memory synchronization, signed release trust'
+            'PASSED: pinned source patch, bounded 20s Edge launch, isolated candidate profile/memory/settings defaults, upstream tar.gz/tree, packaged API smoke, renderer AppContainer, NetworkServiceSandbox feature'
+            'NOT PROVEN: real Douyin playback, model reasoning, continuous autonomy, Windows Network Service native token restrictions, signed release trust'
           ) | Set-Content -LiteralPath release-api/YUTANG-RESULT.txt -Encoding utf8
           Write-Host "CANDIDATE SHA256 $hash"
 
