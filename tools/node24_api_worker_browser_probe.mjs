@@ -381,13 +381,77 @@ async function main() {
         report.localFixturePageCount = pages.filter(item => item.url === fixtureUrl).length;
       }
     } catch {}
+    const firstHostPid = hostPid;
+    const firstBrowserPid = report.processOwnership?.edgeLaunchSummaries?.[0]?.pid || null;
+    try { await backend.stop(); } catch (error) { report.firstBackendStopError = redact(error?.message || error); }
+    await delay(750);
+
+    backend = new ApiProcess(process.execPath, runtime, { env, timeoutMs: 30000 });
+    const restarted = await backend.start(config, { htmlFile, staticRoot: publicRoot });
+    const bootstrap2Response = await fetch(backend.origin + '/api/bootstrap', { signal: AbortSignal.timeout(5000) });
+    const bootstrap2 = await bootstrap2Response.json();
+    if (!bootstrap2Response.ok || typeof bootstrap2.token !== 'string' || bootstrap2.token.length < 10) throw new Error('Restarted API worker bootstrap failed.');
+    const secondOpenResponse = await fetch(backend.origin + '/api/browser/open', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-session-token': bootstrap2.token },
+      body: '{}',
+      signal: AbortSignal.timeout(20000)
+    });
+    const secondOpenBody = await secondOpenResponse.json().catch(() => ({}));
+    const stateAfterRestart = await readJson(stateFile);
+    const restartVersion = await waitForCdp(9227, 5000);
+    let restartProcesses = [], restartListeners = [];
+    try {
+      restartProcesses = powershellJson("Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'msedge.exe' -or $_.Name -eq 'node.exe' } | Select-Object ProcessId,ParentProcessId,Name,CommandLine | ConvertTo-Json -Compress -Depth 4");
+      restartListeners = powershellJson('Get-NetTCPConnection -LocalPort 9227 -State Listen -ErrorAction SilentlyContinue | Select-Object OwningProcess,LocalAddress | ConvertTo-Json -Compress -Depth 4');
+    } catch {}
+    const restartHostPid = Number.isSafeInteger(stateAfterRestart?.pid) ? stateAfterRestart.pid : null;
+    const restartOwnership = restartHostPid ? inspectOwnership(restartProcesses, restartHostPid, backend.child?.pid, profile, restartListeners) : null;
+    let restartTargets = [];
+    try {
+      const response = await fetch('http://127.0.0.1:9227/json/list', { signal: AbortSignal.timeout(3000) });
+      if (response.ok) restartTargets = await response.json();
+    } catch {}
+    const restartPages = restartTargets.filter(item => item.type === 'page');
+    const restartFixtureCount = restartPages.filter(item => item.url === fixtureUrl).length;
+    const restartHostCount = restartProcesses.filter(item => /node\.exe$/i.test(String(item.Name)) && /browser-host(?:-probe)?\.mjs/i.test(String(item.CommandLine || ''))).length;
+    report.backendRestart = {
+      backendStarted: Boolean(restarted?.port),
+      browserOpenStatus: secondOpenResponse.status,
+      opened: secondOpenBody.opened === true,
+      mode: secondOpenBody.mode || null,
+      reused: secondOpenBody.reused === true,
+      paused: secondOpenBody.paused === true,
+      hostReady: stateAfterRestart?.ready === true,
+      hostPid: restartHostPid,
+      reusedSameHost: restartHostPid === firstHostPid,
+      cdp: Boolean(restartVersion),
+      browserVersion: String(restartVersion?.Browser || '').slice(0, 100),
+      browserHostProcessCount: restartHostCount,
+      edgeDescendantCount: restartOwnership?.edgeDescendantCount || 0,
+      listenerOwnedByEdge: restartOwnership?.listenerOwnersAreEdgeDescendants === true,
+      listenerLoopbackOnly: restartOwnership?.listenersLoopbackOnly === true,
+      pageTargetCount: restartPages.length,
+      localFixturePageCount: restartFixtureCount
+    };
+    hostPid = restartHostPid || firstHostPid;
+    report.firstBrowserPid = firstBrowserPid;
+    report.backendRestarted = report.backendRestart.backendStarted &&
+      report.backendRestart.browserOpenStatus === 200 && report.backendRestart.opened &&
+      report.backendRestart.mode === 'prepare' && report.backendRestart.paused &&
+      report.backendRestart.hostReady && report.backendRestart.cdp &&
+      report.backendRestart.browserHostProcessCount === 1 &&
+      report.backendRestart.edgeDescendantCount > 0 &&
+      report.backendRestart.listenerOwnedByEdge && report.backendRestart.listenerLoopbackOnly &&
+      report.backendRestart.pageTargetCount === 1 && report.backendRestart.localFixturePageCount === 1;
+
     report.backendStderrTail = redact(backend.stderr);
     report.browserHostLogTail = await tail(logFile);
     report.hostPid = hostPid;
 
     const ownership = report.processOwnership || {};
     pass = report.backendStarted && report.browserState?.ready === true && report.cdp &&
-      report.browserOpenStatus === 200 && report.browserOpenResult?.opened === true && report.browserOpenResult?.mode === 'prepare' && report.browserOpenResult?.paused === true && report.localFixturePageCount === 1 &&
+      report.browserOpenStatus === 200 && report.browserOpenResult?.opened === true && report.browserOpenResult?.mode === 'prepare' && report.browserOpenResult?.paused === true && report.localFixturePageCount === 1 && report.backendRestarted === true &&
       report.browserState.profileMatches && report.browserState.port === 9227 &&
       ownership.hostFound && ownership.hostIsNode && ownership.hostParentIsApiWorker &&
       ownership.edgeDescendantCount > 0 && ownership.edgeWithProfileCount > 0 &&
