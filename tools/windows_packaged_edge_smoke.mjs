@@ -370,6 +370,58 @@ async function inspectReadyBrowser(state, backendPid, profile, controlDir) {
   assert.ok(hostSummary.edgeWithNetworkSandboxArg > 0, 'Network Service sandbox launch flag was not passed to Edge');
   return { state, browserVersion: version.Browser, hostSummary, ownership };
 }
+
+async function readColdStartDiagnostics(userData, candidatePid, exeFile, redactionPaths) {
+  // This diagnostic only reads disposable runner evidence. Never dump arbitrary files,
+  // raw process arguments, environment values, credentials, or user browser profiles.
+  const report = { userDataEntryNames: [], startupEvents: [], startupError: null,
+    runtimeDirectoryCount: 0, processTree: [], possibleUnrelatedTempExecutables: 0 };
+  try {
+    report.userDataEntryNames = (await fs.readdir(userData)).filter(name => /^[A-Za-z0-9._-]{1,100}$/.test(name)).slice(0,35);
+    const logDir = path.join(userData, 'startup-diagnostics');
+    const files = (await fs.readdir(logDir)).filter(name => /^[A-Za-z0-9._-]{1,110}\.jsonl$/.test(name)).sort().slice(-2);
+    for (const name of files) {
+      const content = await fs.readFile(path.join(logDir, name), 'utf8');
+      for (const line of content.split(/\r?\n/).filter(Boolean).slice(-45)) {
+        try {
+          const record = JSON.parse(line);
+          const event = /^[a-z.-]{1,60}$/.test(String(record.event)) ? record.event : 'unknown';
+          const stage = /^[A-Za-z0-9_.-]{1,60}$/.test(String(record.stage || '')) ? record.stage : null;
+          report.startupEvents.push({ event, stage, seq: Number(record.seq), at: String(record.at).slice(0,30) });
+        } catch { report.startupEvents.push({ event: 'unparseable-startup-record' }); }
+      }
+    }
+  } catch (error) {
+    report.startupEvidenceError = String(error?.code || error?.name || 'read-failed').slice(0,80);
+  }
+  try {
+    report.startupError = safeText(await readTail(path.join(userData, 'startup-error.txt'), 2500), redactionPaths);
+  } catch {}
+  try { report.runtimeDirectoryCount = (await fs.readdir(path.join(userData, 'runtimes'))).length; }
+  catch {}
+  try {
+    const rows = asRows(ps("Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,ExecutablePath | ConvertTo-Json -Compress -Depth 3"));
+    const byPid = new Map(rows.map(item => [Number(item.ProcessId), item]));
+    const isCandidateDescendant = pid => hasHostAncestor(pid, candidatePid, rows);
+    const descendants = rows.filter(item => isCandidateDescendant(Number(item.ProcessId)));
+    report.processTree = descendants.slice(0,45).map(item => ({
+      pid: Number(item.ProcessId), parentPid: Number(item.ParentProcessId),
+      image: String(item.Name || '').slice(0,90),
+      isOriginalCandidate: Number(item.ProcessId) === candidatePid,
+      isTempExecutable: String(item.ExecutablePath || '').toLowerCase().startsWith(String(process.env.RUNNER_TEMP || '').toLowerCase())
+    }));
+    report.possibleUnrelatedTempExecutables = rows.filter(item => {
+      const executable = String(item.ExecutablePath || '').toLowerCase();
+      return executable.includes('ns') && executable.includes('.tmp') && !isCandidateDescendant(Number(item.ProcessId));
+    }).length;
+    report.candidatePidVisible = byPid.has(candidatePid);
+    report.candidateImageName = path.basename(exeFile);
+  } catch (error) {
+    report.processSnapshotError = String(error?.code || error?.name || 'process-query-failed').slice(0,80);
+  }
+  return report;
+}
+
 async function run(exeFile) {
   if (process.platform!=='win32' || process.env.GITHUB_ACTIONS!=='true' || process.env.YUTANG_EDGE_FIREWALL_CONFIRMED!=='yes')
     throw new Error('Refusing candidate launch outside pre-guarded ephemeral Windows GitHub runner');
@@ -568,6 +620,8 @@ async function run(exeFile) {
       } catch {}
     }
     try { debugListenerCount=ps('Get-NetTCPConnection -LocalPort 9227 -State Listen -ErrorAction SilentlyContinue | Measure-Object | Select-Object -ExpandProperty Count'); } catch {}
+    const coldStart = await readColdStartDiagnostics(userData, child.pid, exeFile, redactPaths);
+    console.error('COLD_START_EVIDENCE '+JSON.stringify(coldStart));
     console.error('FAIL_CLOSED_DIAGNOSTICS '+JSON.stringify({
       desktopReady:report.desktopReady===true, candidatePid:child.pid, candidateExit,
       browserOpenHttpStatus:report.browserOpenHttpStatus??null,
