@@ -102,7 +102,6 @@ if (mode === 'direct') {
     emit('host-threw', { errorName: String(error?.name || 'Error'), errorCode: String(error?.code || ''), error: cleanError(error?.message) });
     process.exitCode = 1;
   }
-}
 } else {
   const { mkdir, writeFile } = await import('node:fs/promises');
   const home = path.resolve(profile, '..', '..', '..', '..');
