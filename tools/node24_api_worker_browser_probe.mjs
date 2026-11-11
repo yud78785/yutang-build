@@ -19,8 +19,8 @@ const require = createRequire(path.join(runtime, 'probe-require.cjs'));
 const playwrightPackage = require('playwright-core/package.json');
 const { chromium } = require('playwright-core');
 assert.equal(playwrightPackage.version, '1.64.0-alpha-1790635538000', 'Pinned Playwright package required.');
-const EXPECTED_HOST_SHA256 = '5716a705e19663f1f6faed52569508b72cf091d3a31766828a7a5434a6eca1bc';
-const DIAGNOSTIC_LAUNCH_TIMEOUT_MS = 20_000;
+const EXPECTED_HOST_SHA256 = '29e77cca0cb3c0bdf3750de3727ffde9e2e761a70d90f992eb24cd7bcbbb1a9d';
+const DIAGNOSTIC_LAUNCH_TIMEOUT_MS = 30_000;
 const hostPath = path.join(runtime, 'browser-host.mjs');
 const corePath = path.join(runtime, 'core.mjs');
 const launcherPath = path.join(runtime, 'browser-launcher.mjs');
@@ -170,7 +170,7 @@ async function instrumentRuntime() {
   const hostPatches = [
     [
       "    writeState(false);\n    try { installation = await probeInstallation(); } catch {}\n    context = await chromiumImpl.launchPersistentContext(profile, {",
-      "    console.error('PROBE_STAGE:host_env ' + JSON.stringify({hasNodeChannelFd:Object.hasOwn(process.env,'NODE_CHANNEL_FD'),hasNodeChannelSerializationMode:Object.hasOwn(process.env,'NODE_CHANNEL_SERIALIZATION_MODE'),hasNodeUniqueId:Object.hasOwn(process.env,'NODE_UNIQUE_ID'),processConnected:process.connected===true,hasProcessSend:typeof process.send==='function',hasNodeOptions:Boolean(process.env.NODE_OPTIONS),hasNodePath:Boolean(process.env.NODE_PATH),hasElectronRunAsNode:Boolean(process.env.ELECTRON_RUN_AS_NODE),parentPid:process.ppid}));\n    console.error('PROBE_STAGE:before_edge_probe');\n    writeState(false);\n    try { installation = await probeInstallation(); console.error('PROBE_STAGE:edge_probe_finished'); } catch (probeError) { console.error('PROBE_STAGE:edge_probe_failed:' + String(probeError?.name || 'Error')); }\n    console.error('PROBE_STAGE:before_launch_persistent_context timeoutMs=20000');\n    context = await chromiumImpl.launchPersistentContext(profile, { timeout: 20000,"
+      "    console.error('PROBE_STAGE:host_env ' + JSON.stringify({hasNodeChannelFd:Object.hasOwn(process.env,'NODE_CHANNEL_FD'),hasNodeChannelSerializationMode:Object.hasOwn(process.env,'NODE_CHANNEL_SERIALIZATION_MODE'),hasNodeUniqueId:Object.hasOwn(process.env,'NODE_UNIQUE_ID'),processConnected:process.connected===true,hasProcessSend:typeof process.send==='function',hasNodeOptions:Boolean(process.env.NODE_OPTIONS),hasNodePath:Boolean(process.env.NODE_PATH),hasElectronRunAsNode:Boolean(process.env.ELECTRON_RUN_AS_NODE),parentPid:process.ppid}));\n    console.error('PROBE_STAGE:before_edge_probe');\n    writeState(false);\n    try { installation = await probeInstallation(); console.error('PROBE_STAGE:edge_probe_finished'); } catch (probeError) { console.error('PROBE_STAGE:edge_probe_failed:' + String(probeError?.name || 'Error')); }\n    console.error('PROBE_STAGE:before_launch_persistent_context timeoutMs=30000');\n    context = await chromiumImpl.launchPersistentContext(profile, { timeout: 30000,"
     ],
     [
       "    const nativeFocus = await installNativeFocusReset(context, { onFailure:",
@@ -247,7 +247,7 @@ async function instrumentRuntime() {
   if (core.split(endpointLockBefore).length !== 2) throw new Error('Endpoint lock diagnostic anchor mismatch.');
   core = core.replace(endpointLockBefore, endpointLockAfter);
   const endpointDeadlineBefore = "    const deadline = Date.now() + 25_000;";
-  const endpointDeadlineAfter = "    const deadline = Date.now() + 25_000;\n    console.error('CORE_PROBE:endpoint_wait_start at=' + Date.now() + ' hostPid=' + String(hostPid));";
+  const endpointDeadlineAfter = "    const deadline = Date.now() + 60_000;\n    console.error('CORE_PROBE:endpoint_wait_start at=' + Date.now() + ' hostPid=' + String(hostPid) + ' timeoutMs=60000');";
   if (core.split(endpointDeadlineBefore).length !== 2) throw new Error('Endpoint deadline diagnostic anchor mismatch.');
   core = core.replace(endpointDeadlineBefore, endpointDeadlineAfter);
   const endpointFailedBefore = "      if (readiness === 'failed') throw new Error('专用浏览器启动失败；请正常关闭仍使用 cli-profile 的旧专用窗口后重试。');";
@@ -418,7 +418,7 @@ async function main() {
       durationMs: Date.now() - openStartedAt
     })).catch(error => ({ status: 'ABORTED_OR_FAILED', body: redact(error?.message || error) }));
 
-    const deadline = Date.now() + 35000;
+    const deadline = Date.now() + 60000;
     let state = null;
     while (Date.now() < deadline) {
       state = await readJson(stateFile);
@@ -451,7 +451,7 @@ async function main() {
       report.hostPidMatchesBackendLog = backend.stderr.includes('CORE_PROBE:after_host_spawn pid=' + String(hostPid));
     }
     if (openPromise) {
-      const settled = await Promise.race([openPromise, delay(20000).then(() => null)]);
+      const settled = await Promise.race([openPromise, delay(60000).then(() => null)]);
       if (settled) {
         report.browserOpenStatus = settled.status;
         report.browserOpenBody = settled.body;
@@ -461,8 +461,8 @@ async function main() {
           report.browserOpenResult = { opened: body.opened === true, mode: body.mode || null, reused: body.reused === true, paused: body.paused === true, watchPreserved: body.watchPreserved === true };
         } catch {}
       } else {
-        report.browserOpenStatus = 'PENDING_AFTER_20_SECONDS';
-        openAbort.abort(new Error('Diagnostic browser-open request timed out.'));
+        report.browserOpenStatus = 'PENDING_AFTER_60_SECONDS';
+        openAbort.abort(new Error('Diagnostic browser-open request timed out after 60 seconds.'));
         const aborted = await Promise.race([openPromise, delay(1500).then(() => null)]);
         if (aborted) {
           report.browserOpenStatus = aborted.status;
@@ -495,7 +495,7 @@ async function main() {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-session-token': bootstrap2.token },
       body: '{}',
-      signal: AbortSignal.timeout(20000)
+      signal: AbortSignal.timeout(60000)
     });
     const secondOpenBody = await secondOpenResponse.json().catch(() => ({}));
     const stateAfterRestart = await readJson(stateFile);
@@ -564,10 +564,10 @@ async function main() {
         method: 'POST',
         headers: { 'content-type': 'application/json', 'x-session-token': bootstrap2.token },
         body: '{}',
-        signal: AbortSignal.timeout(20000)
+        signal: AbortSignal.timeout(60000)
       });
       const thirdOpenBody = await thirdOpenResponse.json().catch(() => ({}));
-      const thirdState = await waitForNewHost(stateFile, firstHostPid, 35000);
+      const thirdState = await waitForNewHost(stateFile, firstHostPid, 60000);
       hostPid = Number(thirdState.pid);
       const thirdVersion = await waitForCdp(9227, 5000);
       const thirdTargetsResponse = await fetch('http://127.0.0.1:9227/json/list', { signal: AbortSignal.timeout(3000) });
