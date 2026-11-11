@@ -33,7 +33,7 @@ if (mode === 'direct') {
       const response = await fetch('http://127.0.0.1:' + port + '/json/version', { signal: AbortSignal.timeout(3000) });
       if (response.ok) { browser = await response.json(); cdp = /Edg|Chrome/.test(String(browser.Browser)); }
     } catch {}
-    emit('direct-result', { launch: 'PASS', cdp, browserVersion: String(browser?.Browser || '').slice(0, 100), node: process.versions.node });
+    emit('direct-result', { launch: cdp ? 'PASS' : 'CDP_MISSING', cdp, browserVersion: String(browser?.Browser || '').slice(0, 100), node: process.versions.node });
   } catch (error) {
     emit('direct-result', { launch: 'FAIL', errorName: String(error?.name || 'Error'), errorCode: String(error?.code || ''), error: cleanError(error?.message), node: process.versions.node });
     process.exitCode = 1;
