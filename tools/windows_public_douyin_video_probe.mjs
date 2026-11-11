@@ -83,6 +83,25 @@ export function selfTest() {
   assert.throws(()=>verifyProcessSnapshot({...good,processes:list.map(p=>p.ProcessId===200?{...p,ParentProcessId:300}:p)}),/descendant/);
   assert.throws(()=>verifyProcessSnapshot({...good,processes:list.map(p=>p.ProcessId===201?{...p,CommandLine:p.CommandLine+' --no-sandbox'}:p)}),/Unsafe/);
   assert.throws(()=>verifyProcessSnapshot({...good,profile:'C:\\another'}),/No MS Edge/);
+  // Synthetic diagnostics only; no network, tokens, page data or raw exception texts retained.
+  const categoryFixtures=[
+    ['page.evaluate: Execution context was destroyed','NAVIGATION_CONTEXT_RESET'],
+    ['page.goto: Timeout 30000ms exceeded','TIMEOUT'],
+    ['Target page, context or browser has been closed','PAGE_OR_BROWSER_CLOSED'],
+    ['net::ERR_CONNECTION_RESET','NETWORK_FAILURE'],
+    ['verification required','ACCESS_OR_ORIGIN_GUARD'],
+    ['unrecognized issue sk-secret123456','UNCLASSIFIED']
+  ];
+  for(const [message,expected] of categoryFixtures)
+    assert.equal(classifyPublicVideoError(new Error(message)),expected);
+  const pageProof=classifyPublicVideoPage({isClosed:()=>false,
+    url:()=> 'https://www.douyin.com/video/'+PUBLIC_VIDEO_ID+'?token=never-persist-this'});
+  assert.equal(pageProof.targetVideo,true);
+  assert.doesNotMatch(JSON.stringify(pageProof),/never-persist-this|token|https:\/\//);
+  assert.equal(classifyPublicVideoPage({isClosed:()=>true,url:()=>{throw Error('must not read')}}).urlCategory,'closed');
+  assert.equal(classifyPublicVideoPage({isClosed:()=>false,url:()=> 'https://www.douyin.com.evil.example/private'}).urlCategory,'outside-allowed-origin');
+  assert.equal(classifyPublicVideoPage(null).urlCategory,'no-page');
+  console.log('PASS 10 synthetic public-video failure classification and redaction assertions');
   console.log('PASS 8 synthetic Windows process ownership/port binding regression assertions');
 }
 
@@ -189,6 +208,33 @@ const readProcessToken = pid => {
   return ps(script);
 };
 const asRows = value => Array.isArray(value) ? value : value ? [value] : [];
+export function classifyPublicVideoError(error) {
+  const message=String(error?.message??'').slice(0,4000);
+  const code=typeof error?.code==='string'?error.code:'';
+  const name=typeof error?.name==='string'?error.name:'';
+  if(/Execution context was destroyed|Cannot find context with specified id|context was destroyed during navigation/i.test(message))return 'NAVIGATION_CONTEXT_RESET';
+  if(/Target page, context or browser has been closed|Target closed|Browser has been closed|Page closed|Connection closed/i.test(message))return 'PAGE_OR_BROWSER_CLOSED';
+  if(/ERR_NETWORK_ACCESS_DENIED|ERR_BLOCKED_BY_CLIENT|ERR_INTERNET_DISCONNECTED|net::ERR_|ENOTFOUND|EAI_AGAIN/i.test(message+' '+code))return 'NETWORK_FAILURE';
+  if(/TimeoutError/i.test(name)||/timeout|timed out|deadline exceeded|ETIMEDOUT/i.test(message+' '+code))return 'TIMEOUT';
+  if(/unsupported origin|unsupported page|不受支持的来源|login required|captcha|verification required|invalid url/i.test(message))return 'ACCESS_OR_ORIGIN_GUARD';
+  return 'UNCLASSIFIED';
+}
+
+export function classifyPublicVideoPage(page) {
+  if(!page)return {present:false,closed:null,urlCategory:'no-page',targetVideo:false};
+  try {
+    if(page.isClosed())return {present:true,closed:true,urlCategory:'closed',targetVideo:false};
+    const raw=String(page.url());
+    if(raw==='about:blank')return {present:true,closed:false,urlCategory:'blank',targetVideo:false};
+    const match=/^https:\/\/www\.douyin\.com(\/[^?#]*)?(?:[?#]|$)/.exec(raw);
+    if(!match)return {present:true,closed:false,urlCategory:'outside-allowed-origin',targetVideo:false};
+    const target=(match[1]||'/')==='/video/'+PUBLIC_VIDEO_ID;
+    return {present:true,closed:false,urlCategory:target?'expected-public-video':'other-douyin-page',targetVideo:target};
+  } catch {
+    return {present:true,closed:null,urlCategory:'unavailable',targetVideo:false};
+  }
+}
+
 const isExpectedFirewallBlock = (status, body) => status === 500 &&
   /ERR_NETWORK_ACCESS_DENIED/i.test(String(body || '')) &&
   /douyin\.com/i.test(String(body || ''));
@@ -660,6 +706,7 @@ async function run(exeFile) {
     };
     let verificationController=null;
     let verificationStage='load-runtime';
+    let openVideoStartedAt=null;
     try {
       const runtimeBase=path.join(userData,'runtimes');
       const runtimeEntries=(await fs.readdir(runtimeBase)).filter(name=>/^[a-f0-9]{20}$/.test(name));
@@ -673,6 +720,7 @@ async function run(exeFile) {
         personaMemory:{recordViewing(){}}
       });
       verificationStage='open-video';
+      openVideoStartedAt=Date.now();
       const openResult=await verificationController.execute('douyin_open_video',{url:PUBLIC_VIDEO_URL},{signal:AbortSignal.timeout(45000)});
       let pageState=openResult?.state||openResult;
       let currentUrl=verificationController.page?.url()||'';
@@ -835,6 +883,10 @@ async function run(exeFile) {
     }catch(error){
       publicVideoProbe.outcome='safe_stop_or_probe_error';
       publicVideoProbe.errorStage=verificationStage;
+      publicVideoProbe.errorCategory=classifyPublicVideoError(error);
+      publicVideoProbe.failurePage=classifyPublicVideoPage(verificationController?.page);
+      if(verificationStage==='open-video'&&Number.isFinite(openVideoStartedAt))
+        publicVideoProbe.openVideoElapsedMs=Math.max(0,Date.now()-openVideoStartedAt);
       publicVideoProbe.errorName=String(error?.name||'Error').slice(0,80);
       publicVideoProbe.errorCode=typeof error?.code==='string'?error.code.slice(0,80):null;
       // No error message, page text, cookies, author/title, or request headers are written to evidence.
