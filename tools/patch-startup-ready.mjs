@@ -21,7 +21,7 @@ export const AFTER = [
   "  if (error?.code === 'STARTUP_RENDERER_TIMEOUT') record('renderer.timeout', { ...rendererReadinessState(), reason: 'check-unresolved' });",
   "  throw error;",
   "}"
-].join('\\n        ');
+].join(String.fromCharCode(10)+'        ');
 export function gitBlobSha(content) {
   const bytes = Buffer.isBuffer(content) ? content : Buffer.from(content, 'utf8');
   return createHash('sha1').update(Buffer.from('blob ' + bytes.length + '\0')).update(bytes).digest('hex');
