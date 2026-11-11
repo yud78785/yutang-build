@@ -102,7 +102,11 @@ jobs:
             try { & taskkill.exe /PID $probe.Process.Id /T /F 2>$null | Out-Null } catch {}
           }
           function Read-Log($file) {
-            if(Test-Path -LiteralPath $file) { return (Get-Content -LiteralPath $file -Raw -ErrorAction SilentlyContinue).Trim() }
+            if(Test-Path -LiteralPath $file) {
+              $value=Get-Content -LiteralPath $file -Raw -ErrorAction SilentlyContinue
+              if($null -eq $value) { return '' }
+              return $value.Trim()
+            }
             return ''
           }
 
@@ -143,7 +147,10 @@ jobs:
           }
           $hostLog=Read-Log $hostProbe.Out
           $hostErr=Read-Log $hostProbe.Err
+          $hostExitCode=$null
+          if($hostProbe.Process.HasExited) { $hostExitCode=$hostProbe.Process.ExitCode }
           Write-Host "BROWSER_HOST_NODE24_STATUS=$hostStatus"
+          Write-Host "BROWSER_HOST_PROCESS_EXIT_CODE=$hostExitCode"
           Write-Host $hostLog
           Write-Host $hostErr
           $hostStateFile=Join-Path $hostControl 'browser.json'
