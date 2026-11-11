@@ -1,0 +1,183 @@
+name: Node 24.17 Edge and browser-host isolation probe (NO ACCOUNTS)
+
+on:
+  push:
+    branches:
+      - audit/node24-edge-host-20261111
+    paths:
+      - tools/node24_edge_host_probe.mjs
+      - .github/workflows/node24-edge-host-probe.yml
+
+permissions:
+  contents: read
+
+jobs:
+  node24-edge-host:
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - name: Checkout reviewed diagnostic source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Install exact candidate Node runtime version
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24.17.0
+          check-latest: false
+
+      - name: Obtain exact upstream source and locked Playwright package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          git clone --no-checkout https://github.com/LockyBee/dsh-douyin-agent.git upstream
+          if($LASTEXITCODE -ne 0) { throw 'Upstream clone failed' }
+          git -C upstream checkout --detach 912873e2556d16a088d81dcbc6f7c0060614dd58
+          if($LASTEXITCODE -ne 0) { throw 'Pinned source checkout failed' }
+          $actual=(git -C upstream rev-parse HEAD).Trim()
+          if($actual -ne '912873e2556d16a088d81dcbc6f7c0060614dd58') { throw 'Upstream source identity mismatch' }
+          node --version
+          if((node --version).Trim() -ne 'v24.17.0') { throw 'Candidate Node version mismatch' }
+          $lock=Get-Content -LiteralPath 'upstream/desktop/runtime-api-template/package-lock.json' -Raw
+          $version='1.64.0-alpha-1790635538000'
+          $integrity='sha512-pNwaXirhXMRLaRQs4NQ18EpTdtDoFwyPH9FOaaDC7YXG4hpwE2xmwCic/1srbuExVQC7zT9LJSJpDBAru+Vo9A=='
+          if(-not $lock.Contains($version) -or -not $lock.Contains($integrity)) { throw 'Candidate Playwright lock identity mismatch' }
+          $packDir=Join-Path $env:RUNNER_TEMP 'node24-playwright-package'
+          New-Item -ItemType Directory -Force -Path $packDir | Out-Null
+          $packed=@(npm pack "playwright-core@$version" --ignore-scripts --pack-destination $packDir --json)
+          if($LASTEXITCODE -ne 0) { throw 'Playwright package download failed' }
+          $metadata=($packed -join [Environment]::NewLine | ConvertFrom-Json)
+          $tarball=Join-Path $packDir $metadata[0].filename
+          $sha=(Get-FileHash -LiteralPath $tarball -Algorithm SHA512).Hash
+          $actualIntegrity='sha512-'+[Convert]::ToBase64String([Convert]::FromHexString($sha))
+          if($actualIntegrity -ne $integrity) { throw 'Playwright SHA512 does not match candidate lock' }
+          npm --prefix upstream install --offline --ignore-scripts --no-save --no-package-lock $tarball
+          if($LASTEXITCODE -ne 0) { throw 'Offline Playwright extraction failed' }
+          $installed=Get-Content -LiteralPath 'upstream/node_modules/playwright-core/package.json' -Raw | ConvertFrom-Json
+          if($installed.version -ne $version) { throw 'Installed Playwright version mismatch' }
+          node --check tools/node24_edge_host_probe.mjs
+          Write-Host 'NODE24_AND_PLAYWRIGHT_LOCK: PASS; exact candidate runtime and package verified.'
+
+      - name: Block outbound Edge networking in disposable Windows VM
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $candidates=@((Join-Path $env:ProgramFiles 'Microsoft\Edge\Application\msedge.exe'),(Join-Path ([Environment]::GetFolderPath('ProgramFilesX86')) 'Microsoft\Edge\Application\msedge.exe'))
+          $edge=@($candidates | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf })
+          if($edge.Count -ne 1) { throw 'Expected exactly one Edge installation' }
+          if((Get-AuthenticodeSignature -LiteralPath $edge[0]).Status -ne 'Valid') { throw 'Edge signature not valid' }
+          $rule=New-NetFirewallRule -DisplayName 'YuTangNode24EdgeOutboundBlock' -Direction Outbound -Program $edge[0] -Action Block -Profile Any -ErrorAction Stop
+          if($rule.Action -ne 'Block' -or $rule.Enabled -ne 'True') { throw 'Edge outbound block not confirmed' }
+          Write-Host 'EDGE_OUTBOUND_BLOCK: PASS; browser cannot contact Douyin or any remote account.'
+
+      - name: Compare direct Playwright launch with actual browser-host lifecycle
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $root=(Resolve-Path 'upstream').Path
+          $script=(Resolve-Path 'tools/node24_edge_host_probe.mjs').Path
+          $base=Join-Path $env:RUNNER_TEMP 'node24-edge-host-probe'
+          $directProfile=Join-Path $base 'direct-profile'
+          $directControl=Join-Path $base 'direct-control'
+          $hostProfile=Join-Path $base 'host-profile'
+          $hostControl=Join-Path $base 'host-control'
+          foreach($dir in @($directProfile,$directControl,$hostProfile,$hostControl)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
+          $node=(Get-Command node).Source
+
+          function Start-Probe($mode,$profile,$control,$port) {
+            $out=Join-Path $base "$mode.stdout.log"
+            $err=Join-Path $base "$mode.stderr.log"
+            $args=@('"'+$script+'"',$mode,'"'+$root+'"','"'+$profile+'"','"'+$control+'"',[string]$port)
+            $proc=Start-Process -FilePath $node -ArgumentList $args -PassThru -NoNewWindow -RedirectStandardOutput $out -RedirectStandardError $err
+            return @{Process=$proc;Out=$out;Err=$err;Profile=$profile;Control=$control;Mode=$mode}
+          }
+          function Stop-Probe($probe) {
+            try { & taskkill.exe /PID $probe.Process.Id /T /F 2>$null | Out-Null } catch {}
+          }
+          function Read-Log($file) {
+            if(Test-Path -LiteralPath $file) { return (Get-Content -LiteralPath $file -Raw -ErrorAction SilentlyContinue).Trim() }
+            return ''
+          }
+
+          $direct=Start-Probe 'direct' $directProfile $directControl 9331
+          $directDone=$direct.Process.WaitForExit(45000)
+          if(-not $directDone) { Stop-Probe $direct; $directStatus='TIMEOUT' }
+          else {
+            $directLog=Read-Log $direct.Out
+            $directStatus=if($directLog -match '"launch":"PASS"') {'PASS'} elseif($directLog -match '"launch":"FAIL"') {'FAIL'} else {'NO_REPORT'}
+          }
+          Write-Host "DIRECT_NODE24_STATUS=$directStatus"
+          Write-Host (Read-Log $direct.Out)
+          Write-Host (Read-Log $direct.Err)
+
+          $hostProbe=Start-Probe 'host' $hostProfile $hostControl 9227
+          $hostDeadline=[DateTime]::UtcNow.AddSeconds(65)
+          $hostStatus='TIMEOUT'
+          while([DateTime]::UtcNow -lt $hostDeadline) {
+            if($hostProbe.Process.HasExited) {
+              $log=Read-Log $hostProbe.Out
+              $hostStatus=if($log -match '"started":true') {'PASS'} elseif($log -match 'host-result|host-threw') {'FAIL'} else {'EXITED_NO_REPORT'}
+              break
+            }
+            $stateFile=Join-Path $hostControl 'browser.json'
+            if(Test-Path -LiteralPath $stateFile) {
+              try {
+                $state=Get-Content -LiteralPath $stateFile -Raw | ConvertFrom-Json
+                if($state.ready -eq $true) {
+                  try {
+                    $version=Invoke-RestMethod -Uri 'http://127.0.0.1:9227/json/version' -TimeoutSec 3
+                    if($version.Browser -match 'Edg|Chrome') { $hostStatus='PASS'; break }
+                  } catch {}
+                }
+                if($state.launchFailure) { $hostStatus='FAIL'; break }
+              } catch {}
+            }
+            Start-Sleep -Milliseconds 500
+          }
+          $hostLog=Read-Log $hostProbe.Out
+          $hostErr=Read-Log $hostProbe.Err
+          Write-Host "BROWSER_HOST_NODE24_STATUS=$hostStatus"
+          Write-Host $hostLog
+          Write-Host $hostErr
+          $hostStateFile=Join-Path $hostControl 'browser.json'
+          $hostPid=$null
+          if(Test-Path -LiteralPath $hostStateFile) {
+            try { $hostState=Get-Content -LiteralPath $hostStateFile -Raw | ConvertFrom-Json; $hostPid=$hostState.pid } catch {}
+            if($hostState) {
+              Write-Host ('BROWSER_HOST_STATE '+([ordered]@{pid=$hostState.pid;ready=$hostState.ready;port=$hostState.port;browserVersion=$hostState.browserVersion;failureCode=$hostState.launchFailure.code} | ConvertTo-Json -Compress))
+            }
+          }
+
+          $all=@(Get-CimInstance Win32_Process -Filter "Name = 'msedge.exe' OR Name = 'node.exe'" | Select-Object ProcessId,ParentProcessId,Name,CommandLine)
+          $listeners=@(Get-NetTCPConnection -LocalPort 9227 -State Listen -ErrorAction SilentlyContinue | Select-Object OwningProcess,LocalAddress)
+          $byPid=@{}; foreach($item in $all) { $byPid[[int]$item.ProcessId]=$item }
+          $desc=@()
+          if($hostPid) {
+            foreach($item in $all) {
+              $cursor=[int]$item.ProcessId;$seen=@{};$belongs=$false
+              for($i=0;$i -lt 40 -and $cursor -gt 0;$i++) {
+                if($cursor -eq [int]$hostPid) { $belongs=$true; break }
+                if($seen.ContainsKey($cursor) -or -not $byPid.ContainsKey($cursor)) { break }
+                $seen[$cursor]=$true;$cursor=[int]$byPid[$cursor].ParentProcessId
+              }
+              if($belongs) { $desc += $item }
+            }
+          }
+          $edgeDesc=@($desc | Where-Object { $_.Name -match '^msedge\.exe$' })
+          $summary=[ordered]@{
+            nodeVersion=(node --version).Trim()
+            directStatus=$directStatus
+            browserHostStatus=$hostStatus
+            hostPid=$hostPid
+            hostProcessPresent=[bool]($desc | Where-Object { [int]$_.ProcessId -eq [int]$hostPid })
+            edgeDescendantCount=$edgeDesc.Count
+            edgePortArgCount=@($edgeDesc | Where-Object { $_.CommandLine -match '--remote-debugging-port=9227' }).Count
+            edgeLoopbackArgCount=@($edgeDesc | Where-Object { $_.CommandLine -match '--remote-debugging-address=127\.0\.0\.1' }).Count
+            edgeNoSandboxArgCount=@($edgeDesc | Where-Object { $_.CommandLine -match '--no-sandbox|--disable-setuid-sandbox' }).Count
+            listeners=$listeners
+          }
+          Write-Host ('NODE24_EDGE_HOST_SUMMARY '+($summary | ConvertTo-Json -Compress -Depth 5))
+          Stop-Probe $hostProbe
+          Write-Host 'DIAGNOSTIC_ONLY: no real account, no model key, no Douyin network, no user PC.'
+
