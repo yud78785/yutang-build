@@ -6,7 +6,7 @@ import { openSync, closeSync } from 'node:fs';
 
 const [mode, upstreamRoot, profile, controlDir, portText] = process.argv.slice(2);
 const port = Number(portText || (mode === 'direct' ? 9331 : 9227));
-if (!['direct', 'host', 'spawn-host'].includes(mode) || !path.isAbsolute(upstreamRoot || '') || !path.isAbsolute(profile || '') || !path.isAbsolute(controlDir || '') || !Number.isInteger(port)) {
+if (!['direct', 'host', 'spawn-host-detached-filtered', 'spawn-host-attached-filtered', 'spawn-host-detached-nohide-filtered'].includes(mode) || !path.isAbsolute(upstreamRoot || '') || !path.isAbsolute(profile || '') || !path.isAbsolute(controlDir || '') || !Number.isInteger(port)) {
   throw new Error('Invalid isolated probe arguments');
 }
 const root = path.resolve(upstreamRoot);
@@ -187,16 +187,18 @@ if (mode === 'direct') {
   const logFile = path.join(controlDir, 'browser-host.log');
   const output = openSync(logFile, 'a');
   let child;
+  const detached = mode !== 'spawn-host-attached-filtered';
+  const windowsHide = mode !== 'spawn-host-detached-nohide-filtered';
   try {
     child = spawn(node, [path.join(root, 'browser-host-probe.mjs'), runtimePaths.browserProfileDir, runtimePaths.browserControlDir, String(port)], {
-      detached: true, windowsHide: true, stdio: ['ignore', output, output], env: childEnv, shell: false, cwd: root,
+      detached, windowsHide, stdio: ['ignore', output, output], env: childEnv, shell: false, cwd: root,
     });
   } finally { closeSync(output); }
   const hostPid = child.pid;
   child.unref();
   emit('spawn-host-child-started', {
     pid: hostPid, node: process.versions.node, port, browserHostSha256: hostSha256,
-    chromiumSandbox: true, envKeyCount: Object.keys(childEnv).length,
+    chromiumSandbox: true, detached, windowsHide, envKeyCount: Object.keys(childEnv).length,
     userProfile: Boolean(childEnv.USERPROFILE), homeDrive: Boolean(childEnv.HOMEDRIVE),
     localAppData: Boolean(childEnv.LOCALAPPDATA), systemRoot: Boolean(childEnv.SystemRoot),
   });
@@ -232,7 +234,7 @@ if (mode === 'direct') {
     browserVersion: String(browser?.Browser || '').slice(0, 100),
     failureCode: String(state?.launchFailure?.code || ''),
     failure: String(state?.launchFailure?.message || '').slice(0, 500),
-    chromiumSandbox: true, envKeyCount: Object.keys(childEnv).length, hostLogTail,
+    chromiumSandbox: true, detached, windowsHide, envKeyCount: Object.keys(childEnv).length, hostLogTail,
   });
   if (!ready) process.exitCode = 1;
 }
