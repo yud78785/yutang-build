@@ -489,6 +489,7 @@ async function main() {
     pass = pass && report.cleanupClean;
     if (hostPid && cleanup?.hostProcessExited !== true) await killTree(hostPid);
     await killProfileProcesses(profile);
+    await killProfileProcesses(path.join(control, 'direct-edge-control-profile'));
     report.backendStderrTail = redact(backend.stderr);
     report.browserHostLogTail = await tail(logFile);
     report.pass = pass;
