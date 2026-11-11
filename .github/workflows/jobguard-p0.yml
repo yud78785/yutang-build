@@ -31,6 +31,20 @@ jobs:
           if ($actual -ne $expected) { throw "Source archive SHA256 mismatch: $actual" }
           Expand-Archive -LiteralPath $src -DestinationPath jobguard-test -ErrorAction Stop
           if (-not (Test-Path jobguard-test/src/jobguard_windows.go)) { throw 'Windows source missing' }
+      - name: Print archived source context for PID marker timeout (diagnostic only)
+        working-directory: jobguard-test/src
+        shell: pwsh
+        run: |
+          Write-Host 'PINNED_SOURCE_DIAGNOSTIC_BEGIN'
+          Get-ChildItem -File -Name
+          foreach ($f in @('jobguard_windows_test.go', 'jobguard_windows.go', 'jobguard_test.go', 'jobguard.go')) {
+            if (Test-Path -LiteralPath $f) {
+              Write-Host "SOURCE_FILE: $f"
+              $n = 0
+              Get-Content -LiteralPath $f | ForEach-Object { $n++; '{0:D3}: {1}' -f $n, $_ }
+            }
+          }
+          Write-Host 'PINNED_SOURCE_DIAGNOSTIC_END'
       - name: Execute real Win32 process-tree crash regression (three runs)
         working-directory: jobguard-test/src
         shell: pwsh
