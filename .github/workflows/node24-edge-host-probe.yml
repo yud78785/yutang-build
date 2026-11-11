@@ -280,6 +280,11 @@ jobs:
               & taskkill.exe /F /IM msedge.exe /T 2>$null | Out-Null
               Start-Sleep -Seconds 2
             }
+            $hostStillAlive=$false
+            if($hostPid) { $hostStillAlive=[bool](Get-Process -Id $hostPid -ErrorAction SilentlyContinue) }
+            $leftovers=@(Get-Process -Name msedge -ErrorAction SilentlyContinue)
+            Write-Host "SPAWN_VARIANT_CLEANUP mode=$mode; hostStillAlive=$hostStillAlive; edgeProcessesLeft=$($leftovers.Count)"
+            if($hostStillAlive -or $leftovers.Count -gt 0) { throw "Process cleanup failed for $mode." }
             return $status
           }
 
@@ -289,5 +294,10 @@ jobs:
           Write-Host "DETACHED_FILTERED=$candidateSpawnStatus; ATTACHED_FILTERED=$attachedSpawnStatus; DETACHED_NOHIDE_FILTERED=$noHideSpawnStatus"
           if($candidateSpawnStatus -ne 'PASS') { throw 'Exact candidate detached+hidden launch did not reach ready; inspect comparison variants above.' }
           Write-Host 'PASS: exact candidate detached+hidden filtered environment reached browser-ready.'
+          $finalEdge=@(Get-Process -Name msedge -ErrorAction SilentlyContinue)
+          if($finalEdge.Count -gt 0) { throw 'One or more Edge processes remained after the final cleanup.' }
+          Write-Host 'PASS: no Edge process remains after all launch variants.'
           Write-Host 'DIAGNOSTIC_ONLY: no real account, no model key, no Douyin network, no user PC.'
+          $global:LASTEXITCODE=0
+          exit 0
 
