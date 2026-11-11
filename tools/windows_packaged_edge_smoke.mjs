@@ -242,7 +242,9 @@ export async function inspectRendererSandbox(port = PORT) {
           actualUrl: String(snapshot?.href || ''),
           title: String(snapshot?.title || '').slice(0, 160),
           readyState: String(snapshot?.ready || ''),
-          text: String(snapshot?.text || '').slice(0, 5000)
+          textLength: String(snapshot?.text || '').length,
+          mentionsRenderer: /renderer/i.test(String(snapshot?.text || '')),
+          mentionsSandbox: /sandbox/i.test(String(snapshot?.text || ''))
         });
         if (targetId) {
           try { await cdpCommand(socket, nextId++, 'Target.closeTarget', { targetId }); } catch {}
@@ -250,17 +252,31 @@ export async function inspectRendererSandbox(port = PORT) {
         }
         if (snapshot?.text?.trim().length > 20) {
           const text = String(snapshot.text);
-          const normalized = text.toLowerCase();
+          const rows = text.split(/\r?\n/).map(line => line.split('\t'));
+          const rendererRows = rows.filter(columns => columns[1] === 'Renderer');
+          const rendererAppContainerEnabled = /\"enabled\"\s*:\s*true,\s*\"name\"\s*:\s*\"RendererAppContainer\"/.test(text);
+          const networkServiceSandboxEnabled = /\"enabled\"\s*:\s*true,\s*\"name\"\s*:\s*\"NetworkServiceSandbox\"/.test(text);
+          const networkServiceRow = rows.find(columns => columns[1] === 'Utility' && columns[2] === 'Network Service');
+          const rendererRowsVerified = rendererRows.length > 0 && rendererRows.every(columns =>
+            columns[3] === 'Renderer' && columns[4] === 'Lockdown' && /Untrusted/.test(columns[5] || '') && /^S-1-15-2-/.test(columns[8] || ''));
+          const rendererSandboxVerified = rendererRowsVerified && rendererAppContainerEnabled;
           return {
             accessible: true,
             requestedUrl: url,
             actualUrl: String(snapshot.href || ''),
             title: String(snapshot.title || '').slice(0, 160),
-            textSample: text.slice(0, 5000),
-            mentionsRenderer: /renderer/i.test(text),
+            textSample: text.slice(0, 1800),
+            mentionsRenderer: rendererRows.length > 0,
             mentionsSandbox: /sandbox/i.test(text),
-            explicitSandboxPositive: /sandbox.{0,80}(enabled|active|on|yes|sandboxed)/i.test(text),
-            explicitSandboxNegative: /sandbox.{0,80}(disabled|off|not enabled|not sandboxed)/i.test(text),
+            rendererProcessCount: rendererRows.length,
+            rendererAppContainerEnabled,
+            rendererRowsVerified,
+            rendererSandboxVerified,
+            rendererRows: rendererRows.map(columns => ({ sandbox:columns[3], lockdown:columns[4], integrity:columns[5], lowboxAppContainer:Boolean(/^S-1-15-2-/.test(columns[8] || '')) })),
+            networkServiceSandboxEnabled,
+            networkServiceReportedNotSandboxed: networkServiceRow?.[3] === 'Not Sandboxed',
+            explicitSandboxPositive: rendererSandboxVerified,
+            explicitSandboxNegative: false,
             attempts
           };
         }
@@ -434,6 +450,7 @@ async function run(exeFile) {
     const initialCheck=await inspectReadyBrowser(state,ready.backendPid,profile,controlDir);
     try {
       report.rendererSandbox = await inspectRendererSandbox(PORT);
+      assert.equal(report.rendererSandbox.rendererSandboxVerified, true, 'Edge internal sandbox page did not prove renderer AppContainer/Lockdown/Untrusted integrity.');
       console.log('RENDERER_SANDBOX_DIAGNOSTIC '+JSON.stringify(report.rendererSandbox));
     } catch (error) {
       report.rendererSandbox = { accessible:false, error:safeText(error?.message || error, redactionPaths) };
@@ -503,7 +520,7 @@ async function run(exeFile) {
     report.unrelatedEdgeIsolation={separateProfile:true,separatePort:9231,remainedAliveDuringCandidateCloseAndRestart:true,finalCloseViaCdp:unrelatedClose.closed===true,finalCleanupVerified:unrelatedClean.clean===true};
     report.lifecycle=lifecycle;
     report.cleanupVerified=true;
-    report.notProven=['Effective renderer sandbox integrity','Douyin video playback (outbound blocked by design)','Model reasoning','Long-term autonomy','General user PC safety'];
+    report.notProven=[...(report.rendererSandbox?.rendererSandboxVerified?[]:['Effective renderer sandbox integrity']),...(report.rendererSandbox?.networkServiceSandboxEnabled?[]:['Network Service sandbox (Edge reports disabled)']),'Douyin video playback (outbound blocked by design)','Model reasoning','Long-term autonomy','General user PC safety'];
     console.log('PASS_WINDOWS_PACKAGED_EXE_RESTART_AND_CLEANUP '+JSON.stringify(report));
     return report;
   } catch (error) {
