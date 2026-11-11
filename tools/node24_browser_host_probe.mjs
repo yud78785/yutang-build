@@ -249,6 +249,7 @@ async function main() {
       await Promise.race([new Promise(resolve => hostChild.once('exit', resolve)), delay(3000)]);
     }
     let survivors = [];
+    let remaining = [];
     try {
       const rows = powershellJson("Get-CimInstance Win32_Process -Filter \"Name = 'msedge.exe' OR Name = 'node.exe'\" | Select-Object ProcessId,Name,CommandLine | ConvertTo-Json -Compress -Depth 3");
       const tracked = [profileDir, rawProfileDir].filter(Boolean).map(value => value.toLowerCase());
@@ -260,16 +261,17 @@ async function main() {
       for (const item of survivors) {
         try { execFileSync('taskkill.exe', ['/PID', String(item.ProcessId), '/T', '/F'], { stdio: 'ignore', windowsHide: true, timeout: 10000 }); } catch {}
       }
+      remaining = survivors;
       if (survivors.length) {
         await delay(1000);
         const after = powershellJson("Get-CimInstance Win32_Process -Filter \"Name = 'msedge.exe' OR Name = 'node.exe'\" | Select-Object ProcessId,Name,CommandLine | ConvertTo-Json -Compress -Depth 3");
-        const stillAlive = after.filter(item => {
+        remaining = after.filter(item => {
           const name = String(item.Name || '').toLowerCase();
           const command = String(item.CommandLine || '').toLowerCase();
           return (name === 'msedge.exe' || name === 'node.exe') && tracked.some(value => command.includes(value));
         });
-        if (stillAlive.length) {
-          console.error('YUTANG_PROCESS_CLEANUP_FAILED ' + JSON.stringify(stillAlive.map(item => ({ pid: item.ProcessId, name: item.Name }))));
+        if (remaining.length) {
+          console.error('YUTANG_PROCESS_CLEANUP_FAILED ' + JSON.stringify(remaining.map(item => ({ pid: item.ProcessId, name: item.Name }))));
           process.exitCode = 1;
         }
       }
@@ -277,7 +279,7 @@ async function main() {
       console.error('YUTANG_PROCESS_CLEANUP_UNVERIFIED');
       process.exitCode = 1;
     }
-    if (commonDir && survivors.length === 0) await fsp.rm(commonDir, { recursive: true, force: true }).catch(() => {});
+    if (commonDir && remaining.length === 0) await fsp.rm(commonDir, { recursive: true, force: true }).catch(() => {});
     await fsp.rm(base, { recursive: true, force: true }).catch(() => {});
   }
 }
