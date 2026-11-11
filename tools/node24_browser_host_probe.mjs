@@ -87,7 +87,8 @@ function processSummary(processes, hostPid, profile, port, listeners) {
     edgeWithProfile: edge.filter(item => String(item.CommandLine || '').toLowerCase().includes(profile.toLowerCase())).length,
     edgeWithPortArg: edge.filter(item => String(item.CommandLine || '').includes('--remote-debugging-port=' + port)).length,
     edgeWithLoopbackArg: edge.filter(item => /--remote-debugging-address=127\.0\.0\.1/i.test(String(item.CommandLine || ''))).length,
-    edgeWithNoSandbox: edge.filter(item => /--no-sandbox|--disable-setuid-sandbox/i.test(String(item.CommandLine || ''))).length,\n    edgeWithNetworkSandboxArg: edge.filter(item => /--enable-features=[^\\s\"]*NetworkServiceSandbox/i.test(String(item.CommandLine || ''))).length,
+    edgeWithNoSandbox: edge.filter(item => /--no-sandbox|--disable-setuid-sandbox/i.test(String(item.CommandLine || ''))).length,
+    edgeWithNetworkSandboxArg: edge.filter(item => String(item.CommandLine || '').includes('--enable-features=NetworkServiceSandbox')).length,
     listenerCount: listeners.length,
     listenerOwnersAreEdgeDescendants: listenerRows.length > 0 && listenerRows.every(item => item.ownerIsEdgeDescendant),
     listenersLoopbackOnly: listenerRows.length > 0 && listenerRows.every(item => item.loopback)
