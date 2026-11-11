@@ -73,6 +73,21 @@ jobs:
           node tools/windows_isolated_candidate_edge_smoke.mjs '${{ steps.source.outputs.exe }}' --force-desktop
           if ($LASTEXITCODE -ne 0) { throw 'INTEGRATED desktop-main forced-termination regression failed. NOT RELEASE.' }
 
+      - name: Repeat bounded cold starts across two fresh candidate profiles
+        shell: pwsh
+        timeout-minutes: 25
+        env:
+          YUTANG_EDGE_FIREWALL_CONFIRMED: 'yes'
+          YUTANG_EXPECTED_CANDIDATE_SHA256: ${{ steps.source.outputs.exe_sha }}
+        run: |
+          $ErrorActionPreference='Stop'
+          for ($round=1; $round -le 2; $round++) {
+            Write-Host "COLD_START_STRESS_ROUND $round of 2 (8 starts per round, no outbound Edge network)"
+            node tools/windows_isolated_candidate_edge_smoke.mjs '${{ steps.source.outputs.exe }}' --stress-restarts=7
+            if ($LASTEXITCODE -ne 0) { throw "Cold-start stress regression failed in round $round. CANDIDATE NOT RELEASE." }
+          }
+          Write-Host 'COLD_START_STRESS_VERIFIED: 16 launches, 14 restarts, two independent candidate profiles, all owned processes cleaned.'
+
       - name: Preserve release block
         if: always()
         shell: pwsh
