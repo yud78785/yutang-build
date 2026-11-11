@@ -145,7 +145,7 @@ async function instrumentRuntime() {
   let core = originalCore.replace("import { spawn } from 'node:child_process';", "import { spawn, execFileSync } from 'node:child_process';");
   if (core === originalCore) throw new Error('Core child-process import anchor mismatch.');
   const launcherAnchor = "        this.browserLauncher ??= new BrowserLauncher({";
-  const launcherReplacement = "        this.browserLauncher ??= new BrowserLauncher({\\n          homeUrl: process.env.DOUYIN_TEST_HOME_URL || undefined,";
+  const launcherReplacement = "        this.browserLauncher ??= new BrowserLauncher({ homeUrl: process.env.DOUYIN_TEST_HOME_URL || undefined,";
   if (core.split(launcherAnchor).length !== 2) throw new Error('BrowserLauncher diagnostic home URL anchor mismatch.');
   core = core.replace(launcherAnchor, launcherReplacement);
   const beforeSpawn = "        const child = spawn(resolveNodeExecutable(), [";
