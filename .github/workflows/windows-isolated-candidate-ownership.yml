@@ -90,5 +90,5 @@ jobs:
         shell: pwsh
         run: |
           Write-Host 'CANDIDATE_ONLY: no real user Windows machine, Douyin account, API key, posting, or external Edge network.'
-          Write-Host 'Network Service sandbox type Network must be verified separately from actual Windows native token/AppContainer restriction.'
+          Write-Host 'SANDBOX_GATE: verify Renderer Lockdown/Untrusted/AppContainer plus Network Service sandbox type, live AppContainer SID and dedicated process lineage.'
           Write-Host 'NO_RELEASE: real Douyin public video, actual content understanding, model autonomy, and cross-machine stability are not proven.'
