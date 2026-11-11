@@ -121,10 +121,6 @@ func runGuard() error {
 	if _, err := fmt.Fprintf(os.Stdout, "READY %d\n", ownerPID); err != nil {
 		return fmt.Errorf("write readiness handshake: %w", err)
 	}
-	if err := os.Stdout.Sync(); err != nil {
-		return fmt.Errorf("flush readiness handshake: %w", err)
-	}
-
 	state, _, callErr = procWaitForSingleObject.Call(owner, infinite)
 	if state != waitObject0 {
 		if state == waitFailed {
