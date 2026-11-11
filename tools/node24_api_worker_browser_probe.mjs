@@ -17,6 +17,7 @@ if (!path.isAbsolute(runtime) || !process.env.GITHUB_ACTIONS || process.platform
 assert.equal(process.versions.node, '24.17.0', 'Exact candidate Node runtime required.');
 const require = createRequire(path.join(runtime, 'probe-require.cjs'));
 const playwrightPackage = require('playwright-core/package.json');
+const { chromium } = require('playwright-core');
 assert.equal(playwrightPackage.version, '1.64.0-alpha-1790635538000', 'Pinned Playwright package required.');
 const EXPECTED_HOST_SHA256 = '5716a705e19663f1f6faed52569508b72cf091d3a31766828a7a5434a6eca1bc';
 const hostPath = path.join(runtime, 'browser-host.mjs');
@@ -55,6 +56,52 @@ async function waitForCdp(port, timeoutMs = 3000) {
   }
   return null;
 }
+async function closeEdgeViaCdp(port) {
+  const browser = await chromium.connectOverCDP('http://127.0.0.1:' + Number(port), { timeout: 10000, noDefaults: true });
+  let session = null;
+  try {
+    session = await browser.newBrowserCDPSession();
+    await session.send('Browser.close').catch(() => {});
+  } finally {
+    await session?.detach().catch(() => {});
+    await browser.close().catch(() => {});
+  }
+}
+async function browserSnapshot(profile, port, hostPid) {
+  const processes = powershellJson("Get-CimInstance Win32_Process -Filter \"Name = 'msedge.exe' OR Name = 'node.exe'\" | Select-Object ProcessId,ParentProcessId,Name,CommandLine | ConvertTo-Json -Compress -Depth 4");
+  const netstat = execFileSync('netstat.exe', ['-ano', '-p', 'tcp'], { encoding: 'utf8', windowsHide: true, timeout: 10000 });
+  const listeners = netstat.split(/\r?\n/).flatMap(line => {
+    const match = /^\s*TCP\s+(\S+):9227\s+\S+\s+LISTENING\s+(\d+)\s*$/i.exec(line);
+    return match ? [{ LocalAddress: match[1], OwningProcess: Number(match[2]) }] : [];
+  });
+  const edgeProcesses = processes.filter(item => String(item.Name || '').toLowerCase() === 'msedge.exe');
+  const profileEdges = edgeProcesses.filter(item => String(item.CommandLine || '').toLowerCase().includes(profile.toLowerCase()));
+  return {
+    processes, listeners, edgeProcesses, profileEdges,
+    hostAlive: processes.some(item => Number(item.ProcessId) === Number(hostPid))
+  };
+}
+async function waitForBrowserClosed(profile, port, hostPid, timeoutMs = 15000) {
+  const deadline = Date.now() + timeoutMs;
+  let last = null;
+  while (Date.now() < deadline) {
+    last = await browserSnapshot(profile, port, hostPid);
+    if (!last.hostAlive && last.edgeProcesses.length === 0 && last.profileEdges.length === 0 && last.listeners.length === 0) return last;
+    await delay(250);
+  }
+  throw new Error('Graceful Edge close did not release the host, Edge process tree, and CDP listener.');
+}
+async function waitForNewHost(stateFile, previousPid, timeoutMs = 35000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const state = await readJson(stateFile);
+    if (state?.launchFailure) throw new Error('New browser host reported ' + String(state.launchFailure.code || 'unknown failure'));
+    if (state?.ready === true && Number.isSafeInteger(state.pid) && Number(state.pid) !== Number(previousPid)) return state;
+    await delay(250);
+  }
+  throw new Error('A new browser host PID did not become ready after Edge closed.');
+}
+
 function hasAncestor(pid, ancestorPid, processes) {
   const byPid = new Map(processes.map(item => [Number(item.ProcessId), item]));
   const seen = new Set();
@@ -166,8 +213,7 @@ async function instrumentRuntime() {
   await fs.writeFile(apiWorkerPath, worker);
 
   const originalCore = await fs.readFile(corePath, 'utf8');
-  let core = originalCore.replace("import { spawn } from 'node:child_process';", "import { spawn, execFileSync } from 'node:child_process';");
-  if (core === originalCore) throw new Error('Core child-process import anchor mismatch.');
+  let core = originalCore;
   const launcherAnchor = "        this.browserLauncher ??= new BrowserLauncher({";
   const launcherReplacement = "        this.browserLauncher ??= new BrowserLauncher({ homeUrl: process.env.DOUYIN_TEST_HOME_URL || undefined,";
   if (core.split(launcherAnchor).length !== 2) throw new Error('BrowserLauncher diagnostic home URL anchor mismatch.');
@@ -175,26 +221,6 @@ async function instrumentRuntime() {
   const beforeSpawn = "        const child = spawn(resolveNodeExecutable(), [";
   const afterSpawn = [
     "        console.error('CORE_PROBE:api_worker_env ' + JSON.stringify({hasNodeChannelFd:Object.hasOwn(process.env,'NODE_CHANNEL_FD'),hasNodeChannelSerializationMode:Object.hasOwn(process.env,'NODE_CHANNEL_SERIALIZATION_MODE'),hasNodeUniqueId:Object.hasOwn(process.env,'NODE_UNIQUE_ID'),processConnected:process.connected===true,hasProcessSend:typeof process.send==='function',hasNodeOptions:Boolean(process.env.NODE_OPTIONS),hasNodePath:Boolean(process.env.NODE_PATH),hasElectronRunAsNode:Boolean(process.env.ELECTRON_RUN_AS_NODE),cwdName:path.basename(process.cwd()),nodeVersion:process.versions.node}));",
-    "        const directProfile = path.join(CONTROL, 'direct-edge-control-profile');",
-    "        mkdirSync(directProfile, { recursive: true });",
-    "        const edgeRoots = [process.env.LOCALAPPDATA, process.env.PROGRAMFILES, process.env['PROGRAMFILES(X86)'], process.env.ProgramW6432].filter(Boolean);",
-    "        const edgeExecutable = edgeRoots.map(root => path.join(root, 'Microsoft', 'Edge', 'Application', 'msedge.exe')).find(file => { try { return statSync(file).isFile(); } catch { return false; } });",
-    "        const directControl = { executableFound: Boolean(edgeExecutable), launched: false, cdp: false, browser: '', edgeProcessCountAfterCleanup: null, port9340ListenerCountAfterCleanup: null };",
-    "        if (edgeExecutable) {",
-    "          const directEdge = spawn(edgeExecutable, ['--remote-debugging-port=9340', '--remote-debugging-address=127.0.0.1', '--user-data-dir=' + directProfile, '--no-first-run', '--no-default-browser-check', 'about:blank'], { env: process.env, detached: true, windowsHide: true, stdio: 'ignore' });",
-    "          directEdge.unref();",
-    "          directControl.launched = Number.isSafeInteger(directEdge.pid) && directEdge.pid > 0;",
-    "          const directDeadline = Date.now() + 12000;",
-    "          while (Date.now() < directDeadline) {",
-    "            try { const response = await fetch('http://127.0.0.1:9340/json/version', { signal: AbortSignal.timeout(1000) }); if (response.ok) { const value = await response.json(); if (/Edg|Chrome/.test(String(value.Browser))) { directControl.cdp = true; directControl.browser = String(value.Browser).slice(0, 100); break; } } } catch {}",
-    "            await delay(250);",
-    "          }",
-    "          try { execFileSync('taskkill.exe', ['/PID', String(directEdge.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true, timeout: 10000 }); } catch {}",
-    "          await delay(700);",
-    "          try { directControl.edgeProcessCountAfterCleanup = Number(execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', 'Get-Process -Name msedge -ErrorAction SilentlyContinue | Measure-Object | Select-Object -ExpandProperty Count'], { encoding: 'utf8', windowsHide: true, timeout: 10000 }).trim() || 0); } catch {}",
-    "          try { directControl.port9340ListenerCountAfterCleanup = Number(execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', 'Get-NetTCPConnection -LocalPort 9340 -State Listen -ErrorAction SilentlyContinue | Measure-Object | Select-Object -ExpandProperty Count'], { encoding: 'utf8', windowsHide: true, timeout: 10000 }).trim() || 0); } catch {}",
-    "        }",
-    "        console.error('CORE_PROBE:direct_edge_control ' + JSON.stringify(directControl));",
     "        console.error('CORE_PROBE:before_node_resolve');",
     "        const resolvedNode = resolveNodeExecutable();",
     "        console.error('CORE_PROBE:after_node_resolve');",
@@ -305,6 +331,10 @@ async function main() {
     edgeOutboundBlocked: true,
     backendStarted: false,
     backendRestart: null,
+    firstBackendExit: null,
+    finalBackendExit: null,
+    gracefulCloseCycles: [],
+    finalBrowserPid: null,
     browserOpenStatus: null,
     browserOpenBody: null,
     browserOpenResult: null,
@@ -401,6 +431,7 @@ async function main() {
     const firstHostPid = hostPid;
     const firstBrowserPid = report.processOwnership?.edgeLaunchSummaries?.[0]?.pid || null;
     try { await backend.stop(); } catch (error) { report.firstBackendStopError = redact(error?.message || error); }
+    report.firstBackendExit = { code: backend.exitCode, signal: backend.exitSignal, stderrTail: redact(backend.stderr), clean: backend.exitCode === 0 && !backend.exitSignal && !/UV_HANDLE_CLOSING/.test(backend.stderr) };
     report.firstBackendStderrTail = redact(backend.stderr);
     await delay(750);
 
@@ -456,14 +487,77 @@ async function main() {
     hostPid = restartHostPid || firstHostPid;
     report.firstBrowserPid = firstBrowserPid;
     report.backendRestarted = report.backendRestart.backendStarted &&
-      report.backendRestart.browserOpenStatus === 200 && report.backendRestart.opened &&
-      report.backendRestart.mode === 'prepare' && report.backendRestart.paused &&
+      report.backendRestart.browserOpenStatus === 200 && report.backendRestart.opened && report.backendRestart.reused === true &&
+      report.backendRestart.mode === 'prepare' && report.backendRestart.paused && report.backendRestart.reusedSameHost === true &&
+      report.backendRestart.browserPid === firstBrowserPid &&
       report.backendRestart.hostReady && report.backendRestart.cdp &&
       report.backendRestart.browserHostProcessCount === 1 &&
       report.backendRestart.edgeDescendantCount > 0 &&
       report.backendRestart.listenerOwnedByEdge && report.backendRestart.listenerLoopbackOnly &&
       report.backendRestart.pageTargetCount === 1 && report.backendRestart.localFixturePageCount === 1;
 
+    try {
+      const firstHostPid = hostPid;
+      await closeEdgeViaCdp(9227);
+      const firstClose = await waitForBrowserClosed(profile, 9227, firstHostPid, 15000);
+      report.gracefulCloseCycles.push({
+        phase: 'close-edge-after-api-restart',
+        hostExited: !firstClose.hostAlive,
+        edgeProcessCount: firstClose.edgeProcesses.length,
+        profileEdgeProcessCount: firstClose.profileEdges.length,
+        listenerCount: firstClose.listeners.length,
+        passed: true
+      });
+
+      const thirdOpenResponse = await fetch(backend.origin + '/api/browser/open', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-session-token': bootstrap2.token },
+        body: '{}',
+        signal: AbortSignal.timeout(20000)
+      });
+      const thirdOpenBody = await thirdOpenResponse.json().catch(() => ({}));
+      const thirdState = await waitForNewHost(stateFile, firstHostPid, 35000);
+      hostPid = Number(thirdState.pid);
+      const thirdVersion = await waitForCdp(9227, 5000);
+      const thirdTargetsResponse = await fetch('http://127.0.0.1:9227/json/list', { signal: AbortSignal.timeout(3000) });
+      const thirdTargets = thirdTargetsResponse.ok ? await thirdTargetsResponse.json() : [];
+      const thirdPages = thirdTargets.filter(item => item.type === 'page');
+      const thirdSnapshot = await browserSnapshot(profile, 9227, hostPid);
+      const thirdOwnership = inspectOwnership(thirdSnapshot.processes, hostPid, backend.child?.pid, profile, thirdSnapshot.listeners);
+      const thirdBrowserPid = thirdOwnership.edgeLaunchSummaries?.[0]?.pid || null;
+      report.finalBrowserPid = thirdBrowserPid;
+      const relaunched = thirdOpenResponse.status === 200 && thirdOpenBody.opened === true &&
+        thirdOpenBody.mode === 'prepare' && thirdOpenBody.paused === true &&
+        thirdState.ready === true && Number(thirdState.pid) !== Number(firstHostPid) &&
+        Boolean(thirdVersion) && thirdPages.length === 1 && thirdPages[0].url === fixtureUrl &&
+        thirdOwnership.hostFound && thirdOwnership.hostParentIsApiWorker &&
+        thirdOwnership.edgeDescendantCount > 0 && thirdOwnership.listenerOwnersAreEdgeDescendants &&
+        thirdOwnership.listenersLoopbackOnly && thirdOwnership.edgeNoSandboxArgCount === 0;
+      report.gracefulCloseCycles.push({
+        phase: 'relaunch-after-graceful-close',
+        httpStatus: thirdOpenResponse.status,
+        oldHostPid: firstHostPid,
+        newHostPid: thirdState.pid,
+        newBrowserPid: thirdBrowserPid,
+        pageTargetCount: thirdPages.length,
+        passed: relaunched
+      });
+      if (!relaunched) throw new Error('New Edge host did not launch cleanly after graceful browser close.');
+
+      await closeEdgeViaCdp(9227);
+      const secondClose = await waitForBrowserClosed(profile, 9227, hostPid, 15000);
+      report.gracefulCloseCycles.push({
+        phase: 'second-graceful-close',
+        hostExited: !secondClose.hostAlive,
+        edgeProcessCount: secondClose.edgeProcesses.length,
+        profileEdgeProcessCount: secondClose.profileEdges.length,
+        listenerCount: secondClose.listeners.length,
+        passed: true
+      });
+    } catch (error) {
+      report.gracefulCloseError = redact(error?.message || error);
+      pass = false;
+    }
     report.backendStderrTail = redact(backend.stderr);
     report.browserHostLogTail = await tail(logFile);
     report.hostPid = hostPid;
@@ -480,7 +574,8 @@ async function main() {
   } finally {
     if (openAbort && !openAbort.signal.aborted) openAbort.abort(new Error('Diagnostic cleanup.'));
     try { await backend.stop(); } catch (error) { report.backendStopError = redact(error?.message || error); }
-    const browserPidToClose = Number(report.backendRestart?.browserPid || report.firstBrowserPid || 0);
+    report.finalBackendExit = { code: backend.exitCode, signal: backend.exitSignal, stderrTail: redact(backend.stderr), clean: backend.exitCode === 0 && !backend.exitSignal && !/UV_HANDLE_CLOSING/.test(backend.stderr) };
+    const browserPidToClose = Number(report.finalBrowserPid || report.backendRestart?.browserPid || report.firstBrowserPid || 0);
     if (browserPidToClose > 0) await killTree(browserPidToClose);
     report.dedicatedEdgeCloseIssued = browserPidToClose > 0;
     let cleanup = null;
@@ -498,7 +593,7 @@ async function main() {
         listenerSnapshotVerified = true;
       } catch {}
       const hostStillAlive = processes.some(item => Number(item.ProcessId) === Number(hostPid));
-      const edgeProcesses = processes.filter(item => /msedge\\.exe$/i.test(String(item.Name)));
+      const edgeProcesses = processes.filter(item => String(item.Name || '').toLowerCase() === 'msedge.exe');
       const profileEdges = edgeProcesses.filter(item => String(item.CommandLine || '').toLowerCase().includes(profile.toLowerCase()));
       const listenerDetails = listeners.map(item => { const owner = processes.find(proc => Number(proc.ProcessId) === Number(item.OwningProcess)); return { pid:Number(item.OwningProcess), localAddress:String(item.LocalAddress), ownerName:String(owner?.Name || ''), ownerIsHost:Number(item.OwningProcess) === Number(hostPid), ownerHasProfile:String(owner?.CommandLine || '').toLowerCase().includes(profile.toLowerCase()) }; });
       cleanup = { processSnapshotVerified, listenerSnapshotVerified, hostProcessExited: hostPid ? !hostStillAlive : null, edgeProcessCount: edgeProcesses.length, profileEdgeProcessCount: profileEdges.length, port9227ListenerCount: listeners.length, listenerDetails };
@@ -506,11 +601,10 @@ async function main() {
       await delay(250);
     }
     report.cleanup = cleanup;
-    report.cleanupClean = !report.backendStopError && cleanup?.processSnapshotVerified === true && cleanup?.listenerSnapshotVerified === true && report.dedicatedEdgeCloseIssued && cleanup?.hostProcessExited === true && cleanup.edgeProcessCount === 0 && cleanup.profileEdgeProcessCount === 0 && cleanup.port9227ListenerCount === 0;
-    pass = pass && report.cleanupClean;
+    report.cleanupClean = !report.backendStopError && report.firstBackendExit?.clean === true && report.finalBackendExit?.clean === true && report.gracefulCloseError === undefined && cleanup?.processSnapshotVerified === true && cleanup?.listenerSnapshotVerified === true && report.dedicatedEdgeCloseIssued && cleanup?.hostProcessExited === true && cleanup.edgeProcessCount === 0 && cleanup.profileEdgeProcessCount === 0 && cleanup.port9227ListenerCount === 0;
+    pass = pass && report.cleanupClean && report.gracefulCloseCycles.length === 3 && report.gracefulCloseCycles.every(item => item.passed === true);
     if (hostPid && cleanup?.hostProcessExited !== true) await killTree(hostPid);
     await killProfileProcesses(profile);
-    await killProfileProcesses(path.join(control, 'direct-edge-control-profile'));
     report.backendStderrTail = redact(backend.stderr);
     report.browserHostLogTail = await tail(logFile);
     report.pass = pass;
