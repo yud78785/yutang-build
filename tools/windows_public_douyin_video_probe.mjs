@@ -761,6 +761,42 @@ async function run(exeFile) {
             publicVideoProbe.modelInputPayloadVerified=true;
             publicVideoProbe.modelInferencePerformed=false;
             publicVideoProbe.modelInput=modelInputReport;
+
+            // Test only the production audio extraction primitive. Never persist, upload or transcribe audio here.
+            let audioCapture={outcome:'not_attempted'};
+            try{
+              const capturedAudio=await verificationController.captureAudio(1.5,AbortSignal.timeout(12000));
+              if(typeof capturedAudio?.data!=='string'||!/^[A-Za-z0-9+/]+={0,2}$/.test(capturedAudio.data)||capturedAudio.data.length%4!==0)throw new Error('Audio capture returned invalid Base64.');
+              const audioBytes=Buffer.from(capturedAudio.data,'base64');
+              if(!audioBytes.length||audioBytes.length>2_000_000)throw new Error('Audio capture size outside the bounded 2 MB limit.');
+              if(!['audio/webm;codecs=opus','audio/webm'].includes(capturedAudio.mimeType))throw new Error('Audio capture returned an unsupported MIME type.');
+              if(capturedAudio.videoId!==PUBLIC_VIDEO_ID)throw new Error('Audio capture video identity mismatch.');
+              if(!Number.isFinite(capturedAudio.beforeTime)||!Number.isFinite(capturedAudio.afterTime)||capturedAudio.afterTime<=capturedAudio.beforeTime)throw new Error('Audio capture did not advance the verified video.');
+              audioCapture={
+                outcome:'PASS_PUBLIC_VIDEO_AUDIO_CAPTURE',
+                videoIdMatch:true,
+                mimeType:capturedAudio.mimeType,
+                bytes:audioBytes.length,
+                seconds:capturedAudio.seconds,
+                beforeTime:capturedAudio.beforeTime,
+                afterTime:capturedAudio.afterTime,
+                sha256:createHash('sha256').update(audioBytes).digest('hex'),
+                audioPersisted:false,
+                audioUploaded:false,
+                transcriptionPerformed:false
+              };
+            }catch(error){
+              const message=String(error?.message||'');
+              audioCapture={
+                outcome:/没有向浏览器暴露可采集音轨|no audio track/i.test(message)?'NO_AUDIO_TRACK_EXPOSED':'AUDIO_CAPTURE_UNAVAILABLE',
+                errorName:String(error?.name||'Error').slice(0,80),
+                errorCode:typeof error?.code==='string'?error.code.slice(0,80):null,
+                audioPersisted:false,
+                audioUploaded:false,
+                transcriptionPerformed:false
+              };
+            }
+            publicVideoProbe.audioCapture=audioCapture;
             publicVideoProbe.outcome='PASS_PUBLIC_VIDEO_CORE_CAPTURE_AND_MODEL_INPUT_PACKING';
             publicVideoProbe.proofValid=true;
             report.videoPlaybackTested=true;
