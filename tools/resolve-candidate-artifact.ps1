@@ -79,3 +79,6 @@ if ($exeSha -cne $manifestExe.Groups[1].Value) { throw 'Candidate EXE bytes diff
 "artifact_id=$($artifact.id)" | Out-File -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 "build_run_id=$($buildRun.id)" | Out-File -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 Write-Host "CANDIDATE_BUILD_IDENTITY_PASS: headSha=$targetSha buildRunId=$($buildRun.id) artifactId=$($artifact.id) exeSha=$exeSha"
+# PowerShell cmdlets do not define LASTEXITCODE. A fresh pwsh step can leave it $null,
+# which a caller would wrongly interpret as non-zero after successful verification.
+$global:LASTEXITCODE=0
