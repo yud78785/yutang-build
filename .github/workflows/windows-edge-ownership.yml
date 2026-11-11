@@ -34,7 +34,7 @@ jobs:
           node tools/windows_packaged_edge_smoke.mjs --self-test
           if ($LASTEXITCODE -ne 0) { throw 'Process lineage unit tests rejected program' }
 
-      - name: Download and verify unchanged prior candidate
+      - name: Download and verify exact new Network sandbox candidate
         id: prepare
         shell: pwsh
         env:
@@ -88,6 +88,6 @@ jobs:
         shell: pwsh
         run: |
           Write-Host 'CANDIDATE_ONLY: no personal accounts, no model key, no posting, no data export, no Windows user PC.'
-          Write-Host 'RENDERER_SANDBOX: verified by edge://sandbox; RendererAppContainer, Lockdown, Untrusted integrity and Lowbox/AppContainer SID.'
-          Write-Host 'LIMITATION: Edge reports NetworkServiceSandbox disabled; this remains a separate hardening item.'
+          Write-Host 'SANDBOX_GATE: the runtime probe must separately verify renderer AppContainer and Edge Network Service sandbox type Network.'
+          Write-Host 'LIMITATION: Edge sandbox type is not proof of Windows Network Service token restrictions or AppContainer.'
           Write-Host 'NOT_PROVEN: real Douyin video playback, model reasoning, long-term autonomy, general user PC safety.'
