@@ -271,7 +271,8 @@ async function run(exeFile) {
   // Keep native Windows user-profile paths. Only YuTang state, app userData and memory are redirected to disposable paths.
   // No GITHUB_TOKEN, CI tokens, personal credentials or model API keys are passed to the EXE.
   const edgeExe=process.env.YUTANG_EDGE_EXE;
-  assert.ok(typeof edgeExe==='string'&&path.isAbsolute(edgeExe)&&fs.existsSync(edgeExe),'Verified Microsoft Edge executable path is required');
+  assert.ok(typeof edgeExe === 'string' && path.isAbsolute(edgeExe), 'Verified Microsoft Edge executable path is required');
+  try { await fs.access(edgeExe); } catch { throw new Error('Verified Microsoft Edge executable path is required'); }
   const unrelatedProfile=path.join(base,'unrelated-edge-profile');
   await fs.mkdir(unrelatedProfile,{recursive:true});
   let unrelatedEdgeChild=null;
