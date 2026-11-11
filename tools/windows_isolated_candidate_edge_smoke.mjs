@@ -332,14 +332,14 @@ export async function inspectRendererSandbox(port = PORT, { profile, hostPid } =
                 parentPid: Number(cursor.ParentProcessId) || null,
                 name: String(cursor.Name || ''),
                 profileArgPresent: typeof cursor.CommandLine === 'string' && typeof profile === 'string' && cursor.CommandLine.toLowerCase().includes(profile.toLowerCase()),
-                typeUtility: /(?:^|\\s)--type=utility(?:\\s|$)/i.test(String(cursor.CommandLine || '')),
-                networkService: /network\\.mojom\\.NetworkService/i.test(String(cursor.CommandLine || ''))
+                typeUtility: /(?:^|\s)--type=utility(?:\s|$)/i.test(String(cursor.CommandLine || '')),
+                networkService: /network\.mojom\.NetworkService/i.test(String(cursor.CommandLine || ''))
               });
               const parentPid = Number(cursor.ParentProcessId);
               if (!Number.isSafeInteger(parentPid) || parentPid < 1) break;
               cursor = byPid.get(parentPid);
             }
-            networkServiceProcessOwned = Boolean(networkProcess && /msedge\\.exe$/i.test(String(networkProcess.Name || '')) && hostAncestorPresent);
+            networkServiceProcessOwned = Boolean(networkProcess && /msedge\.exe$/i.test(String(networkProcess.Name || '')) && hostAncestorPresent);
             networkServiceProcessDetails = {
               name: String(networkProcess?.Name || ''),
               parentPid: Number(networkProcess?.ParentProcessId) || null,
