@@ -89,6 +89,16 @@ jobs:
           & $env:YUTANG_NODE 'tools/node24_network_service_sandbox_probe.mjs' $env:YUTANG_RUNTIME
           if($LASTEXITCODE -ne 0) { throw 'Network Service sandbox A/B did not pass; no product change is authorized.' }
 
+      - name: Verify real decoded local video frames (no Douyin or model)
+        shell: pwsh
+        env:
+          YUTANG_EDGE_FIREWALL_CONFIRMED: 'yes'
+        run: |
+          & $env:YUTANG_NODE --check tools/node24_decoded_video_frame_probe.mjs
+          if($LASTEXITCODE -ne 0) { throw 'Decoded-video script syntax rejected' }
+          & $env:YUTANG_NODE tools/node24_decoded_video_frame_probe.mjs $env:YUTANG_RUNTIME
+          if($LASTEXITCODE -ne 0) { throw 'Real video decoding and capture gate did not pass' }
+
       - name: Remove temporary firewall rule
         if: always()
         shell: pwsh
