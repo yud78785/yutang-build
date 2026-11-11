@@ -8,12 +8,14 @@ import path from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
 import { chromium } from './playwright-runtime.mjs';
 
 const require = createRequire(import.meta.url);
 const packageInfo = require('playwright-core/package.json');
 const EXPECTED_NODE = '24.17.0';
 const EXPECTED_PLAYWRIGHT = '1.64.0-alpha-1790635538000';
+const RUNTIME_DIR = path.dirname(fileURLToPath(import.meta.url));
 
 function category(error) {
   const value = String(error?.message || error || '');
@@ -148,15 +150,33 @@ async function main() {
     }
 
     const hostPort = 9342;
-    const profile = path.join(base, 'host-profile');
-    const control = path.join(base, 'control');
-    await fsp.mkdir(profile, { recursive: true });
-    await fsp.mkdir(control, { recursive: true });
+    const common = path.join(home, '.dsh', 'douyin-browser');
+    const profile = path.join(common, 'cli-profile');
+    const control = path.join(common, 'control');
+    const stateDir = path.join(common, 'state');
+    const mediaRoot = path.join(common, 'media');
+    const memoryDir = path.join(common, 'memory');
+    await Promise.all([
+      fsp.mkdir(profile, { recursive: true }),
+      fsp.mkdir(control, { recursive: true }),
+      fsp.mkdir(stateDir, { recursive: true }),
+      fsp.mkdir(mediaRoot, { recursive: true }),
+      fsp.mkdir(memoryDir, { recursive: true })
+    ]);
+    Object.assign(safeEnv, {
+      DOUYIN_RUNTIME_LOCATION_FILE: path.join(common, 'runtime-location.json'),
+      DEEPSEEK_SHARED_MEMORY_DB: path.join(memoryDir, 'shared.sqlite'),
+      DOUYIN_STATE_DIR: stateDir,
+      DOUYIN_MEDIA_ENV_FILE: path.join(mediaRoot, '.env'),
+      DOUYIN_MEDIA_SETTINGS_FILE: path.join(mediaRoot, 'settings.local.json'),
+      DOUYIN_MEDIA_RUNTIME_ROOT: mediaRoot,
+      DOUYIN_MEDIA_MODELS_DIR: path.join(mediaRoot, '.models')
+    });
     const logFile = path.join(control, 'browser-host.log');
     const logFd = fs.openSync(logFile, 'a');
     try {
-      hostChild = spawn(process.execPath, [path.join(path.dirname(new URL(import.meta.url).pathname), 'browser-host.mjs'), profile, control, String(hostPort)], {
-        cwd: path.dirname(new URL(import.meta.url).pathname),
+      hostChild = spawn(process.execPath, [path.join(RUNTIME_DIR, 'browser-host.mjs'), profile, control, String(hostPort)], {
+        cwd: RUNTIME_DIR,
         env: safeEnv, detached: true, windowsHide: true, stdio: ['ignore', logFd, logFd], shell: false
       });
     } finally {
@@ -166,6 +186,7 @@ async function main() {
       hostChild.once('spawn', resolve);
       hostChild.once('error', reject);
     });
+    hostChild.unref();
     report.host.spawned = true;
     const deadline = Date.now() + 35000;
     let state = null;
@@ -205,11 +226,8 @@ async function main() {
   } finally {
     if (rawContext) await rawContext.close().catch(() => {});
     if (hostChild && hostChild.exitCode === null) {
-      try { hostChild.kill('SIGTERM'); } catch {}
+      try { execFileSync('taskkill.exe', ['/PID', String(hostChild.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true, timeout: 10000 }); } catch {}
       await Promise.race([new Promise(resolve => hostChild.once('exit', resolve)), delay(3000)]);
-      if (hostChild.exitCode === null) {
-        try { execFileSync('taskkill.exe', ['/PID', String(hostChild.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true }); } catch {}
-      }
     }
     await fsp.rm(base, { recursive: true, force: true }).catch(() => {});
   }
