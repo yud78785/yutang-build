@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
-export const EXPECTED_EXE = '84321ec6c827de90e95d0d03b76a693444f8ea8c22c9c71c709e2e496bde753a';
+export const EXPECTED_EXE = 'e9f07dbed400bd77a8ab6350ea3a54d338d02d7a8f0c04d87cc621e148160290';
 const FILE = 'Dafeiyu-Douyin-API-1.4.6-win-x64.exe';
 const PORT = 9227;
 const allowedEnv = /^(?:path|systemroot|windir|comspec|pathext|programfiles|programfiles\(x86\)|programdata|username|userdomain|public|allusersprofile|programw6432|os|processor_architecture|number_of_processors|homedrive|homepath|userprofile|appdata|localappdata|temp|tmp|systemdrive|home)$/i;
@@ -124,7 +124,8 @@ function summarizeHostProcesses(processes, hostPid, backendPid, profile, control
     edgeWithPortArg: edge.filter(p => /--remote-debugging-port=9227/i.test(String(p.CommandLine || ''))).length,
     edgeWithProfileArg: edge.filter(p => String(p.CommandLine || '').toLowerCase().includes(profile.toLowerCase())).length,
     edgeWithLoopbackArg: edge.filter(p => /--remote-debugging-address=127\.0\.0\.1/i.test(String(p.CommandLine || ''))).length,
-    edgeWithNoSandbox: edge.filter(p => /--no-sandbox|--disable-setuid-sandbox/i.test(String(p.CommandLine || ''))).length
+    edgeWithNoSandbox: edge.filter(p => /--no-sandbox|--disable-setuid-sandbox/i.test(String(p.CommandLine || ''))).length,
+    edgeWithNetworkSandboxArg: edge.filter(p => String(p.CommandLine || '').includes('--enable-features=NetworkServiceSandbox')).length
   };
 }
 const ps = script => {
@@ -274,8 +275,11 @@ export async function inspectRendererSandbox(port = PORT) {
             rendererSandboxVerified,
             rendererRows: rendererRows.map(columns => ({ sandbox:columns[3], lockdown:columns[4], integrity:columns[5], lowboxAppContainer:Boolean(/^S-1-15-2-/.test(columns[8] || '')) })),
             networkServiceSandboxEnabled,
+            networkServiceSandboxType: String(networkServiceRow?.[3] || ''),
+            networkServiceLowboxAppContainer: /^S-1-15-2-/.test(networkServiceRow?.[8] || ''),
             networkServiceReportedNotSandboxed: networkServiceRow?.[3] === 'Not Sandboxed',
-            explicitSandboxPositive: rendererSandboxVerified,
+            networkServiceSandboxVerified: networkServiceSandboxEnabled && networkServiceRow?.[3] === 'Network' && /^S-1-15-2-/.test(networkServiceRow?.[8] || ''),
+            explicitSandboxPositive: rendererSandboxVerified && networkServiceSandboxEnabled && networkServiceRow?.[3] === 'Network',
             explicitSandboxNegative: false,
             attempts
           };
@@ -363,6 +367,7 @@ async function inspectReadyBrowser(state, backendPid, profile, controlDir) {
     portAddresses: listeners.map(item => item.LocalAddress)
   });
   assert.equal(hostSummary.edgeWithNoSandbox, 0, 'A sandbox-disabling Edge argument was detected');
+  assert.ok(hostSummary.edgeWithNetworkSandboxArg > 0, 'Network Service sandbox launch flag was not passed to Edge');
   return { state, browserVersion: version.Browser, hostSummary, ownership };
 }
 async function run(exeFile) {
@@ -390,20 +395,9 @@ async function run(exeFile) {
   assert.ok(typeof edgeExe === 'string' && path.isAbsolute(edgeExe), 'Verified Microsoft Edge executable path is required');
   try { await fs.access(edgeExe); } catch { throw new Error('Verified Microsoft Edge executable path is required'); }
   const unrelatedProfile=path.join(base,'unrelated-edge-profile');
-  await fs.mkdir(unrelatedProfile,{recursive:true});
   let unrelatedEdgeChild=null;
-  unrelatedEdgeChild=spawn(edgeExe,[
-    '--user-data-dir='+unrelatedProfile,'--remote-debugging-port=9231',
-    '--remote-debugging-address=127.0.0.1','--no-first-run','about:blank'
-  ],{detached:true,windowsHide:true,stdio:'ignore',shell:false});
-  unrelatedEdgeChild.unref();
-  await until(async()=>{
-    const response=await fetch('http://127.0.0.1:9231/json/version',{signal:AbortSignal.timeout(2000)});
-    if(!response.ok)return null;
-    const version=await response.json();
-    if(!/(?:Edg|Chrome)/.test(String(version.Browser)))return null;
-    return assertUnrelatedEdgeAlive(unrelatedProfile,9231);
-  },20000,'independent unrelated Edge process and CDP listener');
+  const preExistingEdge=asRows(ps("Get-CimInstance Win32_Process -Filter \"Name = 'msedge.exe'\" | Select-Object ProcessId,Name,CommandLine | ConvertTo-Json -Compress -Depth 3"));
+  assert.equal(preExistingEdge.length,0,'Cold-start test requires zero pre-existing Edge processes before candidate launch.');
   const child=spawn(exeFile,['--remote-debugging-port=0','--remote-debugging-address=127.0.0.1'],{env,windowsHide:true,stdio:'ignore',shell:false});
   const candidateExit={error:null,exit:null};
   child.once('error',error=>{candidateExit.error=safeText(error?.message||error);});
@@ -465,11 +459,28 @@ async function run(exeFile) {
     try {
       report.rendererSandbox = await inspectRendererSandbox(PORT);
       assert.equal(report.rendererSandbox.rendererSandboxVerified, true, 'Edge internal sandbox page did not prove renderer AppContainer/Lockdown/Untrusted integrity.');
-      console.log('RENDERER_SANDBOX_DIAGNOSTIC '+JSON.stringify(report.rendererSandbox));
+      assert.equal(report.rendererSandbox.networkServiceSandboxVerified, true, 'Edge Network Service is not confirmed as Network/AppContainer sandboxed.');
+      console.log('RENDERER_AND_NETWORK_SANDBOX_DIAGNOSTIC '+JSON.stringify(report.rendererSandbox));
     } catch (error) {
       report.rendererSandbox = { accessible:false, error:safeText(error?.message || error, redactionPaths) };
-      console.log('RENDERER_SANDBOX_DIAGNOSTIC '+JSON.stringify(report.rendererSandbox));
+      console.log('RENDERER_AND_NETWORK_SANDBOX_DIAGNOSTIC '+JSON.stringify(report.rendererSandbox));
+      throw error;
     }
+    report.coldStartVerified=true;
+    report.preExistingEdgeProcessCount=preExistingEdge.length;
+    await fs.mkdir(unrelatedProfile,{recursive:true});
+    unrelatedEdgeChild=spawn(edgeExe,[
+      '--user-data-dir='+unrelatedProfile,'--remote-debugging-port=9231',
+      '--remote-debugging-address=127.0.0.1','--no-first-run','about:blank'
+    ],{detached:true,windowsHide:true,stdio:'ignore',shell:false});
+    unrelatedEdgeChild.unref();
+    await until(async()=>{
+      const response=await fetch('http://127.0.0.1:9231/json/version',{signal:AbortSignal.timeout(2000)});
+      if(!response.ok)return null;
+      const version=await response.json();
+      if(!/(?:Edg|Chrome)/.test(String(version.Browser)))return null;
+      return assertUnrelatedEdgeAlive(unrelatedProfile,9231);
+    },20000,'independent unrelated Edge process and CDP listener started after cold candidate launch');
     const lifecycle={launchCount:1,closeCount:0,hostPids:[state.pid],cycles:[]};
     Object.assign(report,initialCheck.ownership,{
       hostPid:state.pid,backendPid:ready.backendPid,hostSummary:initialCheck.hostSummary,
@@ -482,6 +493,8 @@ async function run(exeFile) {
       listenerCount:initialCheck.ownership.listenerCount,
       loopbackOnly:initialCheck.ownership.loopbackOnly,
       sandboxFlagsChecked:initialCheck.ownership.flagsChecked,
+      networkSandboxFlagPassed:initialCheck.hostSummary.edgeWithNetworkSandboxArg>0,
+      unrelatedEdgeStartedAfterColdStart:true,
       unrelatedEdgeStillAlive:unrelatedInitial.processCount>0&&unrelatedInitial.listenerCount>0
     }));
 
@@ -534,7 +547,7 @@ async function run(exeFile) {
     report.unrelatedEdgeIsolation={separateProfile:true,separatePort:9231,remainedAliveDuringCandidateCloseAndRestart:true,finalCloseViaCdp:unrelatedClose.closed===true,finalCleanupVerified:unrelatedClean.clean===true};
     report.lifecycle=lifecycle;
     report.cleanupVerified=true;
-    report.notProven=[...(report.rendererSandbox?.rendererSandboxVerified?[]:['Effective renderer sandbox integrity']),...(report.rendererSandbox?.networkServiceSandboxEnabled?[]:['Network Service sandbox (Edge reports disabled)']),'Douyin video playback (outbound blocked by design)','Model reasoning','Long-term autonomy','General user PC safety'];
+    report.notProven=['Real Douyin video playback (outbound blocked by design)','Model reasoning','Long-term autonomy','Memory synchronization','Signed release trust','General user PC safety'];
     console.log('PASS_WINDOWS_PACKAGED_EXE_RESTART_AND_CLEANUP '+JSON.stringify(report));
     return report;
   } catch (error) {
