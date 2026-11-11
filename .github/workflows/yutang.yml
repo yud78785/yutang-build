@@ -5,6 +5,9 @@
 name: YuTang - pinned Windows candidate (NOT release)
 
 on:
+  push:
+    branches:
+      - feature/network-service-sandbox-20261111
   workflow_dispatch:
 
 permissions:
@@ -43,6 +46,8 @@ jobs:
           export const CALL = 'chromiumImpl.launchPersistentContext(profile, {';
           export const BEFORE = "channel: 'msedge', headless: false, viewport: null, ignoreDefaultArgs: ['--mute-audio'],";
           export const AFTER = "channel: 'msedge', headless: false, viewport: null, chromiumSandbox: true, ignoreDefaultArgs: ['--mute-audio'],";
+          export const ARGS_BEFORE = "args: [`--remote-debugging-port=${port}`, '--remote-debugging-address=127.0.0.1', '--autoplay-policy=no-user-gesture-required'],";
+          export const ARGS_AFTER = "args: [`--remote-debugging-port=${port}`, '--remote-debugging-address=127.0.0.1', '--autoplay-policy=no-user-gesture-required', '--enable-features=NetworkServiceSandbox'],";
           
           export function gitBlobSha(bytes) {
             const b = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes, 'utf8');
@@ -55,14 +60,19 @@ jobs:
             const s = originalBytes.toString('utf8');
             if (!s.includes(CALL) || s.split(CALL).length !== 2) throw Error('Expected exactly one dedicated Edge launch.');
             if (s.split(BEFORE).length !== 2) throw Error('Expected exact known v1.4.6 Edge options once.');
-            if (s.includes('chromiumSandbox: true')) throw Error('Already modified: unexpected source for pinned commit.');
+            if (s.split(ARGS_BEFORE).length !== 2) throw Error('Expected exact known v1.4.6 Edge args once.');
+            if (s.includes('chromiumSandbox: true') || s.includes('--enable-features=NetworkServiceSandbox')) throw Error('Already modified: unexpected source for pinned commit.');
             const start = s.indexOf(CALL);
             const location = s.indexOf(BEFORE);
+            const argsLocation = s.indexOf(ARGS_BEFORE);
             if (location < start || location > start + 300) throw Error('Edge options do not belong to the dedicated browser launch.');
-            const patched = s.replace(BEFORE, AFTER);
-            if (!patched.slice(start, start + 500).includes('chromiumSandbox: true')) throw Error('Postpatch sandbox check failed.');
-            if (patched.slice(start, start + 650).includes('--no-sandbox')) throw Error('Unsafe flag present near Edge launch.');
-            if (patched.replace(AFTER, BEFORE) !== s) throw Error('Patch changed content beyond one launch option.');
+            if (argsLocation <= location || argsLocation > start + 800) throw Error('Edge args do not belong to the dedicated browser launch.');
+            const patched = s.replace(BEFORE, AFTER).replace(ARGS_BEFORE, ARGS_AFTER);
+            const launch = patched.slice(start, start + 900);
+            if (!launch.includes('chromiumSandbox: true')) throw Error('Postpatch renderer sandbox check failed.');
+            if (!launch.includes('--enable-features=NetworkServiceSandbox')) throw Error('Postpatch Network Service sandbox flag missing.');
+            if (launch.includes('--no-sandbox') || launch.includes('--disable-setuid-sandbox')) throw Error('Unsafe flag present near Edge launch.');
+            if (patched.replace(ARGS_AFTER, ARGS_BEFORE).replace(AFTER, BEFORE) !== s) throw Error('Patch changed content beyond the two reviewed launch options.');
             return { patched, originalId, patchedSha256: createHash('sha256').update(patched).digest('hex') };
           }
           
@@ -91,7 +101,7 @@ jobs:
           if (files.length < 2) { console.error('Usage: node verify-propagation.mjs source copied-file [packaged-file]'); process.exit(1); }
           const originals = files.map(f => { if (!fs.existsSync(f)) throw Error(`Missing file ${f}`); return fs.readFileSync(f); });
           const digest = b => crypto.createHash('sha256').update(b).digest('hex');
-          if (!originals.every(b => b.includes(Buffer.from('chromiumSandbox: true')))) throw Error('One or more copies lack sandbox flag.');
+          if (!originals.every(b => b.includes(Buffer.from('chromiumSandbox: true')) && b.includes(Buffer.from('--enable-features=NetworkServiceSandbox')))) throw Error('One or more copies lack the renderer or Network Service sandbox option.');
           if (!originals.slice(1).every(b => b.equals(originals[0]))) throw Error('Source / staged / packaged copies differ.');
           console.log(`PASS ${files.length} byte-for-byte identical patched source copies; sha256=${digest(originals[0])}`);
           console.log('NOTE This is a packaged-source check, not proof of sandbox runtime behavior.');
@@ -115,7 +125,7 @@ jobs:
             context = await chromium.launchPersistentContext(profile, {
               channel: 'msedge', headless: true, chromiumSandbox: true,
               viewport: null, ignoreDefaultArgs: ['--mute-audio'],
-              args: ['--remote-debugging-address=127.0.0.1', '--autoplay-policy=no-user-gesture-required']
+              args: ['--remote-debugging-address=127.0.0.1', '--autoplay-policy=no-user-gesture-required', '--enable-features=NetworkServiceSandbox']
             });
             const page = context.pages()[0] || await context.newPage();
             await page.goto('about:blank');
@@ -140,12 +150,13 @@ jobs:
           '@ | Set-Content -LiteralPath tools/windows-edge-probe.mjs -Encoding utf8
           @'
           import assert from 'node:assert/strict';
-          import { applyPatch, gitBlobSha, BEFORE, AFTER, CALL } from '../tools/patch-sandbox.mjs';
-          const fixture = `const context = await ${CALL}\n  ${BEFORE}\n  args: [\`--remote-debugging-port=\${port}\`, '--remote-debugging-address=127.0.0.1', '--autoplay-policy=no-user-gesture-required'],\n});`;
+          import { applyPatch, gitBlobSha, BEFORE, AFTER, ARGS_BEFORE, ARGS_AFTER, CALL } from '../tools/patch-sandbox.mjs';
+          const fixture = `const context = await ${CALL}\n  ${BEFORE}\n  ${ARGS_BEFORE}\n});`;
           const hash = gitBlobSha(fixture);
           const { patched, patchedSha256 } = applyPatch(fixture, hash);
-          assert.equal(patched, fixture.replace(BEFORE, AFTER));
+          assert.equal(patched, fixture.replace(BEFORE, AFTER).replace(ARGS_BEFORE, ARGS_AFTER));
           assert.ok(patched.includes('chromiumSandbox: true'));
+          assert.ok(patched.includes('--enable-features=NetworkServiceSandbox'));
           assert.match(patchedSha256,/^[a-f0-9]{64}$/);
           assert.throws(()=>applyPatch(fixture, '0000000000000000000000000000000000000000'),/blob mismatch/);
           assert.throws(()=>applyPatch(patched, hash),/blob mismatch/);
@@ -154,8 +165,8 @@ jobs:
           assert.throws(()=>applyPatch(duplicate,gitBlobSha(duplicate)),/options once/);
           const outside = BEFORE + '\n' + fixture.replace(BEFORE, 'other: true,');
           assert.throws(()=>applyPatch(outside,gitBlobSha(outside)),/do not belong/);
-          const withUnsafe = fixture.replace("'--autoplay-policy=no-user-gesture-required'", "'--no-sandbox'");
-          assert.throws(()=>applyPatch(withUnsafe,gitBlobSha(withUnsafe)),/Unsafe flag/);
+          const withUnsafe = fixture.replace(ARGS_BEFORE, ARGS_BEFORE.replace("'--autoplay-policy=no-user-gesture-required'", "'--no-sandbox'"));
+          assert.throws(()=>applyPatch(withUnsafe,gitBlobSha(withUnsafe)),/exact known v1.4.6 Edge args/);
           console.log('PASS 8 sandbox patch safety assertions (fixtures based on pinned upstream launch options)');
           console.log('LIMIT Original 11,782-byte source is not available inside this offline runtime; original blob verification runs in CI.');
           '@ | Set-Content -LiteralPath tests/test-patch.mjs -Encoding utf8
@@ -326,8 +337,8 @@ jobs:
             "PINNED COMMIT: $env:FIXED_COMMIT"
             "FILE: $($exe[0].Name)"
             "SHA256: $hash"
-            'PASSED: pinned source patch, upstream tar.gz/tree verification, staged/packaged source, packaged API smoke, CI Edge sandbox probe'
-            'NOT PROVEN: actual packaged EXE controls Windows Edge without --no-sandbox on user machine'
+            'PASSED: pinned source patch, upstream tar.gz/tree verification, staged/packaged source, packaged API smoke, renderer AppContainer sandbox, NetworkServiceSandbox feature'
+            'NOT PROVEN: real Douyin playback, model reasoning, continuous autonomy, memory synchronization, signed release trust'
             'NOT PROVEN: Douyin playback, model reasoning, continuous autonomy, memory synchronization'
           ) | Set-Content -LiteralPath release-api/YUTANG-RESULT.txt -Encoding utf8
           Write-Host "CANDIDATE SHA256 $hash"
