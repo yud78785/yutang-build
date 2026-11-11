@@ -50,8 +50,8 @@ The verifier is **read-only**: no extraction, network, subprocess, shell, PowerS
 ## Next meaningful work, ordered by value
 
 1. Keep old successful CI evidence intact and **do not rerun the existing successful build**.
-2. Rebuild a new candidate with the verified `NetworkServiceSandbox` launch flag; preserve the old EXE and its hashes as historical evidence.
-3. Run the new packaged EXE in a no-secrets ephemeral Windows runner and require renderer plus Network Service sandbox evidence, three launch/close cycles, unrelated Edge survival and zero residual processes.
-4. Run a constrained, no-login, public-video observation in a disposable browser environment. Clearly separate a video loaded from a model having *understood* the video.
+2. Run the new packaged EXE in a no-secrets ephemeral Windows runner with a cold Edge start before any unrelated Edge process; require renderer plus Network Service sandbox evidence, three launch/close cycles, unrelated Edge survival and zero residual processes.
+3. Prove real public-video playback and visual frame capture without a login or account; distinguish page metadata from actual decoded video frames.
+4. Verify model reasoning against known video fixtures, with explicit evidence, uncertainty and failure handling.
 5. Prove fail-closed behavior for the authenticated V3 bridge independently, including Drive metadata and concurrency on Windows. Never merge unrelated bridge protocols into this Douyin candidate without an explicit interface contract.
 6. Do not call any of this a release until source/dependency trust and live functionality gaps are closed.
