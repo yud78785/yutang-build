@@ -14,15 +14,15 @@ import sys
 import zipfile
 
 EXPECTED = {
-    "zip_sha256": "9ad557a2b7a41efd942f413694a96cbacebc56ba0c65a2635722a14ed699e42f",
-    "zip_size": 124753117,
+    "zip_sha256": "b5febe43b2e947a86feda01484fbbc475776649ed7687d8d984f5992af6370e9",
+    "zip_size": 124753189,
     "exe_name": "Dafeiyu-Douyin-API-1.4.6-win-x64.exe",
-    "exe_sha256": "84321ec6c827de90e95d0d03b76a693444f8ea8c22c9c71c709e2e496bde753a",
-    "exe_size": 124736935,
+    "exe_sha256": "e9f07dbed400bd77a8ab6350ea3a54d338d02d7a8f0c04d87cc621e148160290",
+    "exe_size": 124737042,
     "result_name": "YUTANG-RESULT.txt",
     "source_commit": "912873e2556d16a088d81dcbc6f7c0060614dd58",
-    "actions_run": 42815316953,
-    "runner_commit": "4745ed23cbb748cb4b070ed70390703d1261aea0",
+    "actions_run": 42942891622,
+    "runner_commit": "74fae764b9c510f745b4a9f45fad88b662bd00d3",
 }
 
 class VerificationError(ValueError):
@@ -114,8 +114,8 @@ def verify(archive: Path, expected=None):
             "PINNED COMMIT: " + expected["source_commit"],
             "FILE: " + expected["exe_name"],
             "SHA256: " + expected["exe_sha256"],
-            "NOT PROVEN: actual packaged EXE controls Windows Edge without --no-sandbox on user machine",
-            "NOT PROVEN: Douyin playback, model reasoning, continuous autonomy, memory synchronization",
+            "NOT PROVEN: real Douyin playback, model reasoning, continuous autonomy, memory synchronization, signed release trust",
+            "NOT PROVEN: real Douyin playback, model reasoning, continuous autonomy, memory synchronization, signed release trust",
         ]
         if not all(line in txt.splitlines() for line in required_lines):
             raise VerificationError("candidate report missing expected source/limitations")
