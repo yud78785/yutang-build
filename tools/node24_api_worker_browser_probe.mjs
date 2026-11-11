@@ -183,6 +183,8 @@ async function instrumentRuntime() {
   if (core.split(beforePid).length !== 2) throw new Error('Core host PID instrumentation anchor mismatch.');
   core = core.replace(beforePid, afterPid);
   await fs.writeFile(corePath, core);
+  try { execFileSync(process.execPath, ['--check', corePath], { encoding: 'utf8', windowsHide: true, timeout: 10000 }); }
+  catch (error) { throw new Error('Instrumented core syntax check failed: ' + redact(error?.stderr || error?.message || error)); }
 }
 function sanitizedEnvironment(base, paths) {
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) =>
@@ -293,7 +295,9 @@ async function main() {
   let openPromise = null;
   let hostPid = null;
   try {
-    const started = await backend.start(config, { htmlFile, staticRoot: publicRoot });
+    let started;
+    try { started = await backend.start(config, { htmlFile, staticRoot: publicRoot }); }
+    catch (error) { throw new Error('API worker start failed: ' + redact(error?.message || error) + '; stderr=' + redact(backend.stderr)); }
     report.backendStarted = true;
     report.backendOrigin = backend.origin;
     const bootstrapResponse = await fetch(backend.origin + '/api/bootstrap', { signal: AbortSignal.timeout(5000) });
