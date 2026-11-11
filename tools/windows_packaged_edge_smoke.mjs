@@ -405,6 +405,9 @@ async function run(exeFile) {
     return assertUnrelatedEdgeAlive(unrelatedProfile,9231);
   },20000,'independent unrelated Edge process and CDP listener');
   const child=spawn(exeFile,['--remote-debugging-port=0','--remote-debugging-address=127.0.0.1'],{env,windowsHide:true,stdio:'ignore',shell:false});
+  const candidateExit={error:null,exit:null};
+  child.once('error',error=>{candidateExit.error=safeText(error?.message||error);});
+  child.once('exit',(code,signal)=>{candidateExit.exit={code,signal};});
   const controlDir=path.join(common,'control');
   const control=path.join(controlDir,'browser.json');
   const profile=path.join(common,'cli-profile');
@@ -412,12 +415,23 @@ async function run(exeFile) {
   const report={type:'WINDOWS_EDGE_LAUNCH_IN_EPHEMERAL_CI_ONLY',candidateSha256:EXPECTED_EXE,realAccount:false,modelKey:false,externalEdgeNetworkBlocked:true,environmentProfile:'isolated-safe-expanded',safeEnvPresence:Object.fromEntries(envKeys.map(key=>[key,Boolean(env[key])]))};
   let backendPid=null;
   try {
-    const ready=await until(async()=>{const x=await readJSON(path.join(userData,'desktop-smoke.json'));return x.ready===true?x:null;},85000,'packaged EXE startup');
+    const readyDeadline=Date.now()+85000;
+    let ready=null;
+    while(Date.now()<readyDeadline){
+      if(candidateExit.error)throw new Error('Candidate EXE spawn error: '+candidateExit.error);
+      if(candidateExit.exit)throw new Error('Candidate EXE exited before desktop readiness: '+JSON.stringify(candidateExit.exit));
+      try{const x=await readJSON(path.join(userData,'desktop-smoke.json'));if(x.ready===true){ready=x;break;}}
+      catch(error){if(error.code!=='ENOENT')throw error;}
+      await delay(250);
+    }
+    if(!ready)throw new Error('Packaged EXE startup unavailable after 85000ms; candidateExit='+JSON.stringify(candidateExit));
     backendPid=ready.backendPid;
     assert.equal(ready.configured,false,'EXE must not be configured with a model key');
     assert.equal(path.resolve(ready.memoryFolder).toLowerCase(),path.resolve(memory).toLowerCase(),'unexpected memory folder');
     assert.match(ready.origin,/^http:\/\/127\.0\.0\.1:\d{4,5}$/);
     report.desktopReady=true;
+    report.candidatePid=child.pid;
+    report.candidateExit=candidateExit;
     report.backendPid=ready.backendPid;
     console.log('PHASE_EXE_DESKTOP_READY: true; isolated memory and no model key confirmed');
     const bootstrap=await (await fetch(ready.origin+'/api/bootstrap',{signal:AbortSignal.timeout(5000)})).json();
@@ -541,7 +555,8 @@ async function run(exeFile) {
     }
     try { debugListenerCount=ps('Get-NetTCPConnection -LocalPort 9227 -State Listen -ErrorAction SilentlyContinue | Measure-Object | Select-Object -ExpandProperty Count'); } catch {}
     console.error('FAIL_CLOSED_DIAGNOSTICS '+JSON.stringify({
-      desktopReady:report.desktopReady===true, browserOpenHttpStatus:report.browserOpenHttpStatus??null,
+      desktopReady:report.desktopReady===true, candidatePid:child.pid, candidateExit,
+      browserOpenHttpStatus:report.browserOpenHttpStatus??null,
       browserOpenHttpBody:report.browserOpenHttpBody??null,
       safeEnvPresence:report.safeEnvPresence??null,
       hostStatePresent:Boolean(state), hostReady:state?.ready===true,
