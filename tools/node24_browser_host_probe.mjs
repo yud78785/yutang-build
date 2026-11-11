@@ -104,18 +104,13 @@ async function main() {
     'Edge outbound firewall rule is not active');
 
   const base = await fsp.mkdtemp(path.join(process.env.RUNNER_TEMP, 'yutang-node24-host-'));
-  const home = path.join(base, 'home');
+  const home = path.join(base, 'isolated-state-home');
   const userData = path.join(base, 'user-data');
-  const temp = path.join(base, 'temp');
-  const appData = path.join(base, 'app-data');
-  const localAppData = path.join(base, 'local-app-data');
-  for (const directory of [home, userData, temp, appData, localAppData]) await fsp.mkdir(directory, { recursive: true });
-  const drive = path.parse(home).root.replace(/[\\/]+$/, '');
-  const envAllow = /^(?:path|systemroot|windir|comspec|pathext|programfiles|programfiles\(x86\)|programdata|username|userdomain|public|allusersprofile|programw6432|os|processor_architecture|number_of_processors)$/i;
+  for (const directory of [home, userData]) await fsp.mkdir(directory, { recursive: true });
+  const envAllow = /^(?:path|systemroot|windir|comspec|pathext|programfiles|programfiles\(x86\)|programdata|username|userdomain|public|allusersprofile|programw6432|os|processor_architecture|number_of_processors|homedrive|homepath|userprofile|appdata|localappdata|temp|tmp|systemdrive|home)$/i;
   const safeEnv = Object.fromEntries(Object.entries(process.env).filter(([key]) => envAllow.test(key)));
   Object.assign(safeEnv, {
-    HOME: home, USERPROFILE: home, HOMEDRIVE: drive, HOMEPATH: home.slice(drive.length), SystemDrive: drive,
-    APPDATA: appData, LOCALAPPDATA: localAppData, TEMP: temp, TMP: temp, DSH_HOME: path.join(home, '.dsh'),
+    DSH_HOME: path.join(home, '.dsh'),
     DOUYIN_DESKTOP_USER_DATA: userData, DOUYIN_RUNTIME_LOCATION_FILE: path.join(base, 'runtime-location.json')
   });
 
