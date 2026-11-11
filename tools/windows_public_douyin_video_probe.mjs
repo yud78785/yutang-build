@@ -659,6 +659,7 @@ async function run(exeFile) {
       playbackProgressSeconds:0
     };
     let verificationController=null;
+    let verificationStage='load-runtime';
     try {
       const runtimeBase=path.join(userData,'runtimes');
       const runtimeEntries=(await fs.readdir(runtimeBase)).filter(name=>/^[a-f0-9]{20}$/.test(name));
@@ -671,6 +672,7 @@ async function run(exeFile) {
         memory:{recordVideo(){}},
         personaMemory:{recordViewing(){}}
       });
+      verificationStage='open-video';
       const openResult=await verificationController.execute('douyin_open_video',{url:PUBLIC_VIDEO_URL},{signal:AbortSignal.timeout(45000)});
       let pageState=openResult?.state||openResult;
       let currentUrl=verificationController.page?.url()||'';
@@ -688,6 +690,7 @@ async function run(exeFile) {
 
       // The public page may expose metadata before the first decodable frame.
       // Poll read-only state for at most 15 seconds; never click, seek or bypass a gate.
+      verificationStage='readiness-poll';
       const readinessStarted=Date.now(),readinessDeadline=readinessStarted+15_000;
       while(Date.now()<readinessDeadline&&!publicVideoProbe.loginRequired&&!publicVideoProbe.verificationRequired&&!publicVideoProbe.unsupportedPage
         &&currentOrigin==='https://www.douyin.com'
@@ -713,11 +716,13 @@ async function run(exeFile) {
       else if(publicVideoProbe.unsupportedPage||currentOrigin!=='https://www.douyin.com') publicVideoProbe.outcome='safe_stop_unsupported_or_redirected';
       else if(publicVideoProbe.actualVideoId!==PUBLIC_VIDEO_ID||publicVideoProbe.readyState<2) publicVideoProbe.outcome='safe_stop_video_not_ready_or_identity_mismatch';
       else {
+        verificationStage='play';
         const playResult=await verificationController.execute('douyin_play',{}, {signal:AbortSignal.timeout(10000)});
         pageState=playResult?.state||playResult;
         if(pageState?.loginRequired||pageState?.verificationRequired||pageState?.unsupportedPage||pageState?.video?.id!==PUBLIC_VIDEO_ID||pageState?.video?.paused!==false){
           publicVideoProbe.outcome=pageState?.loginRequired?'safe_stop_login_required_after_play':pageState?.verificationRequired?'safe_stop_verification_required_after_play':'safe_stop_playback_not_confirmed';
         }else{
+          verificationStage='capture-frames';
           const observed=await verificationController.captureSharedFrames(2.2,AbortSignal.timeout(20000));
           const proofValid=verifySharedVideoFrameProof(observed,PUBLIC_VIDEO_ID);
           const frames=Array.isArray(observed?.frames)?observed.frames:[];
@@ -751,6 +756,7 @@ async function run(exeFile) {
               config:{apiKey:'',baseUrl:'https://api.deepseek.com',model:'deepseek-flash'},
               fetchImpl:async()=>{throw new Error('Live model HTTP calls are forbidden in the credential-free CI probe.');}
             });
+            verificationStage='model-input-packing';
             const offlineDecision=await apiAgent.decideWatch({
               observation:observed,
               context:'',
@@ -828,6 +834,7 @@ async function run(exeFile) {
       }
     }catch(error){
       publicVideoProbe.outcome='safe_stop_or_probe_error';
+      publicVideoProbe.errorStage=verificationStage;
       publicVideoProbe.errorName=String(error?.name||'Error').slice(0,80);
       publicVideoProbe.errorCode=typeof error?.code==='string'?error.code.slice(0,80):null;
       // No error message, page text, cookies, author/title, or request headers are written to evidence.
@@ -924,6 +931,10 @@ async function run(exeFile) {
     report.notProven=['Network Service lockdown/integrity restrictions beyond the verified AppContainer SID','Model reasoning','Long-term autonomy','Memory synchronization','Signed release trust','General user PC safety'];
     if(publicVideoProbe.outcome!=='PASS_PUBLIC_VIDEO_CORE_CAPTURE_AND_MODEL_INPUT_PACKING')report.notProven.unshift('Public Douyin video playback and Core frame capture (safe-stop outcome: '+publicVideoProbe.outcome+')');
     console.log('PASS_WINDOWS_PACKAGED_EXE_RESTART_AND_CLEANUP '+JSON.stringify(report));
+    if (publicVideoProbe.outcome !== 'PASS_PUBLIC_VIDEO_CORE_CAPTURE_AND_MODEL_INPUT_PACKING') {
+      throw Object.assign(new Error('Public video evidence not verified; refusing green functional result (' +
+        String(publicVideoProbe.outcome) + ')'), { code:'PUBLIC_VIDEO_EVIDENCE_INCONCLUSIVE' });
+    }
     return report;
   } catch (error) {
     // Only redacted state, response text and browser-host log tail are emitted; no credentials or raw command lines.
