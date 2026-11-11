@@ -698,7 +698,7 @@ async function run(exeFile) {
                 assert.ok(imageParts.length>=1&&imageParts.length<=3,'Production ApiAgent must pass one storyboard or the original sampled images.');
                 assert.ok(imageParts.every(part=>typeof part.image_url?.url==='string'&&part.image_url.url.startsWith('data:image/jpeg;base64,')),'Model-facing frames must be inline JPEG image_url data.');
                 assert.ok(String(textPart).includes(PUBLIC_VIDEO_ID),'Model-facing text must bind frames to the verified public video ID.');
-                const manifest=apiAgent.lastVisualPacking?.manifest;
+                const manifest=apiAgent.lastVisualPacking;
                 modelInputReport={
                   provider:'offline-test-stub-no-network',
                   model:'deepseek-flash',
