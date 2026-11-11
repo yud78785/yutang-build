@@ -469,12 +469,14 @@ async function main() {
     for (let attempt = 0; attempt < 60; attempt++) {
       let processes = [], listeners = [], processSnapshotVerified = false, listenerSnapshotVerified = false;
       try {
-        processes = powershellJson("Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'msedge.exe' -or $_.Name -eq 'node.exe' } | Select-Object ProcessId,ParentProcessId,Name,CommandLine | ConvertTo-Json -Compress -Depth 4");
-        processSnapshotVerified = true;
-      } catch {}
-      try {
-        listeners = powershellJson('Get-NetTCPConnection -LocalPort 9227 -State Listen -ErrorAction SilentlyContinue | Select-Object OwningProcess,LocalAddress | ConvertTo-Json -Compress -Depth 4');
-        listenerSnapshotVerified = true;
+        const snapshotRows = powershellJson("$processOk=$true; $listenerOk=$true; try { $processes=@(Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object { $_.Name -eq 'msedge.exe' -or $_.Name -eq 'node.exe' } | Select-Object ProcessId,ParentProcessId,Name,CommandLine) } catch { $processOk=$false; $processes=@() }; try { $listeners=@(Get-NetTCPConnection -LocalPort 9227 -State Listen -ErrorAction Stop | Select-Object OwningProcess,LocalAddress) } catch { $listenerOk=$false; $listeners=@() }; ConvertTo-Json -InputObject ([ordered]@{processSnapshotVerified=$processOk;listenerSnapshotVerified=$listenerOk;processes=$processes;listeners=$listeners}) -Compress -Depth 5");
+        if (snapshotRows.length === 1 && snapshotRows[0] && typeof snapshotRows[0] === 'object') {
+          const snapshot = snapshotRows[0];
+          processSnapshotVerified = snapshot.processSnapshotVerified === true;
+          listenerSnapshotVerified = snapshot.listenerSnapshotVerified === true;
+          processes = Array.isArray(snapshot.processes) ? snapshot.processes : snapshot.processes ? [snapshot.processes] : [];
+          listeners = Array.isArray(snapshot.listeners) ? snapshot.listeners : snapshot.listeners ? [snapshot.listeners] : [];
+        }
       } catch {}
       const hostStillAlive = processes.some(item => Number(item.ProcessId) === Number(hostPid));
       const edgeProcesses = processes.filter(item => /msedge\\.exe$/i.test(String(item.Name)));
