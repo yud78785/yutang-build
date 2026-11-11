@@ -157,14 +157,10 @@ if (mode === 'direct') {
   await writeFile(locationFile, JSON.stringify({ version: 1, ...paths }, null, 2) + '\n', { flag: 'wx' });
   await writeFile(paths.mediaEnvFile, '', { flag: 'wx' });
   await writeFile(paths.mediaSettingsFile, JSON.stringify({ enabled: false, backend: 'local-whisper' }), { flag: 'wx' });
-  const allowedEnv = /^(?:path|systemroot|windir|comspec|pathext|programfiles|programfiles\(x86\)|programdata|username|userdomain|public|allusersprofile|programw6432|os|processor_architecture|number_of_processors)$/i;
+  const allowedEnv = /^(?:path|systemroot|windir|comspec|pathext|programfiles|programfiles\(x86\)|programdata|username|userdomain|public|allusersprofile|programw6432|os|processor_architecture|number_of_processors|homedrive|homepath|userprofile|appdata|localappdata|temp|tmp|systemdrive|home)$/i;
   const childEnv = Object.fromEntries(Object.entries(process.env).filter(([key]) => allowedEnv.test(key)));
-  const homeDrive = path.parse(home).root.replace(/[\\/]+$/, '');
-  const homePath = home.slice(homeDrive.length);
   Object.assign(childEnv, {
-    HOME: home, USERPROFILE: home, HOMEDRIVE: homeDrive, HOMEPATH: homePath, SystemDrive: homeDrive,
-    APPDATA: path.join(home, 'app-data'), LOCALAPPDATA: path.join(home, 'local-app-data'),
-    TEMP: path.join(home, 'temp'), TMP: path.join(home, 'temp'), DSH_HOME: path.join(home, '.dsh'),
+    DSH_HOME: path.join(home, '.dsh'),
     DOUYIN_DESKTOP_USER_DATA: userData,
     DOUYIN_RUNTIME_LOCATION_FILE: locationFile,
     DEEPSEEK_SHARED_MEMORY_DB: paths.memoryDbPath,
@@ -200,8 +196,12 @@ if (mode === 'direct') {
   emit('spawn-host-child-started', {
     pid: hostPid, node: process.versions.node, port, browserHostSha256: hostSha256,
     chromiumSandbox: true, detached, windowsHide, envKeyCount: Object.keys(childEnv).length,
-    userProfile: Boolean(childEnv.USERPROFILE), homeDrive: Boolean(childEnv.HOMEDRIVE),
-    localAppData: Boolean(childEnv.LOCALAPPDATA), systemRoot: Boolean(childEnv.SystemRoot),
+    userProfilePreserved: childEnv.USERPROFILE === process.env.USERPROFILE,
+    appDataPreserved: childEnv.APPDATA === process.env.APPDATA,
+    localAppDataPreserved: childEnv.LOCALAPPDATA === process.env.LOCALAPPDATA,
+    tempPreserved: childEnv.TEMP === process.env.TEMP,
+    homeDrivePreserved: childEnv.HOMEDRIVE === process.env.HOMEDRIVE,
+    systemRootPreserved: childEnv.SystemRoot === process.env.SystemRoot,
   });
   const stateFile = path.join(runtimePaths.browserControlDir, 'browser.json');
   const deadline = Date.now() + 35000;
