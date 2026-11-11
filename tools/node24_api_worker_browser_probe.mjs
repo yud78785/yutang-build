@@ -20,6 +20,7 @@ const playwrightPackage = require('playwright-core/package.json');
 const { chromium } = require('playwright-core');
 assert.equal(playwrightPackage.version, '1.64.0-alpha-1790635538000', 'Pinned Playwright package required.');
 const EXPECTED_HOST_SHA256 = '5716a705e19663f1f6faed52569508b72cf091d3a31766828a7a5434a6eca1bc';
+const DIAGNOSTIC_LAUNCH_TIMEOUT_MS = 20_000;
 const hostPath = path.join(runtime, 'browser-host.mjs');
 const corePath = path.join(runtime, 'core.mjs');
 const launcherPath = path.join(runtime, 'browser-launcher.mjs');
@@ -169,7 +170,7 @@ async function instrumentRuntime() {
   const hostPatches = [
     [
       "    writeState(false);\n    try { installation = await probeInstallation(); } catch {}\n    context = await chromiumImpl.launchPersistentContext(profile, {",
-      "    console.error('PROBE_STAGE:host_env ' + JSON.stringify({hasNodeChannelFd:Object.hasOwn(process.env,'NODE_CHANNEL_FD'),hasNodeChannelSerializationMode:Object.hasOwn(process.env,'NODE_CHANNEL_SERIALIZATION_MODE'),hasNodeUniqueId:Object.hasOwn(process.env,'NODE_UNIQUE_ID'),processConnected:process.connected===true,hasProcessSend:typeof process.send==='function',hasNodeOptions:Boolean(process.env.NODE_OPTIONS),hasNodePath:Boolean(process.env.NODE_PATH),hasElectronRunAsNode:Boolean(process.env.ELECTRON_RUN_AS_NODE),parentPid:process.ppid}));\n    console.error('PROBE_STAGE:before_edge_probe');\n    writeState(false);\n    try { installation = await probeInstallation(); console.error('PROBE_STAGE:edge_probe_finished'); } catch (probeError) { console.error('PROBE_STAGE:edge_probe_failed:' + String(probeError?.name || 'Error')); }\n    console.error('PROBE_STAGE:before_launch_persistent_context');\n    context = await chromiumImpl.launchPersistentContext(profile, {"
+      "    console.error('PROBE_STAGE:host_env ' + JSON.stringify({hasNodeChannelFd:Object.hasOwn(process.env,'NODE_CHANNEL_FD'),hasNodeChannelSerializationMode:Object.hasOwn(process.env,'NODE_CHANNEL_SERIALIZATION_MODE'),hasNodeUniqueId:Object.hasOwn(process.env,'NODE_UNIQUE_ID'),processConnected:process.connected===true,hasProcessSend:typeof process.send==='function',hasNodeOptions:Boolean(process.env.NODE_OPTIONS),hasNodePath:Boolean(process.env.NODE_PATH),hasElectronRunAsNode:Boolean(process.env.ELECTRON_RUN_AS_NODE),parentPid:process.ppid}));\n    console.error('PROBE_STAGE:before_edge_probe');\n    writeState(false);\n    try { installation = await probeInstallation(); console.error('PROBE_STAGE:edge_probe_finished'); } catch (probeError) { console.error('PROBE_STAGE:edge_probe_failed:' + String(probeError?.name || 'Error')); }\n    console.error('PROBE_STAGE:before_launch_persistent_context timeoutMs=' + String(DIAGNOSTIC_LAUNCH_TIMEOUT_MS));\n    context = await chromiumImpl.launchPersistentContext(profile, { timeout: DIAGNOSTIC_LAUNCH_TIMEOUT_MS,"
     ],
     [
       "    const nativeFocus = await installNativeFocusReset(context, { onFailure:",
@@ -259,7 +260,8 @@ function sanitizedEnvironment(base, paths) {
     DOUYIN_MEDIA_RUNTIME_ROOT: paths.mediaRoot,
     DOUYIN_MEDIA_MODELS_DIR: paths.mediaModelsDir,
     DOUYIN_QQ_ROOT: paths.qqRoot,
-    DOUYIN_NODE_EXECUTABLE: process.execPath
+    DOUYIN_NODE_EXECUTABLE: process.execPath,
+    DEBUG: 'pw:browser*'
   });
   for (const key of ['ELECTRON_RUN_AS_NODE', 'NODE_OPTIONS', 'NODE_PATH', 'DEEPSEEK_API_KEY', 'DEEPSEEK_BASE_URL']) delete env[key];
   return env;
@@ -329,6 +331,8 @@ async function main() {
     backendEnvKeyCount: Object.keys(env).length,
     modelKeyPresent: false,
     edgeOutboundBlocked: true,
+    diagnosticLaunchTimeoutMs: DIAGNOSTIC_LAUNCH_TIMEOUT_MS,
+    playwrightBrowserDebugEnabled: true,
     backendStarted: false,
     backendRestart: null,
     firstBackendExit: null,
@@ -342,6 +346,8 @@ async function main() {
     pageTargetCount: 0,
     backendStderrTail: '',
     browserHostLogTail: '',
+    launchReachedAfterMarker: false,
+    launchFailureCategory: null,
     browserState: null,
     processOwnership: null,
     cdp: false
@@ -387,6 +393,8 @@ async function main() {
     } : null;
     hostPid = Number.isSafeInteger(state?.pid) ? state.pid : null;
     report.browserHostLogTail = await tail(logFile);
+    report.launchReachedAfterMarker = report.browserHostLogTail.includes('PROBE_STAGE:after_launch_persistent_context');
+    report.launchFailureCategory = report.browserHostLogTail.match(/TimeoutError|TargetClosedError|browserType\\.launchPersistentContext/i)?.[0] || null;
     report.backendStderrTail = redact(backend.stderr);
     if (hostPid) {
       let processes = [], listeners = [];
@@ -607,6 +615,7 @@ async function main() {
     await killProfileProcesses(profile);
     report.backendStderrTail = redact(backend.stderr);
     report.browserHostLogTail = await tail(logFile);
+    report.launchReachedAfterMarker = report.browserHostLogTail.includes('PROBE_STAGE:after_launch_persistent_context');
     report.pass = pass;
     process.stdout.write('YUTANG_API_WORKER_BROWSER_HOST_RESULT ' + JSON.stringify(report) + '\n');
     await fs.rm(base, { recursive: true, force: true }).catch(() => {});
