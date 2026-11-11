@@ -224,7 +224,7 @@ async function runVariant({ name, port, enableNetworkSandbox, base }) {
 }
 async function main() {
   assert.equal(typeof WebSocket, 'function', 'Node 24 WebSocket support required.');
-  const firewall = psJson("Get-NetFirewallRule -DisplayName 'YuTangNetworkSandboxProbeBlockOutbound' | Where-Object { $_.Enabled -eq 'True' -and $_.Action -eq 'Block' -and $_.Direction -eq 'Outbound' | Select-Object Name | ConvertTo-Json -Compress");
+  const firewall = psJson("Get-NetFirewallRule -DisplayName 'YuTangNetworkSandboxProbeBlockOutbound' | Where-Object { $_.Enabled -eq 'True' -and $_.Action -eq 'Block' -and $_.Direction -eq 'Outbound' } | Select-Object Name | ConvertTo-Json -Compress");
   assert.equal(firewall.length, 1, 'Verified Edge outbound firewall block is required.');
   const base = await fs.mkdtemp(path.join(process.env.RUNNER_TEMP || tmpdir(), 'yutang-network-sandbox-ab-'));
   const report = {
