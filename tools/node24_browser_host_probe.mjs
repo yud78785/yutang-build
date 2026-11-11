@@ -152,8 +152,9 @@ async function main() {
     }
 
     const hostPort = 9342;
-    commonDir = path.join(home, '.dsh', 'douyin-browser');
-    if (fs.existsSync(commonDir)) throw new Error('Unexpected pre-existing YuTang browser state on the disposable runner; refusing to overwrite it.');
+    const candidateCommon = path.join(home, '.dsh', 'douyin-browser');
+    if (fs.existsSync(candidateCommon)) throw new Error('Unexpected pre-existing YuTang browser state on the disposable runner; refusing to overwrite it.');
+    commonDir = candidateCommon;
     const common = commonDir;
     const profile = path.join(common, 'cli-profile');
     const control = path.join(common, 'control');
