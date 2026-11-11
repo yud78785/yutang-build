@@ -1,0 +1,18 @@
+{
+  "artifact_name": "YuTang-Windows-CANDIDATE-NOT-RELEASE",
+  "artifact_id": 13854203932,
+  "actions_run": 43020485704,
+  "runner_commit": "c9fe8e8d9a59a53715ee3b4290d5c37dca85554e",
+  "source_commit": "912873e2556d16a088d81dcbc6f7c0060614dd58",
+  "artifact_sha256": "07ce5af17f78a7d0e9f5d730652fe7c0e887cb7910df5cf73ce0c6192b6c6eb1",
+  "artifact_size": 124753218,
+  "exe_name": "Dafeiyu-Douyin-API-1.4.6-win-x64.exe",
+  "exe_sha256": "8acc8de7ba07e725ec04c06fb00e741998c4d1c887b596bf9daaf5ebfb0cc917",
+  "exe_size": 124737099,
+  "signature_status": "NOT_YET_REVALIDATED",
+  "build_verified": true,
+  "packaged_runtime_verified": false,
+  "release_status": "NOT_RELEASED",
+  "expires_at": "2026-11-18T12:32:37Z",
+  "notes": "Candidate includes renderer-ready outer IPC budget 7000 ms (formerly 3000) and NetworkServiceSandbox flag. Exact ZIP/EXE SHA-256 and 2 ZIP entries verified without EXE execution. Packaged Windows cold start, sandbox type, process isolation, lifecycle pending."
+}

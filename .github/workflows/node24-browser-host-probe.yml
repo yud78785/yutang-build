@@ -1,0 +1,85 @@
+name: Node 24 browser-host reproduction (isolated, no accounts)
+
+on:
+  pull_request:
+    paths:
+      - 'tools/node24_browser_host_probe.mjs'
+      - '.github/workflows/node24-browser-host-probe.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  node24-browser-host:
+    runs-on: windows-2025
+    timeout-minutes: 25
+    steps:
+      - name: Checkout reviewed probe (no persisted credentials)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Obtain exact upstream source and stage locked Node 24 runtime
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          git -c core.autocrlf=false clone --no-checkout https://github.com/LockyBee/dsh-douyin-agent.git upstream
+          if($LASTEXITCODE -ne 0) { throw 'Upstream clone failed' }
+          git -C upstream config core.autocrlf false
+          git -C upstream checkout --detach 912873e2556d16a088d81dcbc6f7c0060614dd58
+          if($LASTEXITCODE -ne 0) { throw 'Pinned upstream checkout failed' }
+          $actual=(git -C upstream rev-parse HEAD).Trim()
+          if($actual -ne '912873e2556d16a088d81dcbc6f7c0060614dd58') { throw 'Upstream source identity mismatch' }
+          node tools/patch_candidate_browser_host.mjs upstream/browser-host.mjs
+          if($LASTEXITCODE -ne 0) { throw 'Exact candidate sandbox patch failed' }
+          node --check upstream/browser-host.mjs
+          if($LASTEXITCODE -ne 0) { throw 'Patched browser-host syntax failed' }
+          npm install --global pnpm@10.20.0 --no-fund --no-audit
+          if($LASTEXITCODE -ne 0) { throw 'Pinned pnpm install failed' }
+          Push-Location upstream/desktop
+          try {
+            pnpm --ignore-workspace install --ignore-scripts --frozen-lockfile
+            if($LASTEXITCODE -ne 0) { throw 'Desktop lockfile install failed' }
+            node scripts/stage-api-runtime.mjs --prepare-node-only
+            if($LASTEXITCODE -ne 0) { throw 'Pinned Node 24 acquisition failed' }
+            node scripts/stage-api-runtime.mjs --allow-missing-ui
+            if($LASTEXITCODE -ne 0) { throw 'Locked pure API runtime staging failed' }
+          } finally { Pop-Location }
+          $runtime=(Resolve-Path 'upstream/desktop/.cache/api-runtime').Path
+          $nodePath=(Resolve-Path 'upstream/desktop/.cache/generated/node/node.exe').Path
+          $hostFile=Join-Path $runtime 'browser-host.mjs'
+          $hostHash=(Get-FileHash -LiteralPath $hostFile -Algorithm SHA256).Hash.ToLowerInvariant()
+          if($hostHash -ne '29e77cca0cb3c0bdf3750de3727ffde9e2e761a70d90f992eb24cd7bcbbb1a9d') { throw "Staged browser-host patch hash mismatch: $hostHash" }
+          Copy-Item -LiteralPath 'tools/node24_browser_host_probe.mjs' -Destination (Join-Path $runtime 'node24_browser_host_probe.mjs')
+          "YUTANG_RUNTIME=$runtime" | Out-File -LiteralPath $env:GITHUB_ENV -Encoding utf8 -Append
+          "YUTANG_NODE=$nodePath" | Out-File -LiteralPath $env:GITHUB_ENV -Encoding utf8 -Append
+          & $nodePath -p "process.versions.node"
+          if($LASTEXITCODE -ne 0) { throw 'Bundled Node probe failed' }
+          & $nodePath --check (Join-Path $runtime 'node24_browser_host_probe.mjs')
+          if($LASTEXITCODE -ne 0) { throw 'Bundled Node probe syntax failed' }
+          Write-Host "CANDIDATE_BROWSER_HOST_SHA256=$hostHash"
+
+      - name: Block Edge outbound networking on disposable runner
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $candidates=@(
+            (Join-Path $env:ProgramFiles 'Microsoft\Edge\Application\msedge.exe'),
+            (Join-Path ([Environment]::GetFolderPath('ProgramFilesX86')) 'Microsoft\Edge\Application\msedge.exe')
+          )
+          $edge=@($candidates | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf })
+          if($edge.Count -ne 1) { throw 'Expected exactly one Microsoft Edge binary' }
+          if((Get-AuthenticodeSignature -LiteralPath $edge[0]).Status -ne 'Valid') { throw 'Microsoft Edge signature invalid' }
+          $rule=New-NetFirewallRule -DisplayName 'YuTangNode24HostProbeBlockOutbound' -Direction Outbound -Program $edge[0] -Action Block -Profile Any -ErrorAction Stop
+          if($rule.Enabled -ne 'True' -or $rule.Action -ne 'Block' -or $rule.Direction -ne 'Outbound') { throw 'Edge outbound block not verified' }
+          Write-Host 'EDGE_OUTBOUND_BLOCK_VERIFIED: yes'
+
+      - name: Compare raw Playwright and exact detached browser-host under Node 24
+        shell: pwsh
+        env:
+          YUTANG_EDGE_FIREWALL_CONFIRMED: 'yes'
+        run: |
+          $ErrorActionPreference='Stop'
+          & $env:YUTANG_NODE (Join-Path $env:YUTANG_RUNTIME 'node24_browser_host_probe.mjs')
+          if($LASTEXITCODE -ne 0) { throw 'Node 24 browser-host reproduction did not pass' }

@@ -1,0 +1,93 @@
+name: Disposable Windows packaged Edge ownership experiment (NO ACCOUNTS)
+
+on:
+  push:
+    branches:
+      - audit/offline-candidate-identity-20261111
+    paths:
+      - tools/windows_packaged_edge_smoke.mjs
+      - .github/workflows/windows-edge-ownership.yml
+  pull_request:
+    paths:
+      - tools/windows_packaged_edge_smoke.mjs
+      - .github/workflows/windows-edge-ownership.yml
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  packaged-edge-ownership:
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - name: Checkout reviewed source without persisting Git credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Run pure synthetic process-lineage regression (no EXE)
+        shell: pwsh
+        run: |
+          node --version
+          node --check tools/windows_packaged_edge_smoke.mjs
+          node tools/windows_packaged_edge_smoke.mjs --self-test
+          if ($LASTEXITCODE -ne 0) { throw 'Process lineage unit tests rejected program' }
+
+      - name: Download and verify exact new Network sandbox candidate
+        id: prepare
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $ProgressPreference='SilentlyContinue'
+          $archive=Join-Path $env:RUNNER_TEMP 'YuTang-Unmodified-GitHub-Candidate.zip'
+          $headers=@{Authorization="Bearer $env:GH_TOKEN";Accept='application/vnd.github+json';'X-GitHub-Api-Version'='2022-11-28'}
+          Invoke-WebRequest -Uri 'https://api.github.com/repos/yud78785/yutang-build/actions/artifacts/13854203932/zip' -Headers $headers -MaximumRedirection 5 -OutFile $archive
+          $expected='07ce5af17f78a7d0e9f5d730652fe7c0e887cb7910df5cf73ce0c6192b6c6eb1'
+          if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected) { throw 'Identity mismatch: EXE must not execute' }
+          $result=python tools/verify_candidate.py $archive
+          if ($LASTEXITCODE -ne 0) { throw 'Safety preflight failed: EXE must not execute' }
+          $parsed=$result -join [Environment]::NewLine | ConvertFrom-Json
+          if ($parsed.verdict -ne 'PASS_FILE_IDENTITY_ONLY') { throw 'Candidate identity failed' }
+          $directory=Join-Path $env:RUNNER_TEMP 'YuTang-Original-Candidate-Only'
+          [System.IO.Compression.ZipFile]::ExtractToDirectory($archive,$directory)
+          $exe=Join-Path $directory 'Dafeiyu-Douyin-API-1.4.6-win-x64.exe'
+          if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw 'Candidate EXE missing' }
+          "exe=$exe" | Out-File -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host 'EXACT_CANDIDATE_VERIFIED: PASS_FILE_IDENTITY_ONLY; signing trust is NOT established.'
+
+      - name: Block Microsoft Edge outbound networking on this throwaway VM before EXE launch
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $locations=@(
+            (Join-Path $env:ProgramFiles 'Microsoft\Edge\Application\msedge.exe'),
+            (Join-Path ${env:ProgramFiles(x86)} 'Microsoft\Edge\Application\msedge.exe')
+          )
+          $edge=@($locations | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf })
+          if ($edge.Count -ne 1) { throw "Expected one installed Microsoft Edge binary, found $($edge.Count). Refusing launch." }
+          $edgeHash=(Get-AuthenticodeSignature -LiteralPath $edge[0])
+          if ($edgeHash.Status -ne 'Valid') { throw "Installed Microsoft Edge not validly signed. Refusing launch." }
+          $rule=New-NetFirewallRule -DisplayName 'YuTangEphemeralEdgeOutboundBlock' -Direction Outbound -Program $edge[0] -Action Block -Profile Any -ErrorAction Stop
+          if ($rule.Action -ne 'Block' -or $rule.Direction -ne 'Outbound' -or $rule.Enabled -ne 'True') { throw 'Outbound firewall block unproven; refusing launch' }
+          "YUTANG_EDGE_EXE=$($edge[0])" | Out-File -LiteralPath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host 'EDGE_OUTBOUND_BLOCK: installed Microsoft Edge traffic blocked in disposable CI VM, no Douyin requests by browser.'
+
+      - name: Launch verified candidate with empty CI profile; prove Edge process and CDP binding ownership
+        shell: pwsh
+        env:
+          YUTANG_EDGE_FIREWALL_CONFIRMED: 'yes'
+        run: |
+          node tools/windows_packaged_edge_smoke.mjs '${{ steps.prepare.outputs.exe }}'
+          if ($LASTEXITCODE -ne 0) { throw 'CANDIDATE RUNTIME GATE FAILED; not a release.' }
+
+      - name: Keep release blocked until Douyin playback and model reasoning are proven
+        if: always()
+        shell: pwsh
+        run: |
+          Write-Host 'CANDIDATE_ONLY: no personal accounts, no model key, no posting, no data export, no Windows user PC.'
+          Write-Host 'SANDBOX_GATE: the runtime probe must separately verify renderer AppContainer and Edge Network Service sandbox type Network.'
+          Write-Host 'LIMITATION: Edge sandbox type is not proof of Windows Network Service token restrictions or AppContainer.'
+          Write-Host 'NOT_PROVEN: real Douyin video playback, model reasoning, long-term autonomy, general user PC safety.'

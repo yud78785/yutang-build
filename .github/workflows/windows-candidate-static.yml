@@ -1,0 +1,60 @@
+name: Windows candidate static inspection (NO EXE EXECUTION)
+
+on:
+  push:
+    branches:
+      - audit/offline-candidate-identity-20261111
+    paths:
+      - tools/windows_candidate_preflight.ps1
+      - .github/workflows/windows-candidate-static.yml
+  pull_request:
+    paths:
+      - tools/windows_candidate_preflight.ps1
+      - .github/workflows/windows-candidate-static.yml
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  windows-static:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact reviewed commit (no persisted credentials)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Download immutable original artifact with short-lived read-only token
+        id: download
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ProgressPreference = 'SilentlyContinue'
+          $url = 'https://api.github.com/repos/yud78785/yutang-build/actions/artifacts/13854203932/zip'
+          $output = Join-Path $env:RUNNER_TEMP 'YuTang-Windows-CANDIDATE-NOT-RELEASE.zip'
+          $headers = @{ Authorization = "Bearer $env:GH_TOKEN"; Accept = 'application/vnd.github+json'; 'X-GitHub-Api-Version' = '2022-11-28' }
+          Invoke-WebRequest -Uri $url -Headers $headers -MaximumRedirection 5 -OutFile $output
+          if (-not (Test-Path -LiteralPath $output -PathType Leaf)) { throw 'Download missing' }
+          $actual = (Get-FileHash -LiteralPath $output -Algorithm SHA256).Hash.ToLowerInvariant()
+          $expected = '07ce5af17f78a7d0e9f5d730652fe7c0e887cb7910df5cf73ce0c6192b6c6eb1'
+          if ($actual -ne $expected) { throw 'Downloaded artifact is not original candidate' }
+          "archive=$output" | Out-File -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host 'PASS: identical archived candidate ZIP retrieved; download credentials limited to this step.'
+
+      - name: Run Windows static file identity and native Authenticode inspection only
+        shell: pwsh
+        run: |
+          python --version
+          & ./tools/windows_candidate_preflight.ps1 -Archive '${{ steps.download.outputs.archive }}' -ReportDirectory (Join-Path $env:RUNNER_TEMP 'YuTang-Static-NoExecute')
+          if (-not $?) { throw 'Windows static preflight did not pass' }
+          Get-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'YuTang-Static-NoExecute/windows-static-verification.json') -Raw
+
+      - name: Reconfirm EXE was not launched
+        shell: pwsh
+        run: |
+          Write-Host 'NO_EXE_EXECUTION: Candidate PE file was only decompressed and inspected; no Start-Process or invocation.'
+          Write-Host 'NOT_PROVEN: runtime Edge sandbox, Douyin, model reasoning or long-term integration.'
