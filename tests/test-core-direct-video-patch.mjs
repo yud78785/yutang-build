@@ -54,8 +54,8 @@ const hash = createHash('sha256').update(fixture).digest('hex');
 assert.notEqual(hash,EXPECTED_POST_JOBGUARD_SHA256,'synthetic fixture must not be mistaken for real core');
 assert.throws(()=>applyPatch(fixture),/SHA256 mismatch/);
 const {patched} = applyPatch(fixture,hash);
-assert.match(patched,/initialDirectVideoUrl \?\? RECOMMEND/);
-assert.match(patched,/isSameDirectVideoPage\(this.page.url\(\), directTarget\)/);
+assert.match(patched,/initialDirectVideoReceipt.completed = true/);
+assert.match(patched,/initialDirectVideoReceipt\?\.completed !== true/);
 const context = vm.createContext({URL,globalThis:{}});
 vm.runInContext(patched,context,{timeout:1000});
 const Probe = context.globalThis.Probe;
@@ -67,12 +67,12 @@ await two.execute('douyin_open',{});
 assert.deepEqual(Array.from(two.visited),['https://www.douyin.com/?recommend=1'],'non-target action preserves original feed');
 const three = new Probe(direct+'?tracked=1');
 await three.execute('douyin_open_video',{url:direct});
-assert.deepEqual(Array.from(three.visited),[],'same video path must not be navigated twice');
+assert.deepEqual(Array.from(three.visited),[direct],'existing page needs re-navigation unless this connect navigated successfully');
 const four = new Probe();
 await four.execute('douyin_open_video',{url:'https://evil.example/video/'+id});
 assert.deepEqual(Array.from(four.visited),['https://www.douyin.com/?recommend=1',direct],'foreign URL not eligible for new fastpath');
 const five = new Probe();
-await five.connect(null,{initialDirectVideoUrl:'https://evil.example/video/'+id}).then(
+await five.connect(null,{initialDirectVideoUrl:'https://evil.example/video/'+id, initialDirectVideoReceipt:{completed:false}}).then(
   ()=>assert.fail('unsafe direct-target option was accepted'),
   e=>assert.match(String(e.message),/not verified/)
 );
@@ -80,4 +80,10 @@ await five.connect(null,{initialDirectVideoUrl:'https://evil.example/video/'+id}
 for (const tampered of [fixture.replace(actionAnchor,''),fixture+'\n'+actionAnchor,fixture.replace('else await this.navigate(RECOMMEND,signal);','else {}'),patched]) {
   assert.throws(()=>applyPatch(tampered,createHash('sha256').update(tampered).digest('hex')),/(anchor mismatch|already present)/);
 }
-console.log('PASS direct-video canonical route, no-duplicate, fallback, closed-origin and negative patch regressions (21 assertions)');
+const six=new Probe('https://www.douyin.com/?recommend=1');
+await six.execute('douyin_open_video',{url:direct});
+assert.deepEqual(Array.from(six.visited),[direct],'prepared nonblank page must navigate explicitly');
+const seven=new Probe();
+seven.navigate=async()=>{throw new Error('injected navigation failure');};
+await assert.rejects(seven.execute('douyin_open_video',{url:direct}),/injected navigation failure/);
+console.log('PASS canonical target, navigation receipt, no duplicate on fresh page, strict fallback and negative patch regressions');

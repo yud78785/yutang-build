@@ -31,21 +31,26 @@ export function isSameDirectVideoPage(pageAddress, target) {
 
 const VIDEO_ACTIONS = "const VIDEO_ACTIONS=new Set(['douyin_open','douyin_search','douyin_open_video','douyin_next','douyin_previous','douyin_observe','douyin_screenshot','douyin_video_zoom','douyin_play','douyin_listen']);";
 const CONNECT_BEFORE = '  async connect(signal, { launch = true, create = true, authorizePrepare } = {}) {';
-const CONNECT_AFTER = `  async connect(signal, { launch = true, create = true, authorizePrepare, initialDirectVideoUrl = null } = {}) {
-    if (initialDirectVideoUrl !== null && normalizeDirectVideoUrl(initialDirectVideoUrl) !== initialDirectVideoUrl)
+const CONNECT_AFTER = `  async connect(signal, { launch = true, create = true, authorizePrepare, initialDirectVideoUrl = null, initialDirectVideoReceipt = null } = {}) {
+    if (initialDirectVideoUrl !== null && (normalizeDirectVideoUrl(initialDirectVideoUrl) !== initialDirectVideoUrl ||
+        !initialDirectVideoReceipt || initialDirectVideoReceipt.completed !== false))
       throw new Error('Direct video initialization target was not verified.');`;
 const FEED_BEFORE = '       else await this.navigate(RECOMMEND,signal);';
-const FEED_AFTER = '       else await this.navigate(initialDirectVideoUrl ?? RECOMMEND,signal);';
+const FEED_AFTER = `       else if (initialDirectVideoUrl) {
+         await this.navigate(initialDirectVideoUrl,signal);
+         initialDirectVideoReceipt.completed = true;
+       } else await this.navigate(RECOMMEND,signal);`;
 const CALL_BEFORE = '        await this.connect(signal);\n        aborted(signal);';
 const CALL_AFTER = `        const initialDirectVideoUrl = name === 'douyin_open_video' ? normalizeDirectVideoUrl(args.url) : null;
-        await this.connect(signal, initialDirectVideoUrl ? { initialDirectVideoUrl } : undefined);
+        const initialDirectVideoReceipt = initialDirectVideoUrl ? { completed: false } : null;
+        await this.connect(signal, initialDirectVideoUrl ? { initialDirectVideoUrl, initialDirectVideoReceipt } : undefined);
         aborted(signal);`;
 const OPEN_BEFORE = '          if (args.url) await this.navigate(`https://www.douyin.com/video/${/\\/video\\/(\\d+)/.exec(args.url)[1]}`,signal);';
 const OPEN_AFTER = `          if (args.url) {
             const directTarget = \`https://www.douyin.com/video/\${/\\/video\\/(\\d+)/.exec(args.url)[1]}\`;
-            if (!isSameDirectVideoPage(this.page.url(), directTarget)) await this.navigate(directTarget,signal);
+            if (initialDirectVideoReceipt?.completed !== true) await this.navigate(directTarget,signal);
           }`;
-const HELPERS = normalizeDirectVideoUrl.toString() + '\n\n' + isSameDirectVideoPage.toString();
+const HELPERS = normalizeDirectVideoUrl.toString();
 
 function swapOnce(s, before, after, label) {
   if (s.split(before).length !== 2 || s.includes(after)) throw new Error(label + ' pinned source anchor mismatch; refusing patch.');
