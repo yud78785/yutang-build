@@ -86,7 +86,14 @@ function inspectOwnership(processes, hostPid, backendPid, profile, listeners) {
     edgeNoSandboxArgCount: edge.filter(item => /--no-sandbox|--disable-setuid-sandbox/i.test(String(item.CommandLine || ''))).length,
     listenerCount: listeners.length,
     listenerOwnersAreEdgeDescendants: listenerRows.length > 0 && listenerRows.every(item => item.ownerIsEdgeDescendant),
-    listenersLoopbackOnly: listenerRows.length > 0 && listenerRows.every(item => item.loopback)
+    listenersLoopbackOnly: listenerRows.length > 0 && listenerRows.every(item => item.loopback),
+    edgeLaunchSummaries: edge.slice(0, 10).map(item => {
+      const command = String(item.CommandLine || '');
+      const type = command.match(/--type=([^\\s]+)/i);
+      const port = command.match(/--remote-debugging-port=([^\\s]+)/i);
+      const address = command.match(/--remote-debugging-address=([^\\s]+)/i);
+      return { pid:Number(item.ProcessId), parentPid:Number(item.ParentProcessId), processType:type?.[1] || 'browser', port:port?.[1] || '', address:address?.[1] || '', profileMatches:command.toLowerCase().includes(profile.toLowerCase()), noSandbox:/--no-sandbox|--disable-setuid-sandbox/i.test(command) };
+    })
   };
 }
 async function tail(file, maximum = 6000) {
@@ -113,7 +120,7 @@ async function instrumentRuntime() {
   const hostPatches = [
     [
       "    writeState(false);\n    try { installation = await probeInstallation(); } catch {}\n    context = await chromiumImpl.launchPersistentContext(profile, {",
-      "    console.error('PROBE_STAGE:before_edge_probe');\n    writeState(false);\n    try { installation = await probeInstallation(); console.error('PROBE_STAGE:edge_probe_finished'); } catch (probeError) { console.error('PROBE_STAGE:edge_probe_failed:' + String(probeError?.name || 'Error')); }\n    console.error('PROBE_STAGE:before_launch_persistent_context');\n    context = await chromiumImpl.launchPersistentContext(profile, {"
+      "    console.error('PROBE_STAGE:host_env ' + JSON.stringify({hasNodeChannelFd:Object.hasOwn(process.env,'NODE_CHANNEL_FD'),hasNodeChannelSerializationMode:Object.hasOwn(process.env,'NODE_CHANNEL_SERIALIZATION_MODE'),hasNodeUniqueId:Object.hasOwn(process.env,'NODE_UNIQUE_ID'),processConnected:process.connected===true,hasProcessSend:typeof process.send==='function',hasNodeOptions:Boolean(process.env.NODE_OPTIONS),hasNodePath:Boolean(process.env.NODE_PATH),hasElectronRunAsNode:Boolean(process.env.ELECTRON_RUN_AS_NODE),parentPid:process.ppid}));\n    console.error('PROBE_STAGE:before_edge_probe');\n    writeState(false);\n    try { installation = await probeInstallation(); console.error('PROBE_STAGE:edge_probe_finished'); } catch (probeError) { console.error('PROBE_STAGE:edge_probe_failed:' + String(probeError?.name || 'Error')); }\n    console.error('PROBE_STAGE:before_launch_persistent_context');\n    context = await chromiumImpl.launchPersistentContext(profile, {"
     ],
     [
       "    const nativeFocus = await installNativeFocusReset(context, { onFailure:",
@@ -139,7 +146,7 @@ async function instrumentRuntime() {
   const corePatches = [
     [
       "        const child = spawn(resolveNodeExecutable(), [",
-      "        console.error('CORE_PROBE:before_node_resolve');\n        const resolvedNode = resolveNodeExecutable();\n        console.error('CORE_PROBE:after_node_resolve');\n        const child = spawn(resolvedNode, ["
+      "        console.error('CORE_PROBE:api_worker_env ' + JSON.stringify({hasNodeChannelFd:Object.hasOwn(process.env,'NODE_CHANNEL_FD'),hasNodeChannelSerializationMode:Object.hasOwn(process.env,'NODE_CHANNEL_SERIALIZATION_MODE'),hasNodeUniqueId:Object.hasOwn(process.env,'NODE_UNIQUE_ID'),processConnected:process.connected===true,hasProcessSend:typeof process.send==='function',hasNodeOptions:Boolean(process.env.NODE_OPTIONS),hasNodePath:Boolean(process.env.NODE_PATH),hasElectronRunAsNode:Boolean(process.env.ELECTRON_RUN_AS_NODE),cwdName:path.basename(process.cwd()),nodeVersion:process.versions.node}));\n        console.error('CORE_PROBE:before_node_resolve');\n        const resolvedNode = resolveNodeExecutable();\n        console.error('CORE_PROBE:after_node_resolve');\n        const child = spawn(resolvedNode, ["
     ],
     [
       "        hostPid = child.pid;\n        child.unref();",
