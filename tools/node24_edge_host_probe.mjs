@@ -14,8 +14,8 @@ const { readFile, writeFile } = await import('node:fs/promises');
 const { createHash } = await import('node:crypto');
 const hostSource = await readFile(path.join(root, 'browser-host.mjs'));
 const hostSha256 = createHash('sha256').update(hostSource).digest('hex');
-const expectedHostSha256 = '5716a705e19663f1f6faed52569508b72cf091d3a31766828a7a5434a6eca1bc';
-if (hostSha256 !== expectedHostSha256 || !hostSource.toString('utf8').includes('chromiumSandbox: true')) throw new Error('Probe requires the exact candidate-patched browser-host source.');
+const expectedHostSha256 = '29e77cca0cb3c0bdf3750de3727ffde9e2e761a70d90f992eb24cd7bcbbb1a9d';
+if (hostSha256 !== expectedHostSha256 || !hostSource.toString('utf8').includes('chromiumSandbox: true') || !hostSource.toString('utf8').includes('--enable-features=NetworkServiceSandbox')) throw new Error('Probe requires the exact renderer and Network Service sandbox-patched browser-host source.');
 let instrumentedHost = hostSource.toString('utf8');
 const stagePatches = [
   ["    writeState(false);\n    try { installation = await probeInstallation(); } catch {}\n    context = await chromiumImpl.launchPersistentContext(profile, {",
@@ -55,7 +55,7 @@ if (mode === 'direct') {
       viewport: null,
       chromiumSandbox: true,
       ignoreDefaultArgs: ['--mute-audio'],
-      args: ['--remote-debugging-port=' + port, '--remote-debugging-address=127.0.0.1', '--autoplay-policy=no-user-gesture-required'],
+      args: ['--remote-debugging-port=' + port, '--remote-debugging-address=127.0.0.1', '--autoplay-policy=no-user-gesture-required', '--enable-features=NetworkServiceSandbox'],
       timeout: 30000,
     });
     emit('direct-after-launch', { pages: context.pages().length });
@@ -115,7 +115,7 @@ if (mode === 'direct') {
     log: (...args) => emit('host-log', { message: String(args.join(' ')).slice(0, 300) }),
     error: (...args) => emit('host-error', { message: sanitizeBrowserFailure(args.join(' ')) }),
   };
-  emit('host-entry', { node: process.versions.node, port, browserHostSha256: hostSha256, chromiumSandbox: true });
+  emit('host-entry', { node: process.versions.node, port, browserHostSha256: hostSha256, chromiumSandbox: true, networkServiceSandbox: true });
   try {
     const result = await runBrowserHost({ profile, controlDir, port, chromiumImpl: instrumentedChromium, logger });
     emit('host-result', { started: result.started === true, exitCode: result.exitCode ?? null, failureCode: result.failure?.code || null, failure: result.failure?.details || null });
@@ -195,7 +195,7 @@ if (mode === 'direct') {
   child.unref();
   emit('spawn-host-child-started', {
     pid: hostPid, node: process.versions.node, port, browserHostSha256: hostSha256,
-    chromiumSandbox: true, detached, windowsHide, envKeyCount: Object.keys(childEnv).length,
+    chromiumSandbox: true, networkServiceSandbox: true, detached, windowsHide, envKeyCount: Object.keys(childEnv).length,
     userProfilePreserved: childEnv.USERPROFILE === process.env.USERPROFILE,
     appDataPreserved: childEnv.APPDATA === process.env.APPDATA,
     localAppDataPreserved: childEnv.LOCALAPPDATA === process.env.LOCALAPPDATA,
