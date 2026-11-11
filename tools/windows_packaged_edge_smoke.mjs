@@ -252,11 +252,14 @@ async function run(exeFile) {
   } finally {
     // The GitHub-hosted VM is disposable. Only terminate processes whose command line contains this unique profile.
     try {
-      const state=await readJSON(control);
+      let state=null;
+      try { state=await readJSON(control); } catch {}
       if(Number.isSafeInteger(state?.pid)&&state.pid>0) {
         try { execFileSync('taskkill.exe',['/PID',String(state.pid),'/T','/F'],{stdio:'ignore',windowsHide:true,timeout:10000}); } catch {}
       }
-      try { execFileSync('taskkill.exe',['/PID',String(child.pid),'/T','/F'],{stdio:'ignore',windowsHide:true,timeout:10000}); } catch {}
+      if(Number.isSafeInteger(child.pid)&&child.pid>0) {
+        try { execFileSync('taskkill.exe',['/PID',String(child.pid),'/T','/F'],{stdio:'ignore',windowsHide:true,timeout:10000}); } catch {}
+      }
       await delay(1000);
       let rows=[];
       try { const value=ps("Get-CimInstance Win32_Process -Filter \"Name = 'msedge.exe' OR Name = 'node.exe'\" | Select-Object ProcessId,Name,CommandLine | ConvertTo-Json -Compress -Depth 3"); rows=Array.isArray(value)?value:(value?[value]:[]); }
