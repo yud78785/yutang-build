@@ -181,12 +181,8 @@ function sanitizedEnvironment(base, paths) {
   return env;
 }
 async function main() {
-  const firewall = powershellJson("Get-NetFirewallRule -DisplayName 'YuTangApiWorkerHostProbeBlockOutbound' | Select-Object Enabled,Action,Direction | ConvertTo-Json -Compress");
-  const firewallEnabled = firewall.length === 1 && (firewall[0].Enabled === true || String(firewall[0].Enabled).toLowerCase() === 'true');
-  const firewallAction = firewall.length === 1 && String(firewall[0].Action).toLowerCase() === 'block';
-  const firewallDirection = firewall.length === 1 && String(firewall[0].Direction).toLowerCase() === 'outbound';
-  assert.ok(firewallEnabled && firewallAction && firewallDirection,
-    'Verified Edge outbound firewall rule is required; observed=' + JSON.stringify(firewall));
+  const firewall = powershellJson("Get-NetFirewallRule -DisplayName 'YuTangApiWorkerHostProbeBlockOutbound' | Where-Object { $_.Enabled -eq 'True' -and $_.Action -eq 'Block' -and $_.Direction -eq 'Outbound' } | Select-Object Name | ConvertTo-Json -Compress");
+  assert.ok(firewall.length === 1, 'Verified Edge outbound firewall rule is required.');
   await instrumentRuntime();
 
   const base = await fs.mkdtemp(path.join(process.env.RUNNER_TEMP || tmpdir(), 'yutang-apiworker-host-'));
