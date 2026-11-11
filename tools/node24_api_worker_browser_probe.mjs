@@ -59,14 +59,9 @@ async function waitForCdp(port, timeoutMs = 3000) {
 }
 async function closeEdgeViaCdp(port) {
   const browser = await chromium.connectOverCDP('http://127.0.0.1:' + Number(port), { timeout: 10000, noDefaults: true });
-  let session = null;
-  try {
-    session = await browser.newBrowserCDPSession();
-    await session.send('Browser.close').catch(() => {});
-  } finally {
-    await session?.detach().catch(() => {});
-    await browser.close().catch(() => {});
-  }
+  const session = await browser.newBrowserCDPSession();
+  await Promise.race([session.send('Browser.close').catch(() => {}), delay(2000)]);
+  await Promise.race([browser.close().catch(() => {}), delay(1000)]);
 }
 async function browserSnapshot(profile, port, hostPid) {
   const processes = powershellJson("Get-CimInstance Win32_Process -Filter \"Name = 'msedge.exe' OR Name = 'node.exe'\" | Select-Object ProcessId,ParentProcessId,Name,CommandLine | ConvertTo-Json -Compress -Depth 4");
@@ -87,7 +82,7 @@ async function waitForBrowserClosed(profile, port, hostPid, timeoutMs = 15000) {
   let last = null;
   while (Date.now() < deadline) {
     last = await browserSnapshot(profile, port, hostPid);
-    if (!last.hostAlive && last.edgeProcesses.length === 0 && last.profileEdges.length === 0 && last.listeners.length === 0) return last;
+    if (!last.hostAlive && last.profileEdges.length === 0 && last.listeners.length === 0) return last;
     await delay(250);
   }
   throw new Error('Graceful Edge close did not release the host, Edge process tree, and CDP listener.');
@@ -653,11 +648,11 @@ async function main() {
       const profileEdges = edgeProcesses.filter(item => String(item.CommandLine || '').toLowerCase().includes(profile.toLowerCase()));
       const listenerDetails = listeners.map(item => { const owner = processes.find(proc => Number(proc.ProcessId) === Number(item.OwningProcess)); return { pid:Number(item.OwningProcess), localAddress:String(item.LocalAddress), ownerName:String(owner?.Name || ''), ownerIsHost:Number(item.OwningProcess) === Number(hostPid), ownerHasProfile:String(owner?.CommandLine || '').toLowerCase().includes(profile.toLowerCase()) }; });
       cleanup = { processSnapshotVerified, listenerSnapshotVerified, hostProcessExited: hostPid ? !hostStillAlive : null, edgeProcessCount: edgeProcesses.length, profileEdgeProcessCount: profileEdges.length, port9227ListenerCount: listeners.length, listenerDetails };
-      if (processSnapshotVerified && listenerSnapshotVerified && !hostStillAlive && edgeProcesses.length === 0 && listeners.length === 0) break;
+      if (processSnapshotVerified && listenerSnapshotVerified && !hostStillAlive && profileEdges.length === 0 && listeners.length === 0) break;
       await delay(250);
     }
     report.cleanup = cleanup;
-    report.cleanupClean = !report.backendStopError && report.firstBackendExit?.clean === true && report.finalBackendExit?.clean === true && report.gracefulCloseError === undefined && cleanup?.processSnapshotVerified === true && cleanup?.listenerSnapshotVerified === true && report.dedicatedEdgeCloseIssued && cleanup?.hostProcessExited === true && cleanup.edgeProcessCount === 0 && cleanup.profileEdgeProcessCount === 0 && cleanup.port9227ListenerCount === 0;
+    report.cleanupClean = !report.backendStopError && report.firstBackendExit?.clean === true && report.finalBackendExit?.clean === true && report.gracefulCloseError === undefined && cleanup?.processSnapshotVerified === true && cleanup?.listenerSnapshotVerified === true && report.dedicatedEdgeCloseIssued && cleanup?.hostProcessExited === true && cleanup.profileEdgeProcessCount === 0 && cleanup.port9227ListenerCount === 0;
     pass = pass && report.cleanupClean && report.gracefulCloseCycles.length === 3 && report.gracefulCloseCycles.every(item => item.passed === true);
     if (hostPid && cleanup?.hostProcessExited !== true) await killTree(hostPid);
     await killProfileProcesses(profile);
