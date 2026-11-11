@@ -426,6 +426,68 @@ async function waitForBrowserGone(hostPid, profile, controlDir, port) {
 }
 
 
+
+async function forceWindowsDesktopExit({ candidatePid, exeFile, backendPid, hostPid, profile, controlDir, unrelatedProfile }) {
+  // In an ephemeral Windows CI runner only. Kill the verified Electron main process,
+  // not its process tree; surviving children are release-blocking.
+  const rows = asRows(ps("Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,CommandLine,ExecutablePath | ConvertTo-Json -Compress -Depth 4"));
+  const candidate = rows.find(p => Number(p.ProcessId) === candidatePid);
+  assert.ok(candidate && String(candidate.ExecutablePath || '').toLowerCase() === path.resolve(exeFile).toLowerCase(),
+    'Refusing forced desktop exit: packaged candidate EXE identity not proven');
+  const backend = rows.find(p => Number(p.ProcessId) === backendPid);
+  assert.ok(backend && /node\.exe$/i.test(String(backend.Name || '')) &&
+    /api-worker\.mjs/i.test(String(backend.CommandLine || '')),
+    'Refusing forced desktop exit: API backend identity not proven');
+  const desktopPid = Number(backend.ParentProcessId);
+  const desktop = rows.find(p => Number(p.ProcessId) === desktopPid);
+  assert.ok(Number.isSafeInteger(desktopPid) && desktopPid > 0 && desktop &&
+    String(desktop.Name || '') === '大肥鱼抖音助手.exe' &&
+    hasHostAncestor(desktopPid, candidatePid, rows),
+    'Refusing forced desktop exit: Electron main process is not owned by the packaged EXE');
+  const host = rows.find(p => Number(p.ProcessId) === hostPid);
+  assert.ok(host && Number(host.ParentProcessId) === backendPid &&
+    /browser-host\.mjs/i.test(String(host.CommandLine || '')) &&
+    String(host.CommandLine || '').toLowerCase().includes(profile.toLowerCase()),
+    'Refusing forced desktop exit: dedicated browser-host identity not proven');
+  const guards = rows.filter(p => /jobguard\.exe$/i.test(String(p.Name || '')) &&
+    Number(p.ParentProcessId) === hostPid);
+  assert.equal(guards.length, 1, 'Expected an active Job Object helper before desktop forced exit');
+  const edge = rows.filter(p => /msedge\.exe$/i.test(String(p.Name || '')) &&
+    hasHostAncestor(Number(p.ProcessId), hostPid, rows));
+  assert.ok(edge.length > 0, 'No candidate-owned Edge descendants before desktop forced exit');
+  const beforeListeners = loopbackListeners(PORT);
+  assert.ok(beforeListeners.length > 0 && beforeListeners.every(item =>
+    edge.some(p => Number(p.ProcessId) === Number(item.OwningProcess))),
+    'Candidate-owned CDP listener not proven before desktop forced exit');
+  assertUnrelatedEdgeAlive(unrelatedProfile, 9231);
+  const ownedDescendants = rows.filter(p => hasHostAncestor(Number(p.ProcessId), desktopPid, rows));
+  const trackedPids = [...new Set([candidatePid, desktopPid, ...ownedDescendants.map(p => Number(p.ProcessId))])];
+  assert.ok(trackedPids.includes(backendPid) && trackedPids.includes(hostPid) &&
+    trackedPids.includes(Number(guards[0].ProcessId)),
+    'Desktop process ancestry does not contain required API/host/guard processes');
+  const filter = trackedPids.map(pid => 'ProcessId = ' + String(pid)).join(' OR ');
+  const started = Date.now();
+  execFileSync('taskkill.exe', ['/PID', String(desktopPid), '/F'], {
+    encoding: 'utf8', windowsHide: true, timeout: 10000, maxBuffer: 1024 * 1024
+  });
+  const proof = await until(async () => {
+    const tracked = asRows(ps('Get-CimInstance Win32_Process -Filter "' + filter + '" | Select-Object ProcessId,Name | ConvertTo-Json -Compress -Depth 3'));
+    const remainingOwned = ownedProfileProcesses(profile, controlDir);
+    const remainingListeners = loopbackListeners(PORT);
+    if (tracked.length || remainingOwned.length || remainingListeners.length) return null;
+    return { trackedProcessesRemaining:0, profileProcessesRemaining:0, cdpListenersRemaining:0 };
+  }, 20000, 'desktop forced-exit process tree cleanup without recursive taskkill');
+  const unrelated = assertUnrelatedEdgeAlive(unrelatedProfile, 9231);
+  assert.ok(unrelated.processCount > 0 && unrelated.listenerCount > 0,
+    'Unrelated Edge sentinel did not survive desktop forced exit');
+  return {
+    mode:'kill-electron-main-only', forcedPid:desktopPid, candidatePid, backendPid, hostPid,
+    trackedProcessesBefore:trackedPids.length, ownedEdgeBefore:edge.length,
+    cdpListenersBefore:beforeListeners.length, elapsedMs:Date.now()-started,
+    ...proof, unrelatedEdgeSurvived:true, recursiveTaskkillUsed:false
+  };
+}
+
 async function forceWindowsJobObjectExit({ mode, hostPid, backendPid, profile, controlDir, unrelatedProfile, userData }) {
   // This is only called in a disposable Windows CI runner after the EXE has been hash-verified.
   // Never use /T: recursive taskkill would hide a broken KILL_ON_JOB_CLOSE implementation.
@@ -590,7 +652,7 @@ async function readColdStartDiagnostics(userData, candidatePid, exeFile, redacti
 }
 
 async function run(exeFile, { forceMode = null } = {}) {
-  if (forceMode !== null && forceMode !== 'host' && forceMode !== 'guard') throw new Error('Invalid force-exit mode');
+  if (forceMode !== null && forceMode !== 'host' && forceMode !== 'guard' && forceMode !== 'desktop') throw new Error('Invalid force-exit mode');
   if (process.platform!=='win32' || process.env.GITHUB_ACTIONS!=='true' || process.env.YUTANG_EDGE_FIREWALL_CONFIRMED!=='yes')
     throw new Error('Refusing candidate launch outside pre-guarded ephemeral Windows GitHub runner');
   assert.equal(path.basename(exeFile),FILE);
@@ -766,9 +828,14 @@ async function run(exeFile, { forceMode = null } = {}) {
 
     const finalPid=state.pid;
     if(forceMode){
-      report.forcedExit = await forceWindowsJobObjectExit({
-        mode: forceMode, hostPid:finalPid, backendPid:ready.backendPid, profile, controlDir, unrelatedProfile, userData
-      });
+      report.forcedExit = forceMode === 'desktop'
+        ? await forceWindowsDesktopExit({
+            candidatePid:child.pid, exeFile, backendPid:ready.backendPid, hostPid:finalPid,
+            profile, controlDir, unrelatedProfile
+          })
+        : await forceWindowsJobObjectExit({
+            mode: forceMode, hostPid:finalPid, backendPid:ready.backendPid, profile, controlDir, unrelatedProfile, userData
+          });
       lifecycle.closeCount++;
       lifecycle.finalCloseVerified = report.forcedExit.trackedProcessesRemaining === 0 &&
         report.forcedExit.profileProcessesRemaining === 0 && report.forcedExit.cdpListenersRemaining === 0;
@@ -909,8 +976,8 @@ if(process.argv.includes('--self-test'))selfTest();
 else {
   const exe=process.argv[2];
   if(!exe)throw new Error('Specify exact candidate EXE path; only in GitHub Windows CI');
-  const modes = ['--force-host','--force-guard'].filter(flag => process.argv.includes(flag));
+  const modes = ['--force-host','--force-guard','--force-desktop'].filter(flag => process.argv.includes(flag));
   if(modes.length > 1) throw new Error('Only one forced-exit mode may be selected');
-  const forceMode = modes[0] === '--force-host' ? 'host' : modes[0] === '--force-guard' ? 'guard' : null;
+  const forceMode = modes[0] === '--force-host' ? 'host' : modes[0] === '--force-guard' ? 'guard' : modes[0] === '--force-desktop' ? 'desktop' : null;
   run(path.resolve(exe), { forceMode }).catch(e=>{console.error('FAIL_CLOSED_WINDOWS_EDGE_SMOKE:',e.message);process.exitCode=1;});
 }
