@@ -339,7 +339,7 @@ jobs:
             if ($original -ne $staged) { throw "Candidate state isolation source was not copied into Electron app: $entry" }
           }
           Write-Host 'PASS new candidate has isolated Electron settings, shared state and Edge profile defaults.'
-          if ((Get-FileHash -Algorithm SHA256 -LiteralPath 'browser-launcher.mjs').Hash -ne (Get-FileHash -Algorithm SHA256 -LiteralPath 'release-api/win-unpacked/resources/api-runtime/browser-launcher.mjs').Hash) { throw 'Packaged BrowserLauncher navigation fix is missing or changed' }
+          if ((Get-FileHash -Algorithm SHA256 -LiteralPath '../browser-launcher.mjs').Hash -ne (Get-FileHash -Algorithm SHA256 -LiteralPath 'release-api/win-unpacked/resources/api-runtime/browser-launcher.mjs').Hash) { throw 'Packaged BrowserLauncher navigation fix is missing or changed' }
           Write-Host 'PASS bounded same-origin BrowserLauncher navigation recovery is byte-identical in packaged runtime.'
 
       - name: Run independent Edge sandbox process probe on Windows
