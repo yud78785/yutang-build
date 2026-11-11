@@ -132,6 +132,58 @@ const ps = script => {
   const out=execFileSync('powershell.exe',['-NoProfile','-NonInteractive','-Command',script],{encoding:'utf8',timeout:25000,maxBuffer:8*1024*1024});
   const json=out.trim();return json?JSON.parse(json):[];
 };
+const readProcessToken = pid => {
+  if (!Number.isSafeInteger(pid) || pid < 1) throw new Error('Invalid Network Service PID for token inspection');
+  const csharp = [
+    'using System;',
+    'using System.ComponentModel;',
+    'using System.Runtime.InteropServices;',
+    'public static class YuTangProcessTokenInspector {',
+    '  [DllImport("kernel32.dll", SetLastError=true)] public static extern IntPtr OpenProcess(uint access, bool inherit, int pid);',
+    '  [DllImport("advapi32.dll", SetLastError=true)] public static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);',
+    '  [DllImport("advapi32.dll", SetLastError=true)] public static extern bool GetTokenInformation(IntPtr token, int infoClass, IntPtr info, int length, out int returned);',
+    '  [DllImport("advapi32.dll", CharSet=CharSet.Unicode, SetLastError=true)] public static extern bool ConvertSidToStringSid(IntPtr sid, out IntPtr text);',
+    '  [DllImport("kernel32.dll", SetLastError=true)] public static extern IntPtr LocalFree(IntPtr memory);',
+    '  [DllImport("kernel32.dll", SetLastError=true)] public static extern bool CloseHandle(IntPtr handle);',
+    '  public static object Read(int pid) {',
+    '    IntPtr process = OpenProcess(0x1000, false, pid);',
+    '    if (process == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error());',
+    '    IntPtr token = IntPtr.Zero;',
+    '    try {',
+    '      if (!OpenProcessToken(process, 0x0008, out token)) throw new Win32Exception(Marshal.GetLastWin32Error());',
+    '      IntPtr appBuffer = Marshal.AllocHGlobal(4);',
+    '      bool isAppContainer;',
+    '      try {',
+    '        int returned;',
+    '        if (!GetTokenInformation(token, 29, appBuffer, 4, out returned)) throw new Win32Exception(Marshal.GetLastWin32Error());',
+    '        isAppContainer = Marshal.ReadInt32(appBuffer) != 0;',
+    '      } finally { Marshal.FreeHGlobal(appBuffer); }',
+    '      string sidText = null;',
+    '      if (isAppContainer) {',
+    '        int required = 0;',
+    '        GetTokenInformation(token, 31, IntPtr.Zero, 0, out required);',
+    '        if (required > 0) {',
+    '          IntPtr sidInfo = Marshal.AllocHGlobal(required);',
+    '          try {',
+    '            if (!GetTokenInformation(token, 31, sidInfo, required, out required)) throw new Win32Exception(Marshal.GetLastWin32Error());',
+    '            IntPtr sid = Marshal.ReadIntPtr(sidInfo);',
+    '            if (sid != IntPtr.Zero) {',
+    '              IntPtr sidString = IntPtr.Zero;',
+    '              if (!ConvertSidToStringSid(sid, out sidString)) throw new Win32Exception(Marshal.GetLastWin32Error());',
+    '              try { sidText = Marshal.PtrToStringUni(sidString); }',
+    '              finally { if (sidString != IntPtr.Zero) LocalFree(sidString); }',
+    '            }',
+    '          } finally { Marshal.FreeHGlobal(sidInfo); }',
+    '        }',
+    '      }',
+    '      return new { processId = pid, isAppContainer = isAppContainer, appContainerSid = sidText };',
+    '    } finally { if (token != IntPtr.Zero) CloseHandle(token); CloseHandle(process); }',
+    '  }',
+    '}'
+  ].join('\n');
+  const script = "$ErrorActionPreference='Stop'\n$source=@'\n" + csharp + "\n'@\nAdd-Type -TypeDefinition $source -ErrorAction Stop\n[YuTangProcessTokenInspector]::Read(" + String(pid) + ") | ConvertTo-Json -Compress";
+  return ps(script);
+};
 const asRows = value => Array.isArray(value) ? value : value ? [value] : [];
 const isExpectedFirewallBlock = (status, body) => status === 500 &&
   /ERR_NETWORK_ACCESS_DENIED/i.test(String(body || '')) &&
@@ -258,6 +310,12 @@ export async function inspectRendererSandbox(port = PORT) {
           const rendererAppContainerEnabled = /\"enabled\"\s*:\s*true,\s*\"name\"\s*:\s*\"RendererAppContainer\"/.test(text);
           const networkServiceSandboxEnabled = /\"enabled\"\s*:\s*true,\s*\"name\"\s*:\s*\"NetworkServiceSandbox\"/.test(text);
           const networkServiceRow = rows.find(columns => columns[1] === 'Utility' && columns[2] === 'Network Service');
+          const networkServicePid = Number(networkServiceRow?.[0]);
+          const networkServiceAppContainerSid = String(networkServiceRow?.[8] || '').match(/S-1-15-2-[0-9-]+/)?.[0] || null;
+          let networkServiceToken = null;
+          try { networkServiceToken = readProcessToken(networkServicePid); }
+          catch (error) { networkServiceToken = { processId: networkServicePid, isAppContainer: false, appContainerSid: null, errorName: String(error?.name || 'Error'), errorCode: typeof error?.code === 'string' ? error.code : null }; }
+          const networkServiceWindowsTokenVerified = networkServiceToken?.isAppContainer === true && networkServiceToken?.appContainerSid === networkServiceAppContainerSid && networkServiceAppContainerSid !== null;
           const rendererRowsVerified = rendererRows.length > 0 && rendererRows.every(columns =>
             columns[3] === 'Renderer' && columns[4] === 'Lockdown' && /Untrusted/.test(columns[5] || '') && /^S-1-15-2-/.test(columns[8] || ''));
           const rendererSandboxVerified = rendererRowsVerified && rendererAppContainerEnabled;
@@ -278,10 +336,13 @@ export async function inspectRendererSandbox(port = PORT) {
             networkServiceSandboxType: String(networkServiceRow?.[3] || ''),
             networkServiceLockdown: String(networkServiceRow?.[4] || ''),
             networkServiceIntegrity: String(networkServiceRow?.[5] || ''),
-            networkServiceLowboxAppContainer: /^S-1-15-2-/.test(networkServiceRow?.[8] || ''),
+            networkServicePid,
+            networkServiceAppContainerSid,
+            networkServiceLowboxAppContainer: networkServiceAppContainerSid !== null,
+            networkServiceToken,
+            networkServiceWindowsTokenVerified,
             networkServiceReportedNotSandboxed: networkServiceRow?.[3] === 'Not Sandboxed',
             networkServiceSandboxReported: networkServiceSandboxEnabled && networkServiceRow?.[3] === 'Network',
-            networkServiceWindowsTokenVerified: false,
             explicitSandboxPositive: rendererSandboxVerified && networkServiceSandboxEnabled && networkServiceRow?.[3] === 'Network',
             explicitSandboxNegative: false,
             attempts
