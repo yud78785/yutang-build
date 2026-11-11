@@ -101,8 +101,8 @@ async function main() {
   assert.equal(process.versions.node, EXPECTED_NODE, 'Must use the candidate bundled Node version');
   assert.equal(packageInfo.version, EXPECTED_PLAYWRIGHT, 'Must use the exact locked Playwright package');
 
-  const firewall = powershellJson("Get-NetFirewallRule -DisplayName 'YuTangNode24HostProbeBlockOutbound' | Select-Object Enabled,Action,Direction | ConvertTo-Json -Compress");
-  const firewallEnabled = firewall.length === 1 && (firewall[0].Enabled === true || String(firewall[0].Enabled).toLowerCase() === 'true');
+  const firewall = powershellJson("Get-NetFirewallRule -DisplayName 'YuTangNode24HostProbeBlockOutbound' | Select-Object @{Name='Enabled';Expression={$_.Enabled.ToString()}},@{Name='Action';Expression={$_.Action.ToString()}},@{Name='Direction';Expression={$_.Direction.ToString()}} | ConvertTo-Json -Compress");
+  const firewallEnabled = firewall.length === 1 && String(firewall[0].Enabled).toLowerCase() === 'true';
   const firewallBlocked = firewall.length === 1 && String(firewall[0].Action).toLowerCase() === 'block';
   const firewallOutbound = firewall.length === 1 && String(firewall[0].Direction).toLowerCase() === 'outbound';
   assert.ok(firewallEnabled && firewallBlocked && firewallOutbound,
