@@ -8,6 +8,12 @@ if (!['direct', 'host'].includes(mode) || !path.isAbsolute(upstreamRoot || '') |
   throw new Error('Invalid isolated probe arguments');
 }
 const root = path.resolve(upstreamRoot);
+const { readFile } = await import('node:fs/promises');
+const { createHash } = await import('node:crypto');
+const hostSource = await readFile(path.join(root, 'browser-host.mjs'));
+const hostSha256 = createHash('sha256').update(hostSource).digest('hex');
+const expectedHostSha256 = '5716a705e19663f1f6faed52569508b72cf091d3a31766828a7a5434a6eca1bc';
+if (hostSha256 !== expectedHostSha256 || !hostSource.toString('utf8').includes('chromiumSandbox: true')) throw new Error('Probe requires the exact candidate-patched browser-host source.');
 const { chromium } = await import(pathToFileURL(path.join(root, 'playwright-runtime.mjs')).href);
 const emit = (stage, detail = {}) => process.stdout.write('STAGE ' + JSON.stringify({ stage, ...detail, at: new Date().toISOString() }) + '\n');
 const cleanError = value => String(value || '').replace(/Bearer\s+[^\s,;"']+/gi, 'Bearer [redacted]')
@@ -23,6 +29,7 @@ if (mode === 'direct') {
       channel: 'msedge',
       headless: false,
       viewport: null,
+      chromiumSandbox: true,
       ignoreDefaultArgs: ['--mute-audio'],
       args: ['--remote-debugging-port=' + port, '--remote-debugging-address=127.0.0.1', '--autoplay-policy=no-user-gesture-required'],
       timeout: 30000,
@@ -84,7 +91,7 @@ if (mode === 'direct') {
     log: (...args) => emit('host-log', { message: String(args.join(' ')).slice(0, 300) }),
     error: (...args) => emit('host-error', { message: sanitizeBrowserFailure(args.join(' ')) }),
   };
-  emit('host-entry', { node: process.versions.node, port });
+  emit('host-entry', { node: process.versions.node, port, browserHostSha256: hostSha256, chromiumSandbox: true });
   try {
     const result = await runBrowserHost({ profile, controlDir, port, chromiumImpl: instrumentedChromium, logger });
     emit('host-result', { started: result.started === true, exitCode: result.exitCode ?? null, failureCode: result.failure?.code || null, failure: result.failure?.details || null });
