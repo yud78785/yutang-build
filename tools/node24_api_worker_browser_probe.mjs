@@ -281,6 +281,9 @@ function sanitizedEnvironment(base, paths) {
   assert.ok(Object.keys(env).some(key => /^programfiles\(x86\)$/i.test(key)), 'The Edge x86 installation root must be retained in the isolated environment.');
   Object.assign(env, {
     HOME: paths.home,
+    USERPROFILE: paths.home,
+    HOMEDRIVE: paths.drive,
+    HOMEPATH: paths.home.slice(paths.drive.length),
     DSH_HOME: path.join(paths.home, '.dsh'),
     DOUYIN_DESKTOP_USER_DATA: paths.userData,
     DOUYIN_RUNTIME_LOCATION_FILE: paths.locationFile,
