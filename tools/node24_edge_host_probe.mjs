@@ -10,12 +10,32 @@ if (!['direct', 'host', 'spawn-host'].includes(mode) || !path.isAbsolute(upstrea
   throw new Error('Invalid isolated probe arguments');
 }
 const root = path.resolve(upstreamRoot);
-const { readFile } = await import('node:fs/promises');
+const { readFile, writeFile } = await import('node:fs/promises');
 const { createHash } = await import('node:crypto');
 const hostSource = await readFile(path.join(root, 'browser-host.mjs'));
 const hostSha256 = createHash('sha256').update(hostSource).digest('hex');
 const expectedHostSha256 = '5716a705e19663f1f6faed52569508b72cf091d3a31766828a7a5434a6eca1bc';
 if (hostSha256 !== expectedHostSha256 || !hostSource.toString('utf8').includes('chromiumSandbox: true')) throw new Error('Probe requires the exact candidate-patched browser-host source.');
+
+let instrumentedHost = hostSource.toString('utf8');
+const stagePatches = [
+  ["    writeState(false);\n    try { installation = await probeInstallation(); } catch {}\n    context = await chromiumImpl.launchPersistentContext(profile, {",
+   "    console.error('PROBE_STAGE:before_edge_probe');\n    writeState(false);\n    console.error('PROBE_STAGE:state_false_written');\n    try { installation = await probeInstallation(); console.error('PROBE_STAGE:edge_probe_finished'); } catch { console.error('PROBE_STAGE:edge_probe_failed'); }\n    console.error('PROBE_STAGE:before_launch_persistent_context');\n    context = await chromiumImpl.launchPersistentContext(profile, {"],
+  ["    const nativeFocus = await installNativeFocusReset(context, { onFailure:",
+   "    console.error('PROBE_STAGE:after_launch_persistent_context');\n    console.error('PROBE_STAGE:before_focus_reset');\n    const nativeFocus = await installNativeFocusReset(context, { onFailure:"],
+  ["    nativeFocus.assertHealthy();\n    writeState(true,",
+   "    console.error('PROBE_STAGE:after_focus_reset');\n    nativeFocus.assertHealthy();\n    console.error('PROBE_STAGE:before_ready_state');\n    writeState(true,"],
+  ["    logger.log('专用抖音 Edge 已启动。');",
+   "    console.error('PROBE_STAGE:ready_state_written');\n    logger.log('专用抖音 Edge 已启动。');"],
+  ["  } catch (error) {\n    try { await context?.close(); } catch {}",
+   "  } catch (error) {\n    console.error('PROBE_STAGE:host_catch:' + String(error?.code || error?.name || 'Error'));\n    try { await context?.close(); } catch {}"]
+];
+for (const [before, after] of stagePatches) {
+  if (instrumentedHost.split(before).length !== 2) throw new Error('Candidate host diagnostic patch anchor is not unique.');
+  instrumentedHost = instrumentedHost.replace(before, after);
+}
+await writeFile(path.join(root, 'browser-host.mjs'), instrumentedHost);
+
 const { chromium } = await import(pathToFileURL(path.join(root, 'playwright-runtime.mjs')).href);
 const emit = (stage, detail = {}) => process.stdout.write('STAGE ' + JSON.stringify({ stage, ...detail, at: new Date().toISOString() }) + '\n');
 const cleanError = value => String(value || '').replace(/Bearer\s+[^\s,;"']+/gi, 'Bearer [redacted]')
@@ -106,18 +126,18 @@ if (mode === 'direct') {
   const { mkdir, writeFile } = await import('node:fs/promises');
   const home = path.resolve(profile, '..', '..', '..');
   const base = path.dirname(home);
-  const common = path.join(home, '.dsh', 'douyin-browser');
-  const locationFile = path.join(common, 'runtime-location.json');
-  const mediaRoot = path.join(common, 'media');
-  const memoryDir = path.join(common, 'memory');
+  const locationFile = path.join(base, 'runtime-location.json');
+  const mediaRoot = path.join(base, 'media');
+  const memoryDir = path.join(base, 'memory');
+  const userData = path.join(base, 'user-data');
   const paths = {
-    stateDir: path.join(common, 'state'),
+    stateDir: path.join(base, 'state'),
     memoryDir,
     memoryDbPath: path.join(memoryDir, 'shared.sqlite'),
     mediaEnvFile: path.join(mediaRoot, '.env'),
     mediaSettingsFile: path.join(mediaRoot, 'settings.local.json'),
     mediaRuntimeRoot: mediaRoot,
-    mediaModelsDir: path.join(mediaRoot, '.models'),
+    mediaModelsDir: path.join(mediaRoot, 'models'),
   };
   await Promise.all([
     mkdir(path.dirname(locationFile), { recursive: true }),
@@ -126,6 +146,7 @@ if (mode === 'direct') {
     mkdir(paths.stateDir, { recursive: true }),
     mkdir(paths.memoryDir, { recursive: true }),
     mkdir(mediaRoot, { recursive: true }),
+    mkdir(userData, { recursive: true }),
     mkdir(path.join(base, 'app-data'), { recursive: true }),
     mkdir(path.join(base, 'local-app-data'), { recursive: true }),
     mkdir(path.join(base, 'temp'), { recursive: true }),
@@ -141,7 +162,7 @@ if (mode === 'direct') {
     HOME: home, USERPROFILE: home, HOMEDRIVE: homeDrive, HOMEPATH: homePath, SystemDrive: homeDrive,
     APPDATA: path.join(base, 'app-data'), LOCALAPPDATA: path.join(base, 'local-app-data'),
     TEMP: path.join(base, 'temp'), TMP: path.join(base, 'temp'), DSH_HOME: path.join(home, '.dsh'),
-    DOUYIN_DESKTOP_USER_DATA: path.join(base, 'user-data'),
+    DOUYIN_DESKTOP_USER_DATA: userData,
     DOUYIN_RUNTIME_LOCATION_FILE: locationFile,
     DEEPSEEK_SHARED_MEMORY_DB: paths.memoryDbPath,
     DOUYIN_STATE_DIR: paths.stateDir,
@@ -202,12 +223,14 @@ if (mode === 'direct') {
     }
     await new Promise(resolve => setTimeout(resolve, 250));
   }
+  let hostLogTail = '';
+  try { hostLogTail = (await readFile(logFile, 'utf8')).slice(-8000).replaceAll(home, '[isolated-home]').replaceAll(base, '[isolated-base]'); } catch {}
   emit('host-result', {
     started: ready, ready: state?.ready === true, cdp, pid: hostPid,
     browserVersion: String(browser?.Browser || '').slice(0, 100),
     failureCode: String(state?.launchFailure?.code || ''),
     failure: String(state?.launchFailure?.message || '').slice(0, 500),
-    chromiumSandbox: true, envKeyCount: Object.keys(childEnv).length,
+    chromiumSandbox: true, envKeyCount: Object.keys(childEnv).length, hostLogTail,
   });
   if (!ready) process.exitCode = 1;
 }
