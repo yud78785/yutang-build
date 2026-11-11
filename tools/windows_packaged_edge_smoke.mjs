@@ -392,11 +392,14 @@ async function run(exeFile) {
     try {
       let state=null;
       try { state=await readJSON(control); } catch {}
+      const currentProcesses=asRows(ps("Get-CimInstance Win32_Process -Filter \"Name = 'msedge.exe' OR Name = 'node.exe' OR Name = '"+FILE.replace(/\.exe$/i,'')+".exe'\" | Select-Object ProcessId,Name,CommandLine,ExecutablePath | ConvertTo-Json -Compress -Depth 4"));
       if(Number.isSafeInteger(state?.pid)&&state.pid>0) {
-        try { execFileSync('taskkill.exe',['/PID',String(state.pid),'/T','/F'],{stdio:'ignore',windowsHide:true,timeout:10000}); } catch {}
+        const ownedHost=currentProcesses.find(p=>Number(p.ProcessId)===state.pid&&/node\.exe$/i.test(String(p.Name||''))&&/browser-host\.mjs/i.test(String(p.CommandLine||''))&&String(p.CommandLine||'').toLowerCase().includes(profile.toLowerCase()));
+        if(ownedHost)try { execFileSync('taskkill.exe',['/PID',String(state.pid),'/T','/F'],{stdio:'ignore',windowsHide:true,timeout:10000}); } catch {}
       }
       if(Number.isSafeInteger(child.pid)&&child.pid>0) {
-        try { execFileSync('taskkill.exe',['/PID',String(child.pid),'/T','/F'],{stdio:'ignore',windowsHide:true,timeout:10000}); } catch {}
+        const ownedApp=currentProcesses.find(p=>Number(p.ProcessId)===child.pid&&String(p.ExecutablePath||'').toLowerCase()===path.resolve(exeFile).toLowerCase());
+        if(ownedApp)try { execFileSync('taskkill.exe',['/PID',String(child.pid),'/T','/F'],{stdio:'ignore',windowsHide:true,timeout:10000}); } catch {}
       }
       await delay(1000);
       let rows=[];
