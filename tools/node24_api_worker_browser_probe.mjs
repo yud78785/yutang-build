@@ -243,7 +243,7 @@ async function instrumentRuntime() {
   if (core.split(endpointLockBefore).length !== 2) throw new Error('Endpoint lock diagnostic anchor mismatch.');
   core = core.replace(endpointLockBefore, endpointLockAfter);
   const endpointDeadlineBefore = "    const deadline = Date.now() + 25_000;";
-  const endpointDeadlineAfter = "    const deadline = Date.now() + 60_000;\n    console.error('CORE_PROBE:endpoint_wait_start at=' + Date.now() + ' hostPid=' + String(hostPid) + ' timeoutMs=60000');";
+  const endpointDeadlineAfter = "    const deadline = Date.now() + 25_000;\n    console.error('CORE_PROBE:endpoint_wait_start at=' + Date.now() + ' hostPid=' + String(hostPid) + ' timeoutMs=25000');";
   if (core.split(endpointDeadlineBefore).length !== 2) throw new Error('Endpoint deadline diagnostic anchor mismatch.');
   core = core.replace(endpointDeadlineBefore, endpointDeadlineAfter);
   const endpointFailedBefore = "      if (readiness === 'failed') throw new Error('专用浏览器启动失败；请正常关闭仍使用 cli-profile 的旧专用窗口后重试。');";
