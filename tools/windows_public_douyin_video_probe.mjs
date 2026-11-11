@@ -845,7 +845,7 @@ async function run(exeFile) {
     report.unrelatedEdgeIsolation={separateProfile:true,separatePort:9231,remainedAliveDuringCandidateCloseAndRestart:true,finalCloseViaCdp:unrelatedClose.closed===true,finalCleanupVerified:unrelatedClean.clean===true};
     report.lifecycle=lifecycle;
     report.cleanupVerified=true;
-    report.notProven=['Network Service Windows token restrictions (only Edge sandbox type is checked)','Model reasoning','Long-term autonomy','Memory synchronization','Signed release trust','General user PC safety'];
+    report.notProven=['Network Service lockdown/integrity restrictions beyond the verified AppContainer SID','Model reasoning','Long-term autonomy','Memory synchronization','Signed release trust','General user PC safety'];
     if(publicVideoProbe.outcome!=='PASS_PUBLIC_VIDEO_CORE_CAPTURE_AND_MODEL_INPUT_PACKING')report.notProven.unshift('Public Douyin video playback and Core frame capture (safe-stop outcome: '+publicVideoProbe.outcome+')');
     console.log('PASS_WINDOWS_PACKAGED_EXE_RESTART_AND_CLEANUP '+JSON.stringify(report));
     return report;
