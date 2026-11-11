@@ -275,17 +275,11 @@ async function instrumentRuntime() {
 function sanitizedEnvironment(base, paths) {
   // Browser observation requires a deliberately small OS-only environment.
   // Model/API credentials and unrelated CI, shell, developer-tool and proxy variables are not inherited.
-  const allowed = /^(?:path|systemroot|windir|comspec|pathext|programfiles|programfiles\(x86\)|programdata|username|userdomain|public|allusersprofile|programw6432|os|processor_architecture|number_of_processors)$/i;
+  const allowed = /^(?:path|systemroot|windir|comspec|pathext|programfiles|programfiles\(x86\)|programdata|username|userdomain|userprofile|appdata|localappdata|homedrive|homepath|systemdrive|logonserver|public|allusersprofile|programw6432|os|processor_architecture|number_of_processors)$/i;
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => allowed.test(key)));
   assert.ok(Object.keys(env).some(key => /^programfiles\(x86\)$/i.test(key)), 'The Edge x86 installation root must be retained in the isolated environment.');
   Object.assign(env, {
     HOME: paths.home,
-    USERPROFILE: paths.home,
-    HOMEDRIVE: paths.drive,
-    HOMEPATH: paths.home.slice(paths.drive.length),
-    SystemDrive: paths.drive,
-    APPDATA: paths.appData,
-    LOCALAPPDATA: paths.localAppData,
     TEMP: paths.temp,
     TMP: paths.temp,
     DSH_HOME: path.join(paths.home, '.dsh'),
@@ -358,6 +352,9 @@ async function main() {
   const control = path.join(home, '.dsh', 'douyin-browser', 'control');
   const profile = path.join(home, '.dsh', 'douyin-browser', 'cli-profile');
   await fs.mkdir(control, { recursive: true });
+  await fs.mkdir(profile, { recursive: true });
+  const initialProfileEntries = await fs.readdir(profile);
+  assert.equal(initialProfileEntries.length, 0, 'Dedicated Edge profile must start empty; native browser cookies must not be reused.');
   const stateFile = path.join(control, 'browser.json');
   const logFile = path.join(control, 'browser-host.log');
   let backend = new ApiProcess(process.execPath, runtime, { env, timeoutMs: 30000 });
@@ -369,6 +366,8 @@ async function main() {
     backendEnvKeyCount: Object.keys(env).length,
     backendEnvKeys: Object.keys(env).sort(),
     modelKeyPresent: false,
+    dedicatedProfileFresh: true,
+    nativeWindowsProfileEnvironmentPreserved: true,
     edgeOutboundBlocked: true,
     diagnosticLaunchTimeoutMs: DIAGNOSTIC_LAUNCH_TIMEOUT_MS,
     playwrightBrowserDebugEnabled: true,
