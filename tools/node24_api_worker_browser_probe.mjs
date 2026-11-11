@@ -194,7 +194,7 @@ async function instrumentRuntime() {
     ],
     [
       "    writeState(true, { browserVersion: versionOf(installation?.version) });",
-      "    writeState(true, { browserVersion: versionOf(installation?.version) });\\n    logger.error('PROBE_STAGE:ready_written at=' + Date.now() + ' pid=' + processImpl.pid);"
+      "    writeState(true, { browserVersion: versionOf(installation?.version) });\n    logger.error('PROBE_STAGE:ready_written at=' + Date.now() + ' pid=' + processImpl.pid);"
     ],
   ];
   for (const [before, after] of hostPatches) {
@@ -206,7 +206,7 @@ async function instrumentRuntime() {
   const originalLauncher = await fs.readFile(launcherPath, 'utf8');
   let launcher = originalLauncher;
   const launcherOpenBefore = "    const browser = await this.getBrowser(signal); cancelled(signal);";
-  const launcherOpenAfter = "    console.error('LAUNCHER_PROBE:before_get_browser at=' + Date.now());\\n    const browser = await this.getBrowser(signal); cancelled(signal);\\n    console.error('LAUNCHER_PROBE:after_get_browser at=' + Date.now());";
+  const launcherOpenAfter = "    console.error('LAUNCHER_PROBE:before_get_browser at=' + Date.now());\n    const browser = await this.getBrowser(signal); cancelled(signal);\n    console.error('LAUNCHER_PROBE:after_get_browser at=' + Date.now());";
   if (launcher.split(launcherOpenBefore).length !== 2) throw new Error('BrowserLauncher getBrowser diagnostic anchor mismatch.');
   launcher = launcher.replace(launcherOpenBefore, launcherOpenAfter);
   const launcherGotoBefore = "    if (page.url() === 'about:blank') { await abortable(page.goto(this.homeUrl, { waitUntil: 'domcontentloaded', timeout: 25_000 }), signal); await abortable(page.evaluate(installPreparePause, { label:PREPARE_PAGE_NAME, token, claimInitial:true }), signal); }";
@@ -247,7 +247,7 @@ async function instrumentRuntime() {
   if (core.split(endpointLockBefore).length !== 2) throw new Error('Endpoint lock diagnostic anchor mismatch.');
   core = core.replace(endpointLockBefore, endpointLockAfter);
   const endpointDeadlineBefore = "    const deadline = Date.now() + 25_000;";
-  const endpointDeadlineAfter = "    const deadline = Date.now() + 25_000;\\n    console.error('CORE_PROBE:endpoint_wait_start at=' + Date.now() + ' hostPid=' + String(hostPid));";
+  const endpointDeadlineAfter = "    const deadline = Date.now() + 25_000;\n    console.error('CORE_PROBE:endpoint_wait_start at=' + Date.now() + ' hostPid=' + String(hostPid));";
   if (core.split(endpointDeadlineBefore).length !== 2) throw new Error('Endpoint deadline diagnostic anchor mismatch.');
   core = core.replace(endpointDeadlineBefore, endpointDeadlineAfter);
   const endpointFailedBefore = "      if (readiness === 'failed') throw new Error('专用浏览器启动失败；请正常关闭仍使用 cli-profile 的旧专用窗口后重试。');";
