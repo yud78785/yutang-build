@@ -240,8 +240,9 @@ async function instrumentRuntime() {
 function sanitizedEnvironment(base, paths) {
   // Browser observation requires a deliberately small OS-only environment.
   // Model/API credentials and unrelated CI, shell, developer-tool and proxy variables are not inherited.
-  const allowed = /^(?:path|systemroot|windir|comspec|pathext|programfiles|programfiles\\(x86\\)|programdata|username|userdomain|public|allusersprofile|programw6432|os|processor_architecture|number_of_processors)$/i;
+  const allowed = /^(?:path|systemroot|windir|comspec|pathext|programfiles|programfiles\(x86\)|programdata|username|userdomain|public|allusersprofile|programw6432|os|processor_architecture|number_of_processors)$/i;
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => allowed.test(key)));
+  assert.ok(Object.keys(env).some(key => /^programfiles\(x86\)$/i.test(key)), 'The Edge x86 installation root must be retained in the isolated environment.');
   Object.assign(env, {
     HOME: paths.home,
     USERPROFILE: paths.home,
