@@ -24,6 +24,7 @@ const DIAGNOSTIC_LAUNCH_TIMEOUT_MS = 20_000;
 const hostPath = path.join(runtime, 'browser-host.mjs');
 const corePath = path.join(runtime, 'core.mjs');
 const launcherPath = path.join(runtime, 'browser-launcher.mjs');
+const runtimePathsPath = path.join(runtime, 'runtime-paths.mjs');
 const apiWorkerPath = path.join(runtime, 'api-worker.mjs');
 
 const sha256 = value => createHash('sha256').update(value).digest('hex');
@@ -265,6 +266,18 @@ async function instrumentRuntime() {
   if (core.split(beforePid).length !== 2) throw new Error('Core host PID instrumentation anchor mismatch.');
   core = core.replace(beforePid, afterPid);
   await fs.writeFile(corePath, core);
+
+  // Test-only path redirection: keep Windows USERPROFILE/APPDATA/HOMEPATH native.
+  // Redirect only the dedicated Edge profile/control folders to this fresh disposable directory.
+  // Never modify a normal user's default Edge profile or an existing YuTang profile.
+  const originalRuntimePaths = await fs.readFile(runtimePathsPath, 'utf8');
+  const browserPathsBefore = "    browserProfileDir: path.join(home, '.dsh', 'douyin-browser', 'cli-profile'),\n    browserControlDir: path.join(home, '.dsh', 'douyin-browser', 'control'),";
+  const browserPathsAfter = "    browserProfileDir: env.YUTANG_TEST_BROWSER_PROFILE ? absolute(env.YUTANG_TEST_BROWSER_PROFILE, 'CI browser profile') : path.join(home, '.dsh', 'douyin-browser', 'cli-profile'),\n    browserControlDir: env.YUTANG_TEST_BROWSER_CONTROL ? absolute(env.YUTANG_TEST_BROWSER_CONTROL, 'CI browser control') : path.join(home, '.dsh', 'douyin-browser', 'control'),";
+  if (originalRuntimePaths.split(browserPathsBefore).length !== 2) throw new Error('Pinned runtime-paths isolated profile override anchor mismatch.');
+  await fs.writeFile(runtimePathsPath, originalRuntimePaths.replace(browserPathsBefore, browserPathsAfter));
+  try { execFileSync(process.execPath, ['--check', runtimePathsPath], { encoding: 'utf8', windowsHide: true, timeout: 10000 }); }
+  catch (error) { throw new Error('Instrumented runtime paths syntax check failed: ' + redact(error?.message || error)); }
+
   try { execFileSync(process.execPath, ['--check', corePath], { encoding: 'utf8', windowsHide: true, timeout: 10000 }); }
   catch (error) { throw new Error('Instrumented core syntax check failed: ' + redact(error?.stderr || error?.message || error)); }
 }
@@ -274,11 +287,11 @@ function sanitizedEnvironment(base, paths) {
   const allowed = /^(?:path|systemroot|windir|comspec|pathext|programfiles|programfiles\(x86\)|programdata|username|userdomain|userprofile|appdata|localappdata|homedrive|homepath|systemdrive|logonserver|public|allusersprofile|programw6432|os|processor_architecture|number_of_processors)$/i;
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => allowed.test(key)));
   assert.ok(Object.keys(env).some(key => /^programfiles\(x86\)$/i.test(key)), 'The Edge x86 installation root must be retained in the isolated environment.');
+  assert.ok(typeof process.env.USERPROFILE === 'string' && path.isAbsolute(process.env.USERPROFILE), 'Native Windows USERPROFILE is required.');
   Object.assign(env, {
-    HOME: paths.home,
-    USERPROFILE: paths.home,
-    HOMEDRIVE: paths.drive,
-    HOMEPATH: paths.home.slice(paths.drive.length),
+    HOME: process.env.USERPROFILE,
+    YUTANG_TEST_BROWSER_PROFILE: path.join(paths.home, '.dsh', 'douyin-browser', 'cli-profile'),
+    YUTANG_TEST_BROWSER_CONTROL: path.join(paths.home, '.dsh', 'douyin-browser', 'control'),
     DSH_HOME: path.join(paths.home, '.dsh'),
     DOUYIN_DESKTOP_USER_DATA: paths.userData,
     DOUYIN_RUNTIME_LOCATION_FILE: paths.locationFile,
@@ -338,6 +351,9 @@ async function main() {
   assert.equal(env.NODE_OPTIONS, undefined, 'Node options must not be inherited.');
   assert.equal(env.ELECTRON_RUN_AS_NODE, undefined, 'Electron runtime mode must not be inherited.');
   assert.equal(env.DOUYIN_NODE_EXECUTABLE, process.execPath);
+  assert.equal(env.USERPROFILE, process.env.USERPROFILE, 'The OS USERPROFILE must remain native.');
+  assert.equal(env.APPDATA, process.env.APPDATA, 'The OS APPDATA must remain native.');
+  assert.equal(env.LOCALAPPDATA, process.env.LOCALAPPDATA, 'The OS LOCALAPPDATA must remain native.');
 
   const publicRoot = path.join(runtime, 'public');
   await fs.mkdir(publicRoot, { recursive: true });
@@ -367,7 +383,8 @@ async function main() {
     profileCookieCount: null,
     coldStartRetryProfileReset: null,
     coldStartFailureBounded: null,
-    nativeWindowsProfileEnvironmentPreserved: true,
+    nativeWindowsProfileEnvironmentPreserved: env.USERPROFILE === process.env.USERPROFILE && env.APPDATA === process.env.APPDATA && env.LOCALAPPDATA === process.env.LOCALAPPDATA,
+    profilePathOverriddenToDisposable: true,
     edgeOutboundBlocked: true,
     diagnosticLaunchTimeoutMs: DIAGNOSTIC_LAUNCH_TIMEOUT_MS,
     playwrightBrowserDebugEnabled: true,
