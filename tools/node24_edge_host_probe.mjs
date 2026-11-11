@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { spawn } from 'node:child_process';
+import { openSync, closeSync } from 'node:fs';
 
 const [mode, upstreamRoot, profile, controlDir, portText] = process.argv.slice(2);
 const port = Number(portText || (mode === 'direct' ? 9331 : 9227));
-if (!['direct', 'host'].includes(mode) || !path.isAbsolute(upstreamRoot || '') || !path.isAbsolute(profile || '') || !path.isAbsolute(controlDir || '') || !Number.isInteger(port)) {
+if (!['direct', 'host', 'spawn-host'].includes(mode) || !path.isAbsolute(upstreamRoot || '') || !path.isAbsolute(profile || '') || !path.isAbsolute(controlDir || '') || !Number.isInteger(port)) {
   throw new Error('Invalid isolated probe arguments');
 }
 const root = path.resolve(upstreamRoot);
@@ -47,7 +49,7 @@ if (mode === 'direct') {
   } finally {
     if (context) await context.close().catch(() => {});
   }
-} else {
+} else if (mode === 'host') {
   const { runBrowserHost, sanitizeBrowserFailure } = await import(pathToFileURL(path.join(root, 'browser-host.mjs')).href);
   const instrumentedChromium = {
     async launchPersistentContext(...args) {
@@ -100,4 +102,113 @@ if (mode === 'direct') {
     emit('host-threw', { errorName: String(error?.name || 'Error'), errorCode: String(error?.code || ''), error: cleanError(error?.message) });
     process.exitCode = 1;
   }
+}
+} else {
+  const { mkdir, writeFile } = await import('node:fs/promises');
+  const home = path.resolve(profile, '..', '..', '..', '..');
+  const base = path.dirname(home);
+  const common = path.join(home, '.dsh', 'douyin-browser');
+  const locationFile = path.join(common, 'runtime-location.json');
+  const mediaRoot = path.join(common, 'media');
+  const memoryDir = path.join(common, 'memory');
+  const paths = {
+    stateDir: path.join(common, 'state'),
+    memoryDir,
+    memoryDbPath: path.join(memoryDir, 'shared.sqlite'),
+    mediaEnvFile: path.join(mediaRoot, '.env'),
+    mediaSettingsFile: path.join(mediaRoot, 'settings.local.json'),
+    mediaRuntimeRoot: mediaRoot,
+    mediaModelsDir: path.join(mediaRoot, '.models'),
+  };
+  await Promise.all([
+    mkdir(path.dirname(locationFile), { recursive: true }),
+    mkdir(controlDir, { recursive: true }),
+    mkdir(profile, { recursive: true }),
+    mkdir(paths.stateDir, { recursive: true }),
+    mkdir(paths.memoryDir, { recursive: true }),
+    mkdir(mediaRoot, { recursive: true }),
+    mkdir(path.join(base, 'app-data'), { recursive: true }),
+    mkdir(path.join(base, 'local-app-data'), { recursive: true }),
+    mkdir(path.join(base, 'temp'), { recursive: true }),
+  ]);
+  await writeFile(locationFile, JSON.stringify({ version: 1, ...paths }, null, 2) + '\n', { flag: 'wx' });
+  await writeFile(paths.mediaEnvFile, '', { flag: 'wx' });
+  await writeFile(paths.mediaSettingsFile, JSON.stringify({ enabled: false, backend: 'local-whisper' }), { flag: 'wx' });
+  const allowedEnv = /^(?:path|systemroot|windir|comspec|pathext|programfiles|programfiles\(x86\)|programdata|username|userdomain|public|allusersprofile|programw6432|os|processor_architecture|number_of_processors)$/i;
+  const childEnv = Object.fromEntries(Object.entries(process.env).filter(([key]) => allowedEnv.test(key)));
+  const homeDrive = path.parse(home).root.replace(/[\\/]+$/, '');
+  const homePath = home.slice(homeDrive.length);
+  Object.assign(childEnv, {
+    HOME: home, USERPROFILE: home, HOMEDRIVE: homeDrive, HOMEPATH: homePath, SystemDrive: homeDrive,
+    APPDATA: path.join(base, 'app-data'), LOCALAPPDATA: path.join(base, 'local-app-data'),
+    TEMP: path.join(base, 'temp'), TMP: path.join(base, 'temp'), DSH_HOME: path.join(home, '.dsh'),
+    DOUYIN_DESKTOP_USER_DATA: path.join(base, 'user-data'),
+    DOUYIN_RUNTIME_LOCATION_FILE: locationFile,
+    DEEPSEEK_SHARED_MEMORY_DB: paths.memoryDbPath,
+    DOUYIN_STATE_DIR: paths.stateDir,
+    DOUYIN_MEDIA_ENV_FILE: paths.mediaEnvFile,
+    DOUYIN_MEDIA_SETTINGS_FILE: paths.mediaSettingsFile,
+    DOUYIN_MEDIA_RUNTIME_ROOT: paths.mediaRuntimeRoot,
+    DOUYIN_MEDIA_MODELS_DIR: paths.mediaModelsDir,
+    DOUYIN_NODE_EXECUTABLE: process.execPath,
+    DOUYIN_DESKTOP_SMOKE: '1',
+  });
+  for (const key of ['ELECTRON_RUN_AS_NODE', 'NODE_OPTIONS', 'DEEPSEEK_API_KEY', 'DEEPSEEK_BASE_URL']) delete childEnv[key];
+  const { resolveRuntimePaths, resolveNodeExecutable } = await import(pathToFileURL(path.join(root, 'runtime-paths.mjs')).href);
+  const runtimePaths = resolveRuntimePaths({ env: childEnv, home, sourceRoot: root });
+  if (path.resolve(runtimePaths.browserProfileDir).toLowerCase() !== path.resolve(profile).toLowerCase()
+      || path.resolve(runtimePaths.browserControlDir).toLowerCase() !== path.resolve(controlDir).toLowerCase()) {
+    throw new Error('Candidate runtime path resolution differs from the isolated test paths.');
+  }
+  const node = resolveNodeExecutable({ env: childEnv, executable: process.execPath, versions: process.versions, sourceRoot: root });
+  if (path.resolve(node).toLowerCase() !== path.resolve(process.execPath).toLowerCase()) throw new Error('Candidate Node executable resolution differs from Node 24.17.0.');
+  const logFile = path.join(controlDir, 'browser-host.log');
+  const output = openSync(logFile, 'a');
+  let child;
+  try {
+    child = spawn(node, [path.join(root, 'browser-host.mjs'), runtimePaths.browserProfileDir, runtimePaths.browserControlDir, String(port)], {
+      detached: true, windowsHide: true, stdio: ['ignore', output, output], env: childEnv, shell: false, cwd: root,
+    });
+  } finally { closeSync(output); }
+  const hostPid = child.pid;
+  child.unref();
+  emit('spawn-host-child-started', {
+    pid: hostPid, node: process.versions.node, port, browserHostSha256: hostSha256,
+    chromiumSandbox: true, envKeyCount: Object.keys(childEnv).length,
+    userProfile: Boolean(childEnv.USERPROFILE), homeDrive: Boolean(childEnv.HOMEDRIVE),
+    localAppData: Boolean(childEnv.LOCALAPPDATA), systemRoot: Boolean(childEnv.SystemRoot),
+  });
+  const stateFile = path.join(runtimePaths.browserControlDir, 'browser.json');
+  const deadline = Date.now() + 35000;
+  let ready = false, cdp = false, browser = null, state = null;
+  while (Date.now() < deadline) {
+    try { state = JSON.parse(await readFile(stateFile, 'utf8')); } catch { state = null; }
+    if (state?.pid && state.pid !== hostPid) {
+      emit('spawn-host-state-pid-mismatch', { expectedPid: hostPid, actualPid: state.pid });
+      break;
+    }
+    if (state?.launchFailure) {
+      emit('spawn-host-failure', { code: String(state.launchFailure.code || ''), message: String(state.launchFailure.message || '').slice(0, 500) });
+      break;
+    }
+    if (state?.ready === true) {
+      try {
+        const response = await fetch('http://127.0.0.1:' + port + '/json/version', { signal: AbortSignal.timeout(2000) });
+        if (response.ok) {
+          browser = await response.json();
+          cdp = /Edg|Chrome/.test(String(browser.Browser));
+          if (cdp) { ready = true; break; }
+        }
+      } catch {}
+    }
+    await new Promise(resolve => setTimeout(resolve, 250));
+  }
+  emit('host-result', {
+    started: ready, ready: state?.ready === true, cdp, pid: hostPid,
+    browserVersion: String(browser?.Browser || '').slice(0, 100),
+    failureCode: String(state?.launchFailure?.code || ''),
+    failure: String(state?.launchFailure?.message || '').slice(0, 500),
+    chromiumSandbox: true, envKeyCount: Object.keys(childEnv).length,
+  });
+  if (!ready) process.exitCode = 1;
 }
