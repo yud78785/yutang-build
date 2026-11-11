@@ -12,7 +12,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
 
-export const EXPECTED_EXE = 'c334971b305caaf5a6335f74bcf6111045013637e91bd7a02f1ceeeb0f4705f9';
+export const EXPECTED_EXE = '116c07c83218ec5bc79f49083d618245a59b11aaaf71af9551ce7750c84c048f';
 export const PUBLIC_VIDEO_URL = 'https://www.douyin.com/video/7577614489533680959';
 export const PUBLIC_VIDEO_ID = '7577614489533680959';
 const FILE = 'Dafeiyu-Douyin-API-1.4.6-win-x64.exe';
@@ -327,12 +327,29 @@ export async function inspectRendererSandbox(port = PORT, { profile, hostPid } =
             const networkProcess = processList.find(item => Number(item.ProcessId) === networkServicePid);
             const profileArgPresent = Boolean(networkProcess && typeof networkProcess.CommandLine === 'string' && typeof profile === 'string' && networkProcess.CommandLine.toLowerCase().includes(profile.toLowerCase()));
             const hostAncestorPresent = Boolean(Number.isSafeInteger(hostPid) && hasHostAncestor(networkServicePid, hostPid, processList));
-            networkServiceProcessOwned = Boolean(networkProcess && /msedge\\.exe$/i.test(String(networkProcess.Name || '')) && profileArgPresent && hostAncestorPresent);
+            const lineage = [];
+            const byPid = new Map(processList.map(item => [Number(item.ProcessId), item]));
+            let cursor = networkProcess;
+            for (let depth = 0; cursor && depth < 16; depth++) {
+              lineage.push({
+                pid: Number(cursor.ProcessId),
+                parentPid: Number(cursor.ParentProcessId) || null,
+                name: String(cursor.Name || ''),
+                profileArgPresent: typeof cursor.CommandLine === 'string' && typeof profile === 'string' && cursor.CommandLine.toLowerCase().includes(profile.toLowerCase()),
+                typeUtility: /(?:^|\\s)--type=utility(?:\\s|$)/i.test(String(cursor.CommandLine || '')),
+                networkService: /network\\.mojom\\.NetworkService/i.test(String(cursor.CommandLine || ''))
+              });
+              const parentPid = Number(cursor.ParentProcessId);
+              if (!Number.isSafeInteger(parentPid) || parentPid < 1) break;
+              cursor = byPid.get(parentPid);
+            }
+            networkServiceProcessOwned = Boolean(networkProcess && /msedge\\.exe$/i.test(String(networkProcess.Name || '')) && hostAncestorPresent);
             networkServiceProcessDetails = {
               name: String(networkProcess?.Name || ''),
               parentPid: Number(networkProcess?.ParentProcessId) || null,
               profileArgPresent,
-              hostAncestorPresent
+              hostAncestorPresent,
+              lineage
             };
           } catch (error) {
             networkServiceProcessDetails = { errorName: String(error?.name || 'Error'), errorCode: typeof error?.code === 'string' ? error.code : null };
@@ -613,7 +630,7 @@ async function run(exeFile) {
         networkServiceLockdown:report.rendererSandbox.networkServiceLockdown,
         networkServiceIntegrity:report.rendererSandbox.networkServiceIntegrity,
         networkServiceLowboxAppContainer:report.rendererSandbox.networkServiceLowboxAppContainer,
-        networkServiceWindowsTokenVerified:report.rendererSandbox.networkServiceWindowsTokenVerified,networkServiceProcessOwned:report.rendererSandbox.networkServiceProcessOwned
+        networkServiceWindowsTokenVerified:report.rendererSandbox.networkServiceWindowsTokenVerified,networkServiceProcessOwned:report.rendererSandbox.networkServiceProcessOwned,networkServiceProcessDetails:report.rendererSandbox.networkServiceProcessDetails
       }));
       assert.equal(report.rendererSandbox.rendererSandboxVerified, true, 'Edge internal sandbox page did not prove renderer AppContainer/Lockdown/Untrusted integrity.');
       assert.equal(report.rendererSandbox.networkServiceSandboxReported, true, 'Edge internal sandbox page did not report Network Service sandbox type Network with the feature enabled.');
