@@ -221,7 +221,7 @@ async function instrumentRuntime() {
   core = core.replace(launcherAnchor, launcherReplacement);
   const beforeSpawn = "        const child = spawn(resolveNodeExecutable(), [";
   const afterSpawn = [
-    "        console.error('CORE_PROBE:api_worker_env ' + JSON.stringify({hasNodeChannelFd:Object.hasOwn(process.env,'NODE_CHANNEL_FD'),hasNodeChannelSerializationMode:Object.hasOwn(process.env,'NODE_CHANNEL_SERIALIZATION_MODE'),hasNodeUniqueId:Object.hasOwn(process.env,'NODE_UNIQUE_ID'),processConnected:process.connected===true,hasProcessSend:typeof process.send==='function',hasNodeOptions:Boolean(process.env.NODE_OPTIONS),hasNodePath:Boolean(process.env.NODE_PATH),hasElectronRunAsNode:Boolean(process.env.ELECTRON_RUN_AS_NODE),cwdName:path.basename(process.cwd()),nodeVersion:process.versions.node}));",
+    "        console.error('CORE_PROBE:api_worker_env ' + JSON.stringify({envKeyNames:Object.keys(process.env).sort(),hasNodeChannelFd:Object.hasOwn(process.env,'NODE_CHANNEL_FD'),hasNodeChannelSerializationMode:Object.hasOwn(process.env,'NODE_CHANNEL_SERIALIZATION_MODE'),hasNodeUniqueId:Object.hasOwn(process.env,'NODE_UNIQUE_ID'),processConnected:process.connected===true,hasProcessSend:typeof process.send==='function',hasNodeOptions:Boolean(process.env.NODE_OPTIONS),hasNodePath:Boolean(process.env.NODE_PATH),hasElectronRunAsNode:Boolean(process.env.ELECTRON_RUN_AS_NODE),cwdName:path.basename(process.cwd()),nodeVersion:process.versions.node}));",
     "        console.error('CORE_PROBE:before_node_resolve');",
     "        const resolvedNode = resolveNodeExecutable();",
     "        console.error('CORE_PROBE:after_node_resolve');",
@@ -238,8 +238,10 @@ async function instrumentRuntime() {
   catch (error) { throw new Error('Instrumented core syntax check failed: ' + redact(error?.stderr || error?.message || error)); }
 }
 function sanitizedEnvironment(base, paths) {
-  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) =>
-    !/(?:TOKEN|SECRET|PASSWORD|API.?KEY|CREDENTIAL|AUTHORIZATION|COOKIE|GITHUB|ACTIONS|RUNNER|WORKFLOW|EVENT|INPUT|OUTPUT|STATE|STEP|NODE_OPTIONS|NODE_PATH|ELECTRON_RUN_AS_NODE)/i.test(key)));
+  // Browser observation requires a deliberately small OS-only environment.
+  // Model/API credentials and unrelated CI, shell, developer-tool and proxy variables are not inherited.
+  const allowed = /^(?:path|systemroot|windir|comspec|pathext|programfiles|programfiles\\(x86\\)|programdata|username|userdomain|public|allusersprofile|programw6432|os|processor_architecture|number_of_processors)$/i;
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => allowed.test(key)));
   Object.assign(env, {
     HOME: paths.home,
     USERPROFILE: paths.home,
@@ -329,6 +331,7 @@ async function main() {
     nodePathSha256: sha256(await fs.readFile(process.execPath)),
     playwright: playwrightPackage.version,
     backendEnvKeyCount: Object.keys(env).length,
+    backendEnvKeys: Object.keys(env).sort(),
     modelKeyPresent: false,
     edgeOutboundBlocked: true,
     diagnosticLaunchTimeoutMs: DIAGNOSTIC_LAUNCH_TIMEOUT_MS,
