@@ -77,7 +77,7 @@ const implementations = [patchRuntimePaths, patchPrepareApiRuntime, patchDesktop
 const invoked = process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href;
 if (invoked) {
   const args = process.argv.slice(2);
-  if (args.length !== 3 || args.some(item => !path.isAbsolute(path.resolve(item)))) {
+  if (args.length !== 3 || args.some(item => !path.isAbsolute(item))) {
     console.error('Usage: node tools/patch-isolated-candidate-state.mjs /absolute/runtime-paths.mjs /absolute/prepare-api-runtime.mjs /absolute/main.mjs');
     process.exitCode = 2;
   } else {
