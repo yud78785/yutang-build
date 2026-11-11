@@ -249,7 +249,7 @@ async function cdpCommand(socket, id, method, params = {}, sessionId = null) {
   ]);
 }
 
-export async function inspectRendererSandbox(port = PORT) {
+export async function inspectRendererSandbox(port = PORT, { profile, hostPid } = {}) {
   assert.equal(typeof WebSocket, 'function', 'Node runtime must provide WebSocket for sandbox diagnostics');
   const versionResponse = await fetch('http://127.0.0.1:' + port + '/json/version', { signal: AbortSignal.timeout(5000) });
   assert.equal(versionResponse.status, 200, 'CDP version endpoint must respond for sandbox diagnostics');
@@ -316,6 +316,24 @@ export async function inspectRendererSandbox(port = PORT) {
           try { networkServiceToken = readProcessToken(networkServicePid); }
           catch (error) { networkServiceToken = { processId: networkServicePid, isAppContainer: false, appContainerSid: null, errorName: String(error?.name || 'Error'), errorCode: typeof error?.code === 'string' ? error.code : null }; }
           const networkServiceWindowsTokenVerified = networkServiceToken?.isAppContainer === true && networkServiceToken?.appContainerSid === networkServiceAppContainerSid && networkServiceAppContainerSid !== null;
+          let networkServiceProcessOwned = false;
+          let networkServiceProcessDetails = null;
+          try {
+            const processList = asRows(ps("Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,CommandLine | ConvertTo-Json -Depth 3 -Compress"));
+            const networkProcess = processList.find(item => Number(item.ProcessId) === networkServicePid);
+            const profileArgPresent = Boolean(networkProcess && typeof networkProcess.CommandLine === 'string' && typeof profile === 'string' && networkProcess.CommandLine.toLowerCase().includes(profile.toLowerCase()));
+            const hostAncestorPresent = Boolean(Number.isSafeInteger(hostPid) && hasHostAncestor(networkServicePid, hostPid, processList));
+            networkServiceProcessOwned = Boolean(networkProcess && /msedge\\.exe$/i.test(String(networkProcess.Name || '')) && profileArgPresent && hostAncestorPresent);
+            networkServiceProcessDetails = {
+              name: String(networkProcess?.Name || ''),
+              parentPid: Number(networkProcess?.ParentProcessId) || null,
+              profileArgPresent,
+              hostAncestorPresent
+            };
+          } catch (error) {
+            networkServiceProcessDetails = { errorName: String(error?.name || 'Error'), errorCode: typeof error?.code === 'string' ? error.code : null };
+          }
+          const networkServiceFullIsolationVerified = networkServiceWindowsTokenVerified && networkServiceProcessOwned;
           const rendererRowsVerified = rendererRows.length > 0 && rendererRows.every(columns =>
             columns[3] === 'Renderer' && columns[4] === 'Lockdown' && /Untrusted/.test(columns[5] || '') && /^S-1-15-2-/.test(columns[8] || ''));
           const rendererSandboxVerified = rendererRowsVerified && rendererAppContainerEnabled;
@@ -341,9 +359,13 @@ export async function inspectRendererSandbox(port = PORT) {
             networkServiceLowboxAppContainer: networkServiceAppContainerSid !== null,
             networkServiceToken,
             networkServiceWindowsTokenVerified,
+            networkServiceProcessOwned,
+            networkServiceProcessDetails,
+            networkServiceFullIsolationVerified,
             networkServiceReportedNotSandboxed: networkServiceRow?.[3] === 'Not Sandboxed',
             networkServiceSandboxReported: networkServiceSandboxEnabled && networkServiceRow?.[3] === 'Network',
             explicitSandboxPositive: rendererSandboxVerified && networkServiceSandboxEnabled && networkServiceRow?.[3] === 'Network',
+            explicitSandboxFullPositive: rendererSandboxVerified && networkServiceSandboxEnabled && networkServiceRow?.[3] === 'Network' && networkServiceFullIsolationVerified,
             explicitSandboxNegative: false,
             attempts
           };
@@ -575,7 +597,7 @@ async function run(exeFile) {
     }
     const initialCheck=await inspectReadyBrowser(state,ready.backendPid,profile,controlDir);
     try {
-      report.rendererSandbox = await inspectRendererSandbox(PORT);
+      report.rendererSandbox = await inspectRendererSandbox(PORT, { profile, hostPid: state.pid });
       console.log('RENDERER_AND_NETWORK_SANDBOX_DIAGNOSTIC '+JSON.stringify({
         rendererSandboxVerified:report.rendererSandbox.rendererSandboxVerified,
         rendererProcessCount:report.rendererSandbox.rendererProcessCount,
@@ -584,10 +606,12 @@ async function run(exeFile) {
         networkServiceLockdown:report.rendererSandbox.networkServiceLockdown,
         networkServiceIntegrity:report.rendererSandbox.networkServiceIntegrity,
         networkServiceLowboxAppContainer:report.rendererSandbox.networkServiceLowboxAppContainer,
-        networkServiceWindowsTokenVerified:false
+        networkServiceWindowsTokenVerified:report.rendererSandbox.networkServiceWindowsTokenVerified,networkServiceProcessOwned:report.rendererSandbox.networkServiceProcessOwned
       }));
       assert.equal(report.rendererSandbox.rendererSandboxVerified, true, 'Edge internal sandbox page did not prove renderer AppContainer/Lockdown/Untrusted integrity.');
       assert.equal(report.rendererSandbox.networkServiceSandboxReported, true, 'Edge internal sandbox page did not report Network Service sandbox type Network with the feature enabled.');
+      assert.equal(report.rendererSandbox.networkServiceWindowsTokenVerified, true, 'Network Service process token AppContainer SID did not match edge://sandbox.');
+      assert.equal(report.rendererSandbox.networkServiceProcessOwned, true, 'Network Service process was not verified as a child of this dedicated Edge host/profile.');
     } catch (error) {
       report.rendererSandbox = { accessible:false, error:safeText(error?.message || error, redactionPaths) };
       console.log('RENDERER_AND_NETWORK_SANDBOX_DIAGNOSTIC '+JSON.stringify(report.rendererSandbox));
