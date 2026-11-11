@@ -12,7 +12,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
 
-export const EXPECTED_EXE = '3d61154c4643a9b751b2bd911bb9cf1f167273db7b4312571ef5ef6178be7e5c';
+export const EXPECTED_EXE = process.env.YUTANG_EXPECTED_CANDIDATE_SHA256 || '';
 export const PUBLIC_VIDEO_URL = 'https://www.douyin.com/video/7577614489533680959';
 export const PUBLIC_VIDEO_ID = '7577614489533680959';
 const FILE = 'Dafeiyu-Douyin-API-1.4.6-win-x64.exe';

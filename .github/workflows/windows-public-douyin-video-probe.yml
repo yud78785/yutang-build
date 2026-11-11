@@ -1,16 +1,11 @@
 name: YuTang public Douyin video capture probe (NO LOGIN / NO MODEL / NOT RELEASE)
 
 on:
-  push:
-    branches:
-      - hardening/candidate-fresh-profile-bounded-launch-20261111
-    paths:
-      - .github/workflows/windows-public-douyin-video-probe.yml
-      - tools/windows_public_douyin_video_probe.mjs
   pull_request:
     paths:
       - .github/workflows/windows-public-douyin-video-probe.yml
       - tools/windows_public_douyin_video_probe.mjs
+      - tools/resolve-candidate-artifact.ps1
 
 permissions:
   contents: read
@@ -19,12 +14,13 @@ permissions:
 jobs:
   public-video-capture:
     runs-on: windows-2025
-    timeout-minutes: 20
+    timeout-minutes: 60
     steps:
       - name: Checkout reviewed probe without persisted Git credentials
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Verify smoke harness syntax and process safety assertions
         shell: pwsh
@@ -35,35 +31,16 @@ jobs:
           node tools/windows_public_douyin_video_probe.mjs --self-test
           if ($LASTEXITCODE -ne 0) { throw 'Synthetic process ownership assertions failed' }
 
-      - name: Fetch exact isolated candidate and verify ZIP/EXE hashes before execution
+      - name: Resolve exact PR head candidate from its own successful build
         id: source
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
+          YUTANG_TARGET_SHA: ${{ github.event.pull_request.head.sha }}
+          YUTANG_TARGET_BRANCH: ${{ github.head_ref }}
         run: |
-          $ErrorActionPreference='Stop'
-          $ProgressPreference='SilentlyContinue'
-          $archive=Join-Path $env:RUNNER_TEMP 'YuTang-Public-Douyin-Candidate.zip'
-          $headers=@{Authorization="Bearer $env:GH_TOKEN";Accept='application/vnd.github+json';'X-GitHub-Api-Version'='2022-11-28'}
-          Invoke-WebRequest -Uri 'https://api.github.com/repos/yud78785/yutang-build/actions/artifacts/13873651630/zip' -Headers $headers -MaximumRedirection 5 -OutFile $archive
-          $expectedArchive='07b265bd555b5676a819bb463524d249d8e52fe99318dcfb124fee4a3d0a51ef'
-          if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expectedArchive) { throw 'Candidate ZIP hash mismatch; refusing extraction.' }
-          Add-Type -AssemblyName System.IO.Compression.FileSystem
-          $zip=[System.IO.Compression.ZipFile]::OpenRead($archive)
-          try {
-            $entries=@($zip.Entries)
-            $allowed=@('Dafeiyu-Douyin-API-1.4.6-win-x64.exe','YUTANG-RESULT.txt')
-            if ($entries.Count -ne 2 -or @($entries | Where-Object {$allowed -cnotcontains $_.FullName}).Count -ne 0 -or @($entries.FullName | Select-Object -Unique).Count -ne 2) { throw 'Candidate ZIP entries are not the exact expected files.' }
-            $exeEntry=@($entries | Where-Object {$_.FullName -eq $allowed[0]})[0]
-            if (-not $exeEntry -or $exeEntry.Length -lt 50000000 -or $exeEntry.Length -gt 200000000) { throw 'Candidate EXE size is outside the expected bound.' }
-          } finally { $zip.Dispose() }
-          $directory=Join-Path $env:RUNNER_TEMP 'YuTang-Public-Douyin-Candidate'
-          [System.IO.Compression.ZipFile]::ExtractToDirectory($archive,$directory)
-          $exe=Join-Path $directory 'Dafeiyu-Douyin-API-1.4.6-win-x64.exe'
-          $expectedExe='3d61154c4643a9b751b2bd911bb9cf1f167273db7b4312571ef5ef6178be7e5c'
-          if ((Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expectedExe) { throw 'Candidate EXE hash mismatch; refusing execution.' }
-          "exe=$exe" | Out-File -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          Write-Host 'PUBLIC_VIDEO_CANDIDATE_IDENTITY_PASS: exact artifact ZIP and EXE verified.'
+          & ./tools/resolve-candidate-artifact.ps1 -Purpose public-video
+          if ($LASTEXITCODE -ne 0) { throw 'Candidate identity resolver failed closed.' }
 
       - name: Permit ordinary Edge egress only on disposable CI runner
         shell: pwsh
@@ -94,6 +71,7 @@ jobs:
         shell: pwsh
         env:
           YUTANG_PUBLIC_VIDEO_TEST_ALLOWED: 'yes'
+          YUTANG_EXPECTED_CANDIDATE_SHA256: ${{ steps.source.outputs.exe_sha }}
         run: |
           node tools/windows_public_douyin_video_probe.mjs '${{ steps.source.outputs.exe }}'
           if ($LASTEXITCODE -ne 0) { throw 'Public video Core capture or candidate lifecycle probe failed.' }

@@ -8,6 +8,12 @@ on:
   pull_request:
     paths:
       - .github/workflows/yutang.yml
+      - .github/workflows/windows-isolated-candidate-ownership.yml
+      - .github/workflows/windows-public-douyin-video-probe.yml
+      - tools/jobguard/**
+      - tools/windows_isolated_candidate_edge_smoke.mjs
+      - tools/windows_public_douyin_video_probe.mjs
+      - tools/resolve-candidate-artifact.ps1
   workflow_dispatch:
 
 permissions:
@@ -19,11 +25,13 @@ jobs:
     timeout-minutes: 90
     env:
       FIXED_COMMIT: 912873e2556d16a088d81dcbc6f7c0060614dd58
+      YUTANG_BUILD_CONTROL_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
       - name: Checkout build controls (no persisted Git credentials)
         uses: actions/checkout@v4
         with:
           persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Set up Node.js 24
         uses: actions/setup-node@v4
@@ -410,6 +418,7 @@ jobs:
           @(
             'STATUS: WINDOWS CI CANDIDATE ONLY - NOT AN END-TO-END SECURITY RELEASE'
             "PINNED COMMIT: $env:FIXED_COMMIT"
+            "BUILD CONTROL SHA: $env:YUTANG_BUILD_CONTROL_SHA"
             "FILE: $($exe[0].Name)"
             "SHA256: $hash"
             'PASSED: pinned source patch, bounded 20s Edge launch, isolated candidate profile/memory/settings defaults, bounded same-origin BrowserLauncher navigation recovery, upstream tar.gz/tree, packaged API smoke, renderer AppContainer, NetworkServiceSandbox feature'
