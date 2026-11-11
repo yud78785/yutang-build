@@ -13,6 +13,8 @@ function once(source,before,after,label){
   return source.replace(before,after);
 }
 export function patchApiProcess(source){
+  if(source.includes('attachDesktopJobGuard')||source.includes('this.desktopGuard'))
+    throw new Error('Desktop worker guard already present: pinned anchor mismatch');
   source=once(source,"import path from 'node:path';","import path from 'node:path';\nimport fs from 'node:fs/promises';",'guard fs import');
   source=once(source,"this.pending = new Map(); this.secrets = new Set(); this.stderr = '';",
     "this.pending = new Map(); this.secrets = new Set(); this.stderr = ''; this.desktopGuard = null;",'desktop guard state');
