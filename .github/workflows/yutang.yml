@@ -5,9 +5,6 @@
 name: YuTang - pinned Windows candidate (NOT release)
 
 on:
-  push:
-    branches:
-      - feature/network-service-sandbox-20261111
   pull_request:
     paths:
       - .github/workflows/yutang.yml
@@ -203,6 +200,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Sandbox patch controls failed' }
           node tests/test-propagation.mjs
           if ($LASTEXITCODE -ne 0) { throw 'Propagation fail-closed controls failed' }
+          node tools/patch-startup-ready.mjs --self-test
+          if ($LASTEXITCODE -ne 0) { throw 'Renderer startup patch safety checks failed' }
 
       - name: Checkout exact upstream release commit and verify source identity
         shell: pwsh
@@ -218,8 +217,12 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Patch or original blob verification failed' }
           node --check upstream/browser-host.mjs
           if ($LASTEXITCODE -ne 0) { throw 'Patched source syntax failed' }
+          node tools/patch-startup-ready.mjs upstream/desktop/src/startup-navigation.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned renderer startup patch failed' }
+          node --check upstream/desktop/src/startup-navigation.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Patched renderer source syntax failed' }
           $changed = @(git -C upstream diff --name-only)
-          if ($changed.Count -ne 1 -or $changed[0] -ne 'browser-host.mjs') { throw 'Unexpected source differences' }
+          if ($changed.Count -ne 2 -or $changed -notcontains 'browser-host.mjs' -or $changed -notcontains 'desktop/src/startup-navigation.mjs') { throw 'Unexpected source differences' }
 
       - name: Install pinned pnpm and repository dependencies
         shell: pwsh
@@ -308,6 +311,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Sandbox fix was not staged into runtime' }
           node scripts/build-api-desktop.mjs
           if ($LASTEXITCODE -ne 0) { throw 'Desktop application build failed' }
+          $source=(Get-FileHash -Algorithm SHA256 -LiteralPath 'src/startup-navigation.mjs').Hash
+          $copied=(Get-FileHash -Algorithm SHA256 -LiteralPath 'app/startup-navigation.mjs').Hash
+          if ($source -ne $copied) { throw 'Renderer startup patch not copied into desktop app' }
+          Write-Host 'PASS renderer startup patch is byte-identical in desktop application entry.'
 
       - name: Run independent Edge sandbox process probe on Windows
         shell: pwsh
