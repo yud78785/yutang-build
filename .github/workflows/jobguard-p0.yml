@@ -25,8 +25,8 @@ jobs:
       - name: Verify immutable source archive
         shell: pwsh
         run: |
-          $src = 'experiments/jobguard-p0/jobguard-src-r2.zip'
-          $expected = '072997cf92699dd7e281dade6acfbb3e5ca0ddcae581e5439b86b968c2947d90'
+          $src = 'experiments/jobguard-p0/jobguard-src-r3.zip'
+          $expected = '9f592842e20bdeef37aa9a9ca7e691df16c88065c1d86faf0595f1da810b4ce6'
           $actual = (Get-FileHash -LiteralPath $src -Algorithm SHA256).Hash.ToLowerInvariant()
           if ($actual -ne $expected) { throw "Source archive SHA256 mismatch: $actual" }
           Expand-Archive -LiteralPath $src -DestinationPath jobguard-test -ErrorAction Stop
@@ -68,8 +68,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "072997cf92699dd7e281dade6acfbb3e5ca0ddcae581e5439b86b968c2947d90  experiments/jobguard-p0/jobguard-src-r2.zip" | sha256sum -c -
-          unzip -q experiments/jobguard-p0/jobguard-src-r2.zip -d jobguard-test
+          echo "9f592842e20bdeef37aa9a9ca7e691df16c88065c1d86faf0595f1da810b4ce6  experiments/jobguard-p0/jobguard-src-r3.zip" | sha256sum -c -
+          unzip -q experiments/jobguard-p0/jobguard-src-r3.zip -d jobguard-test
           cd jobguard-test/src
           go test -count=5 ./...
           go test -race -count=3 ./...
