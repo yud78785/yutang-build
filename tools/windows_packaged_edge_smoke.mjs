@@ -262,8 +262,10 @@ async function run(exeFile) {
   const profile=path.join(common,'cli-profile');
   const envKeys=['HOMEDRIVE','HOMEPATH','USERNAME','USERDOMAIN','SystemDrive','ProgramFiles','ProgramFiles(x86)','ProgramData','SystemRoot','TEMP','TMP'];
   const report={type:'WINDOWS_EDGE_LAUNCH_IN_EPHEMERAL_CI_ONLY',candidateSha256:EXPECTED_EXE,realAccount:false,modelKey:false,externalEdgeNetworkBlocked:true,environmentProfile:'isolated-safe-expanded',safeEnvPresence:Object.fromEntries(envKeys.map(key=>[key,Boolean(env[key])]))};
+  let backendPid=null;
   try {
     const ready=await until(async()=>{const x=await readJSON(path.join(userData,'desktop-smoke.json'));return x.ready===true?x:null;},85000,'packaged EXE startup');
+    backendPid=ready.backendPid;
     assert.equal(ready.configured,false,'EXE must not be configured with a model key');
     assert.equal(path.resolve(ready.memoryFolder).toLowerCase(),path.resolve(memory).toLowerCase(),'unexpected memory folder');
     assert.match(ready.origin,/^http:\/\/127\.0\.0\.1:\d{4,5}$/);
@@ -397,6 +399,10 @@ async function run(exeFile) {
         const ownedHost=currentProcesses.find(p=>Number(p.ProcessId)===state.pid&&/node\.exe$/i.test(String(p.Name||''))&&/browser-host\.mjs/i.test(String(p.CommandLine||''))&&String(p.CommandLine||'').toLowerCase().includes(profile.toLowerCase()));
         if(ownedHost)try { execFileSync('taskkill.exe',['/PID',String(state.pid),'/T','/F'],{stdio:'ignore',windowsHide:true,timeout:10000}); } catch {}
       }
+      if(Number.isSafeInteger(backendPid)&&backendPid>0) {
+        const ownedBackend=currentProcesses.find(p=>Number(p.ProcessId)===backendPid&&/node\.exe$/i.test(String(p.Name||''))&&/api-worker\.mjs/i.test(String(p.CommandLine||'')));
+        if(ownedBackend)try { execFileSync('taskkill.exe',['/PID',String(backendPid),'/T','/F'],{stdio:'ignore',windowsHide:true,timeout:10000}); } catch {}
+      }
       if(Number.isSafeInteger(child.pid)&&child.pid>0) {
         const ownedApp=currentProcesses.find(p=>Number(p.ProcessId)===child.pid&&String(p.ExecutablePath||'').toLowerCase()===path.resolve(exeFile).toLowerCase());
         if(ownedApp)try { execFileSync('taskkill.exe',['/PID',String(child.pid),'/T','/F'],{stdio:'ignore',windowsHide:true,timeout:10000}); } catch {}
@@ -408,15 +414,16 @@ async function run(exeFile) {
       try { const value=ps(processQuery); rows=Array.isArray(value)?value:(value?[value]:[]); }
       catch { process.exitCode=1; rows=[{ProcessId:'unknown',Name:'unverified',CommandLine:profile}]; }
       const belongsToCandidate=p=>Number(p.ProcessId)===child.pid&&String(p.ExecutablePath||'').toLowerCase()===path.resolve(exeFile).toLowerCase();
+      const belongsToBackend=p=>Number(p.ProcessId)===backendPid&&/node\.exe$/i.test(String(p.Name||''))&&/api-worker\.mjs/i.test(String(p.CommandLine||''));
       const belongsToBrowser=p=>String(p.CommandLine||'').toLowerCase().includes(profile.toLowerCase())||String(p.CommandLine||'').toLowerCase().includes(controlDir.toLowerCase());
-      let survivors=rows.filter(p=>belongsToBrowser(p)||belongsToCandidate(p));
+      let survivors=rows.filter(p=>belongsToBrowser(p)||belongsToCandidate(p)||belongsToBackend(p));
       for(const item of survivors) { if(Number.isSafeInteger(Number(item.ProcessId)))try { execFileSync('taskkill.exe',['/PID',String(item.ProcessId),'/T','/F'],{stdio:'ignore',windowsHide:true,timeout:10000}); } catch {} }
       if(survivors.length) {
         await delay(1000);
         try {
           const value=ps(processQuery);
           const after=Array.isArray(value)?value:(value?[value]:[]);
-          survivors=after.filter(p=>belongsToBrowser(p)||belongsToCandidate(p));
+          survivors=after.filter(p=>belongsToBrowser(p)||belongsToCandidate(p)||belongsToBackend(p));
         } catch { survivors=[{ProcessId:'unknown',Name:'unverified'}]; }
       }
       if(survivors.length) {
