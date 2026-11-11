@@ -6,10 +6,12 @@ on:
       - audit/node24-edge-host-20261111
     paths:
       - tools/node24_network_service_sandbox_probe.mjs
+      - tools/node24_decoded_video_frame_probe.mjs
       - .github/workflows/node24-network-service-sandbox.yml
   pull_request:
     paths:
       - tools/node24_network_service_sandbox_probe.mjs
+      - tools/node24_decoded_video_frame_probe.mjs
       - .github/workflows/node24-network-service-sandbox.yml
   workflow_dispatch:
 
