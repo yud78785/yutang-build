@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
-export const EXPECTED_EXE = 'ac02053ff2f95897d581518e8ce80fed28de6c101e5a3f2e767f1cf6c42bde7d';
+export const EXPECTED_EXE = '3d61154c4643a9b751b2bd911bb9cf1f167273db7b4312571ef5ef6178be7e5c';
 const FILE = 'Dafeiyu-Douyin-API-1.4.6-win-x64.exe';
 const PORT = 9227;
 const allowedEnv = /^(?:path|systemroot|windir|comspec|pathext|programfiles|programfiles\(x86\)|programdata|username|userdomain|public|allusersprofile|programw6432|os|processor_architecture|number_of_processors|homedrive|homepath|userprofile|appdata|localappdata|temp|tmp|systemdrive|home)$/i;
