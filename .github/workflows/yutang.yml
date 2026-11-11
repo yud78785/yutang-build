@@ -355,8 +355,12 @@ jobs:
           $env:NODE_PATH = (Resolve-Path .cache/api-runtime/node_modules).Path
           node -e "console.log('Smoke verifier Playwright:', require.resolve('playwright-core'))"
           if ($LASTEXITCODE -ne 0) { throw 'Staged verification dependency unavailable' }
+          node ../../tools/patch-smoke-isolation.mjs (Resolve-Path scripts/verify-packaged-api.mjs).Path
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned isolated-state smoke expectation patch failed' }
+          node --check scripts/verify-packaged-api.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Patched packaged smoke verifier syntax failed' }
           node scripts/verify-packaged-api.mjs
-          if ($LASTEXITCODE -ne 0) { throw 'Official packaged API verification failed' }
+          if ($LASTEXITCODE -ne 0) { throw 'Isolated packaged API verification failed' }
           $exe = @(Get-ChildItem release-api -Filter '*.exe' -File | Where-Object { $_.Length -gt 50000000 })
           if (@($exe).Count -ne 1) { throw 'Expected exactly one EXE artifact' }
           $hash = (Get-FileHash -LiteralPath $exe[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
