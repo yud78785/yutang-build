@@ -426,7 +426,7 @@ async function waitForBrowserGone(hostPid, profile, controlDir, port) {
 }
 
 
-async function forceWindowsJobObjectExit({ mode, hostPid, backendPid, profile, controlDir, unrelatedProfile }) {
+async function forceWindowsJobObjectExit({ mode, hostPid, backendPid, profile, controlDir, unrelatedProfile, userData }) {
   // This is only called in a disposable Windows CI runner after the EXE has been hash-verified.
   // Never use /T: recursive taskkill would hide a broken KILL_ON_JOB_CLOSE implementation.
   assert.ok(mode === 'host' || mode === 'guard', 'Unsupported force-exit test mode');
@@ -444,8 +444,14 @@ async function forceWindowsJobObjectExit({ mode, hostPid, backendPid, profile, c
   assert.ok(Number.isSafeInteger(guardPid) && guardPid > 0, 'Invalid Job Object helper PID');
   assert.match(String(guard.CommandLine || ''), new RegExp('--owner-pid\\s+' + String(hostPid) + '(?:\\s|$)', 'i'),
     'Job Object helper was not launched for the exact host PID');
-  const guardPath = String(guard.ExecutablePath || '').replace(/\//g, '\\').toLowerCase();
-  assert.ok(guardPath.endsWith('\\api-runtime\\jobguard.exe'), 'Refusing forced kill: Job Object helper binary is not in the packaged API runtime');
+  // Electron prepares a private copy of the packaged runtime under this candidate's isolated userData.
+  // Verify its exact per-run runtime namespace, not the original installer staging directory.
+  const guardPath = path.resolve(String(guard.ExecutablePath || ''));
+  const relativeGuard = path.relative(path.join(userData, 'runtimes'), guardPath);
+  const guardParts = relativeGuard.split(/[\\/]+/);
+  assert.ok(guardParts.length === 2 && /^[a-f0-9]{20}$/i.test(guardParts[0]) &&
+    /^jobguard\.exe$/i.test(guardParts[1]),
+    'Refusing forced kill: Job Object helper is not inside the candidate isolated prepared runtime');
   const edgePids = rows.filter(p => /msedge\.exe$/i.test(String(p.Name || '')) &&
     hasHostAncestor(Number(p.ProcessId), hostPid, rows)).map(p => Number(p.ProcessId));
   assert.ok(edgePids.length > 0, 'No candidate-owned Edge descendants existed before forced kill');
@@ -761,7 +767,7 @@ async function run(exeFile, { forceMode = null } = {}) {
     const finalPid=state.pid;
     if(forceMode){
       report.forcedExit = await forceWindowsJobObjectExit({
-        mode: forceMode, hostPid:finalPid, backendPid:ready.backendPid, profile, controlDir, unrelatedProfile
+        mode: forceMode, hostPid:finalPid, backendPid:ready.backendPid, profile, controlDir, unrelatedProfile, userData
       });
       lifecycle.closeCount++;
       lifecycle.finalCloseVerified = report.forcedExit.trackedProcessesRemaining === 0 &&
