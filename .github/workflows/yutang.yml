@@ -206,6 +206,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Renderer startup patch safety checks failed' }
           node --check tools/patch-isolated-candidate-state.mjs
           if ($LASTEXITCODE -ne 0) { throw 'Isolated profile/memory patch syntax failed' }
+          node --check tools/patch-browser-launcher-navigation.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'BrowserLauncher navigation patch syntax failed' }
+          node tests/test-browser-launcher-navigation-patch.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'BrowserLauncher navigation recovery patch tests failed' }
 
       - name: Checkout exact upstream release commit and verify source identity
         shell: pwsh
@@ -227,12 +231,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Patched renderer source syntax failed' }
           node tools/patch-isolated-candidate-state.mjs (Resolve-Path upstream/runtime-paths.mjs).Path (Resolve-Path upstream/desktop/src/prepare-api-runtime.mjs).Path (Resolve-Path upstream/desktop/src/main.mjs).Path
           if ($LASTEXITCODE -ne 0) { throw 'Candidate profile, memory and settings isolation patch failed' }
-          foreach ($entry in @('upstream/runtime-paths.mjs', 'upstream/desktop/src/prepare-api-runtime.mjs', 'upstream/desktop/src/main.mjs')) {
+          node tools/patch-browser-launcher-navigation.mjs (Resolve-Path upstream/browser-launcher.mjs).Path
+          if ($LASTEXITCODE -ne 0) { throw 'BrowserLauncher bounded same-origin navigation recovery patch failed' }
+          foreach ($entry in @('upstream/runtime-paths.mjs', 'upstream/desktop/src/prepare-api-runtime.mjs', 'upstream/desktop/src/main.mjs', 'upstream/browser-launcher.mjs')) {
             node --check $entry
             if ($LASTEXITCODE -ne 0) { throw "Patched candidate source failed syntax check: $entry" }
           }
           $changed = @(git -C upstream diff --name-only)
-          if ($changed.Count -ne 5 -or $changed -notcontains 'browser-host.mjs' -or $changed -notcontains 'runtime-paths.mjs' -or $changed -notcontains 'desktop/src/prepare-api-runtime.mjs' -or $changed -notcontains 'desktop/src/main.mjs' -or $changed -notcontains 'desktop/src/startup-navigation.mjs') { throw 'Unexpected source differences' }
+          if ($changed.Count -ne 6 -or $changed -notcontains 'browser-host.mjs' -or $changed -notcontains 'runtime-paths.mjs' -or $changed -notcontains 'desktop/src/prepare-api-runtime.mjs' -or $changed -notcontains 'desktop/src/main.mjs' -or $changed -notcontains 'desktop/src/startup-navigation.mjs' -or $changed -notcontains 'browser-launcher.mjs') { throw 'Unexpected source differences' }
 
       - name: Install pinned pnpm and repository dependencies
         shell: pwsh
@@ -320,6 +326,7 @@ jobs:
           node ../../tools/verify-propagation.mjs ../browser-host.mjs .cache/api-runtime/browser-host.mjs
           if ($LASTEXITCODE -ne 0) { throw 'Sandbox or timeout fix was not staged into runtime' }
           if ((Get-FileHash -Algorithm SHA256 -LiteralPath '../runtime-paths.mjs').Hash -ne (Get-FileHash -Algorithm SHA256 -LiteralPath '.cache/api-runtime/runtime-paths.mjs').Hash) { throw 'Private YuTang runtime path defaults did not propagate to the staged runtime' }
+          if ((Get-FileHash -Algorithm SHA256 -LiteralPath '../browser-launcher.mjs').Hash -ne (Get-FileHash -Algorithm SHA256 -LiteralPath '.cache/api-runtime/browser-launcher.mjs').Hash) { throw 'Bounded BrowserLauncher navigation fix did not propagate to the staged runtime' }
           node scripts/build-api-desktop.mjs
           if ($LASTEXITCODE -ne 0) { throw 'Desktop application build failed' }
           $source=(Get-FileHash -Algorithm SHA256 -LiteralPath 'src/startup-navigation.mjs').Hash
@@ -332,6 +339,8 @@ jobs:
             if ($original -ne $staged) { throw "Candidate state isolation source was not copied into Electron app: $entry" }
           }
           Write-Host 'PASS new candidate has isolated Electron settings, shared state and Edge profile defaults.'
+          if ((Get-FileHash -Algorithm SHA256 -LiteralPath 'browser-launcher.mjs').Hash -ne (Get-FileHash -Algorithm SHA256 -LiteralPath 'release-api/win-unpacked/resources/api-runtime/browser-launcher.mjs').Hash) { throw 'Packaged BrowserLauncher navigation fix is missing or changed' }
+          Write-Host 'PASS bounded same-origin BrowserLauncher navigation recovery is byte-identical in packaged runtime.'
 
       - name: Run independent Edge sandbox process probe on Windows
         shell: pwsh
@@ -369,7 +378,7 @@ jobs:
             "PINNED COMMIT: $env:FIXED_COMMIT"
             "FILE: $($exe[0].Name)"
             "SHA256: $hash"
-            'PASSED: pinned source patch, bounded 20s Edge launch, isolated candidate profile/memory/settings defaults, upstream tar.gz/tree, packaged API smoke, renderer AppContainer, NetworkServiceSandbox feature'
+            'PASSED: pinned source patch, bounded 20s Edge launch, isolated candidate profile/memory/settings defaults, bounded same-origin BrowserLauncher navigation recovery, upstream tar.gz/tree, packaged API smoke, renderer AppContainer, NetworkServiceSandbox feature'
             'NOT PROVEN: real Douyin playback, model reasoning, continuous autonomy, Windows Network Service native token restrictions, signed release trust'
           ) | Set-Content -LiteralPath release-api/YUTANG-RESULT.txt -Encoding utf8
           Write-Host "CANDIDATE SHA256 $hash"
