@@ -22,6 +22,7 @@ const EXPECTED_HOST_SHA256 = '5716a705e19663f1f6faed52569508b72cf091d3a31766828a
 const hostPath = path.join(runtime, 'browser-host.mjs');
 const corePath = path.join(runtime, 'core.mjs');
 const launcherPath = path.join(runtime, 'browser-launcher.mjs');
+const apiWorkerPath = path.join(runtime, 'api-worker.mjs');
 
 const sha256 = value => createHash('sha256').update(value).digest('hex');
 const redact = value => String(value ?? '')
@@ -147,6 +148,22 @@ async function instrumentRuntime() {
   const launcherAfter = "function allowedPage(url) { try { return url === 'about:blank' || url === process.env.DOUYIN_TEST_HOME_URL || new URL(url).origin === 'https://www.douyin.com'; } catch { return false; } }";
   if (originalLauncher.split(launcherBefore).length !== 2) throw new Error('BrowserLauncher local fixture allow-list anchor mismatch.');
   await fs.writeFile(launcherPath, originalLauncher.replace(launcherBefore, launcherAfter));
+
+  const originalWorker = await fs.readFile(apiWorkerPath, 'utf8');
+  let worker = originalWorker;
+  const workerPatches = [
+    ["  const stop = () => stopping ??= (async () => {", "  const stop = () => stopping ??= (async () => {\n    console.error('API_WORKER_PROBE:stop_body_enter');"],
+    ["    await server?.stop();", "    await server?.stop();\n    console.error('API_WORKER_PROBE:stop_body_done');"],
+    ["  const exit = async code => {", "  const exit = async code => {\n    console.error('API_WORKER_PROBE:exit_enter code=' + String(code));"],
+    ["      } else if (type === 'stop') {\n        await stop();", "      } else if (type === 'stop') {\n        console.error('API_WORKER_PROBE:stop_command_enter');\n        await stop();"],
+    ["      if (type === 'stop') process.exit(0);", "      if (type === 'stop') { console.error('API_WORKER_PROBE:explicit_process_exit'); process.exit(0); }"],
+    ["  process.once('disconnect', () => { void exit(0); });", "  process.once('disconnect', () => { console.error('API_WORKER_PROBE:disconnect_event'); void exit(0); });"]
+  ];
+  for (const [before, after] of workerPatches) {
+    if (worker.split(before).length !== 2) throw new Error('API worker shutdown instrumentation anchor mismatch.');
+    worker = worker.replace(before, after);
+  }
+  await fs.writeFile(apiWorkerPath, worker);
 
   const originalCore = await fs.readFile(corePath, 'utf8');
   let core = originalCore.replace("import { spawn } from 'node:child_process';", "import { spawn, execFileSync } from 'node:child_process';");
@@ -384,6 +401,7 @@ async function main() {
     const firstHostPid = hostPid;
     const firstBrowserPid = report.processOwnership?.edgeLaunchSummaries?.[0]?.pid || null;
     try { await backend.stop(); } catch (error) { report.firstBackendStopError = redact(error?.message || error); }
+    report.firstBackendStderrTail = redact(backend.stderr);
     await delay(750);
 
     backend = new ApiProcess(process.execPath, runtime, { env, timeoutMs: 30000 });
@@ -469,14 +487,15 @@ async function main() {
     for (let attempt = 0; attempt < 60; attempt++) {
       let processes = [], listeners = [], processSnapshotVerified = false, listenerSnapshotVerified = false;
       try {
-        const snapshotRows = powershellJson("$processOk=$true; $listenerOk=$true; try { $processes=@(Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object { $_.Name -eq 'msedge.exe' -or $_.Name -eq 'node.exe' } | Select-Object ProcessId,ParentProcessId,Name,CommandLine) } catch { $processOk=$false; $processes=@() }; try { $listeners=@(Get-NetTCPConnection -LocalPort 9227 -State Listen -ErrorAction Stop | Select-Object OwningProcess,LocalAddress) } catch { $listenerOk=$false; $listeners=@() }; ConvertTo-Json -InputObject ([ordered]@{processSnapshotVerified=$processOk;listenerSnapshotVerified=$listenerOk;processes=$processes;listeners=$listeners}) -Compress -Depth 5");
+        const snapshotRows = powershellJson("$processOk=$true; try { $processes=@(Get-CimInstance Win32_Process -ErrorAction Stop | Where-Object { $_.Name -eq 'msedge.exe' -or $_.Name -eq 'node.exe' } | Select-Object ProcessId,ParentProcessId,Name,CommandLine) } catch { $processOk=$false; $processes=@() }; ConvertTo-Json -InputObject ([ordered]@{processSnapshotVerified=$processOk;processes=$processes}) -Compress -Depth 5");
         if (snapshotRows.length === 1 && snapshotRows[0] && typeof snapshotRows[0] === 'object') {
           const snapshot = snapshotRows[0];
           processSnapshotVerified = snapshot.processSnapshotVerified === true;
-          listenerSnapshotVerified = snapshot.listenerSnapshotVerified === true;
           processes = Array.isArray(snapshot.processes) ? snapshot.processes : snapshot.processes ? [snapshot.processes] : [];
-          listeners = Array.isArray(snapshot.listeners) ? snapshot.listeners : snapshot.listeners ? [snapshot.listeners] : [];
         }
+        const netstat = execFileSync('netstat.exe', ['-ano', '-p', 'tcp'], { encoding: 'utf8', windowsHide: true, timeout: 10000 });
+        listeners = netstat.split(/\\r?\\n/).flatMap(line => { const match = /^\\s*TCP\\s+(\\S+):9227\\s+\\S+\\s+LISTENING\\s+(\\d+)\\s*$/i.exec(line); return match ? [{ LocalAddress: match[1], OwningProcess: Number(match[2]) }] : []; });
+        listenerSnapshotVerified = true;
       } catch {}
       const hostStillAlive = processes.some(item => Number(item.ProcessId) === Number(hostPid));
       const edgeProcesses = processes.filter(item => /msedge\\.exe$/i.test(String(item.Name)));
