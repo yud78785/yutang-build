@@ -391,19 +391,23 @@ async function main() {
     try { await backend.stop(); } catch (error) { report.backendStopError = redact(error?.message || error); }
     let cleanup = null;
     for (let attempt = 0; attempt < 24; attempt++) {
-      let processes = [], listeners = [];
+      let processes = [], listeners = [], processSnapshotVerified = false, listenerSnapshotVerified = false;
       try {
-        processes = powershellJson("Get-CimInstance Win32_Process -Filter \\\"Name = 'msedge.exe' OR Name = 'node.exe'\\\" | Select-Object ProcessId,ParentProcessId,Name,CommandLine | ConvertTo-Json -Compress -Depth 4");
+        processes = powershellJson("Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'msedge.exe' -or $_.Name -eq 'node.exe' } | Select-Object ProcessId,ParentProcessId,Name,CommandLine | ConvertTo-Json -Compress -Depth 4");
+        processSnapshotVerified = true;
+      } catch {}
+      try {
         listeners = powershellJson('Get-NetTCPConnection -LocalPort 9227 -State Listen -ErrorAction SilentlyContinue | Select-Object OwningProcess,LocalAddress | ConvertTo-Json -Compress -Depth 4');
+        listenerSnapshotVerified = true;
       } catch {}
       const hostStillAlive = processes.some(item => Number(item.ProcessId) === Number(hostPid));
       const profileEdges = processes.filter(item => /msedge\\.exe$/i.test(String(item.Name)) && String(item.CommandLine || '').toLowerCase().includes(profile.toLowerCase()));
-      cleanup = { hostProcessExited: hostPid ? !hostStillAlive : null, profileEdgeProcessCount: profileEdges.length, port9227ListenerCount: listeners.length };
-      if (!hostStillAlive && profileEdges.length === 0 && listeners.length === 0) break;
+      cleanup = { processSnapshotVerified, listenerSnapshotVerified, hostProcessExited: hostPid ? !hostStillAlive : null, profileEdgeProcessCount: profileEdges.length, port9227ListenerCount: listeners.length };
+      if (processSnapshotVerified && listenerSnapshotVerified && !hostStillAlive && profileEdges.length === 0 && listeners.length === 0) break;
       await delay(250);
     }
     report.cleanup = cleanup;
-    report.cleanupClean = !report.backendStopError && cleanup?.hostProcessExited === true && cleanup.profileEdgeProcessCount === 0 && cleanup.port9227ListenerCount === 0;
+    report.cleanupClean = !report.backendStopError && cleanup?.processSnapshotVerified === true && cleanup?.listenerSnapshotVerified === true && cleanup?.hostProcessExited === true && cleanup.profileEdgeProcessCount === 0 && cleanup.port9227ListenerCount === 0;
     pass = pass && report.cleanupClean;
     if (hostPid && cleanup?.hostProcessExited !== true) await killTree(hostPid);
     await killProfileProcesses(profile);
