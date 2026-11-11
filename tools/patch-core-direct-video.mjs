@@ -35,8 +35,8 @@ const CONNECT_AFTER = `  async connect(signal, { launch = true, create = true, a
     if (initialDirectVideoUrl !== null && (normalizeDirectVideoUrl(initialDirectVideoUrl) !== initialDirectVideoUrl ||
         !initialDirectVideoReceipt || initialDirectVideoReceipt.completed !== false))
       throw new Error('Direct video initialization target was not verified.');`;
-const FEED_BEFORE = '       else await this.navigate(RECOMMEND,signal);';
-const FEED_AFTER = `       else if (initialDirectVideoUrl) {
+const FEED_BEFORE = '      else await this.navigate(RECOMMEND,signal);';
+const FEED_AFTER = `      else if (initialDirectVideoUrl) {
          await this.navigate(initialDirectVideoUrl,signal);
          initialDirectVideoReceipt.completed = true;
        } else await this.navigate(RECOMMEND,signal);`;

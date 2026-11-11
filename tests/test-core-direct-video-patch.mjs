@@ -36,7 +36,7 @@ const fixture = [
   '  async connect(signal, { launch = true, create = true, authorizePrepare } = {}) {',
   '    if (this.page.url()==="about:blank") {',
   '       if (false) await this.navigate("never",signal);',
-  '       else await this.navigate(RECOMMEND,signal);',
+  '      else await this.navigate(RECOMMEND,signal);',
   '    }',
   '  }',
   '  async execute(name,args={}) {',
