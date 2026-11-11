@@ -1,4 +1,5 @@
 name: Node 24 exact API worker browser-host reproduction (isolated)
+# This workflow tests the candidate's pinned renderer and Network Service sandbox launch path.
 
 on:
   pull_request:
