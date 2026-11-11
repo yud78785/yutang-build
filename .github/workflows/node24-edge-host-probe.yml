@@ -287,5 +287,7 @@ jobs:
           $attachedSpawnStatus=Run-SpawnVariant 'spawn-host-attached-filtered' $attachedProfile $attachedControl 9228
           $noHideSpawnStatus=Run-SpawnVariant 'spawn-host-detached-nohide-filtered' $noHideProfile $noHideControl 9229
           Write-Host "DETACHED_FILTERED=$candidateSpawnStatus; ATTACHED_FILTERED=$attachedSpawnStatus; DETACHED_NOHIDE_FILTERED=$noHideSpawnStatus"
+          if($candidateSpawnStatus -ne 'PASS') { throw 'Exact candidate detached+hidden launch did not reach ready; inspect comparison variants above.' }
+          Write-Host 'PASS: exact candidate detached+hidden filtered environment reached browser-ready.'
           Write-Host 'DIAGNOSTIC_ONLY: no real account, no model key, no Douyin network, no user PC.'
 
