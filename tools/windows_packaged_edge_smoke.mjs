@@ -202,6 +202,17 @@ async function waitForBrowserGone(hostPid, profile, controlDir, port) {
   }, 15000, 'browser-host and Edge process cleanup');
 }
 
+function assertUnrelatedEdgeAlive(profile, port) {
+  const all = asRows(ps("Get-CimInstance Win32_Process -Filter \"Name = 'msedge.exe'\" | Select-Object ProcessId,ParentProcessId,Name,CommandLine | ConvertTo-Json -Compress -Depth 4"));
+  const owned = all.filter(item => String(item.CommandLine || '').toLowerCase().includes(profile.toLowerCase()));
+  const listeners = loopbackListeners(port);
+  assert.ok(owned.length > 0, 'Unrelated Edge process disappeared during candidate browser operation');
+  assert.ok(listeners.length > 0, 'Unrelated Edge CDP listener disappeared during candidate browser operation');
+  assert.ok(listeners.every(item => item.LocalAddress === '127.0.0.1' || item.LocalAddress === '::1'), 'Unrelated Edge CDP listener is not loopback-only');
+  assert.ok(listeners.every(item => owned.some(p => Number(p.ProcessId) === Number(item.OwningProcess))), 'Unrelated Edge CDP listener is not owned by its separate Edge process tree');
+  return { processCount: owned.length, listenerCount: listeners.length, loopbackOnly: true };
+}
+
 async function waitForNewBrowserState(control, previousPid, previousStartedAt, profile) {
   return until(async () => {
     const state = await readJSON(control);
@@ -259,6 +270,23 @@ async function run(exeFile) {
   Object.assign(env,{DSH_HOME:path.join(home,'.dsh'),DOUYIN_DESKTOP_USER_DATA:userData,DOUYIN_RUNTIME_LOCATION_FILE:locationFile,DOUYIN_DESKTOP_SMOKE:'1'});
   // Keep native Windows user-profile paths. Only YuTang state, app userData and memory are redirected to disposable paths.
   // No GITHUB_TOKEN, CI tokens, personal credentials or model API keys are passed to the EXE.
+  const edgeExe=process.env.YUTANG_EDGE_EXE;
+  assert.ok(typeof edgeExe==='string'&&path.isAbsolute(edgeExe)&&fs.existsSync(edgeExe),'Verified Microsoft Edge executable path is required');
+  const unrelatedProfile=path.join(base,'unrelated-edge-profile');
+  await fs.mkdir(unrelatedProfile,{recursive:true});
+  let unrelatedEdgeChild=null;
+  unrelatedEdgeChild=spawn(edgeExe,[
+    '--user-data-dir='+unrelatedProfile,'--remote-debugging-port=9231',
+    '--remote-debugging-address=127.0.0.1','--no-first-run','about:blank'
+  ],{detached:true,windowsHide:true,stdio:'ignore',shell:false});
+  unrelatedEdgeChild.unref();
+  await until(async()=>{
+    const response=await fetch('http://127.0.0.1:9231/json/version',{signal:AbortSignal.timeout(2000)});
+    if(!response.ok)return null;
+    const version=await response.json();
+    if(!/(?:Edg|Chrome)/.test(String(version.Browser)))return null;
+    return assertUnrelatedEdgeAlive(unrelatedProfile,9231);
+  },20000,'independent unrelated Edge process and CDP listener');
   const child=spawn(exeFile,['--remote-debugging-port=0','--remote-debugging-address=127.0.0.1'],{env,windowsHide:true,stdio:'ignore',shell:false});
   const controlDir=path.join(common,'control');
   const control=path.join(controlDir,'browser.json');
@@ -308,12 +336,14 @@ async function run(exeFile) {
       hostPid:state.pid,backendPid:ready.backendPid,hostSummary:initialCheck.hostSummary,
       browserVersion:initialCheck.browserVersion,browserReady:true,cdpResponded:true
     });
+    const unrelatedInitial=assertUnrelatedEdgeAlive(unrelatedProfile,9231);
     console.log('PASS_WINDOWS_PACKAGED_EXE_INITIAL_BROWSER '+JSON.stringify({
       hostPid:state.pid,browserVersion:initialCheck.browserVersion,
       edgeProcessCount:initialCheck.ownership.edgeProcessCount,
       listenerCount:initialCheck.ownership.listenerCount,
       loopbackOnly:initialCheck.ownership.loopbackOnly,
-      sandboxFlagsChecked:initialCheck.ownership.flagsChecked
+      sandboxFlagsChecked:initialCheck.ownership.flagsChecked,
+      unrelatedEdgeStillAlive:unrelatedInitial.processCount>0&&unrelatedInitial.listenerCount>0
     }));
 
     // Close the owned Edge through its loopback CDP endpoint, then prove the host and every Edge child exit.
@@ -322,8 +352,9 @@ async function run(exeFile) {
       const previousPid=state.pid, previousStartedAt=state.startedAt;
       const closeResult=await closeEdgeViaCdp(PORT);
       const closeProof=await waitForBrowserGone(previousPid,profile,controlDir,PORT);
+      const unrelatedAfterClose=assertUnrelatedEdgeAlive(unrelatedProfile,9231);
       lifecycle.closeCount++;
-      const cycleReport={cycle,closedPid:previousPid,closeViaCdp:closeResult.closed===true,closeVerified:closeProof.clean===true,processesRemaining:closeProof.edgeAndHostProcesses,listenersRemaining:closeProof.listeners};
+      const cycleReport={cycle,closedPid:previousPid,closeViaCdp:closeResult.closed===true,closeVerified:closeProof.clean===true,processesRemaining:closeProof.edgeAndHostProcesses,listenersRemaining:closeProof.listeners,unrelatedEdgeStillAlive:unrelatedAfterClose.processCount>0&&unrelatedAfterClose.listenerCount>0};
       assert.equal(cycleReport.closeVerified,true,'Owned Edge or browser-host remained after CDP Browser.close');
 
       const nextOpen=await requestBrowserOpen(ready.origin,bootstrap.token,redactionPaths);
@@ -333,7 +364,9 @@ async function run(exeFile) {
       cycleReport.restartNavigationBlockedByFirewall=nextFirewallBlock;
       const nextState=await waitForNewBrowserState(control,previousPid,previousStartedAt,profile);
       const nextCheck=await inspectReadyBrowser(nextState,ready.backendPid,profile,controlDir);
+      const unrelatedAfterRestart=assertUnrelatedEdgeAlive(unrelatedProfile,9231);
       cycleReport.restartedPid=nextState.pid;
+      cycleReport.unrelatedEdgeStillAliveAfterRestart=unrelatedAfterRestart.processCount>0&&unrelatedAfterRestart.listenerCount>0;
       cycleReport.restartReady=true;
       cycleReport.restartBrowserVersion=nextCheck.browserVersion;
       cycleReport.restartEdgeProcessCount=nextCheck.ownership.edgeProcessCount;
@@ -355,6 +388,11 @@ async function run(exeFile) {
     lifecycle.finalProcessesRemaining=finalProof.edgeAndHostProcesses;
     lifecycle.finalListenersRemaining=finalProof.listeners;
     assert.equal(lifecycle.finalCloseVerified,true,'Final Edge/browser-host close left a process or listener behind');
+    const unrelatedFinal=assertUnrelatedEdgeAlive(unrelatedProfile,9231);
+    const unrelatedClose=await closeEdgeViaCdp(9231);
+    const unrelatedClean=await waitForBrowserGone(unrelatedEdgeChild.pid,unrelatedProfile,unrelatedProfile,9231);
+    assert.equal(unrelatedClean.clean,true,'Unrelated Edge test process did not close cleanly');
+    report.unrelatedEdgeIsolation={separateProfile:true,separatePort:9231,remainedAliveDuringCandidateCloseAndRestart:true,finalCloseViaCdp:unrelatedClose.closed===true,finalCleanupVerified:unrelatedClean.clean===true};
     report.lifecycle=lifecycle;
     report.cleanupVerified=true;
     report.notProven=['Effective renderer sandbox integrity','Douyin video playback (outbound blocked by design)','Model reasoning','Long-term autonomy','General user PC safety'];
