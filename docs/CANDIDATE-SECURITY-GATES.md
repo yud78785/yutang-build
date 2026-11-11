@@ -32,7 +32,7 @@ The verifier is **read-only**: no extraction, network, subprocess, shell, PowerS
 | CI reproducibility | Workflow completed, exact Git commit and ZIP/EXE hashes established | Keep pinned source, audited dependencies, recorded provenance |
 | EXE signing | **Outer NSIS launcher certificate table = 0 bytes (unsigned)** | Authenticode-sign from a verified publisher and validate the actual signature, or treat as untrusted and keep test-only |
 | GitHub Actions dependencies | Workflow calls checkout/setup-node/upload-artifact by mutable `@v4` tags, not immutable action commit hashes | Pin action dependencies or adopt approved workflow dependency lockfile before future builds |
-| Sandbox test | Separate Edge probe on Windows runner found eight related processes without sandbox-disabling flags | On a disposable Windows VM launch the **packaged EXE**, follow its Edge child processes, verify actual renderer isolation/token state (not merely absence of `--no-sandbox`) |
+| Sandbox test | Packaged candidate EXE verified RendererAppContainer, Lockdown, Untrusted integrity and Lowbox/AppContainer SID through `edge://sandbox`. Separate Node 24 A/B test proved `--enable-features=NetworkServiceSandbox` changes Edge Network Service from `Not Sandboxed` to `Network` with an AppContainer SID. The old packaged EXE still has the feature disabled; the new patch is not yet rebuilt into a candidate. | Rebuild the candidate with the new feature flag, then rerun the packaged EXE test and require both renderer and Network Service sandbox evidence. |
 | Credentials / persistent state | Upstream supports existing `~/.dsh` browser profile and remembered settings; media key `.env` is plaintext | Use fresh disposable VM and throwaway profile, never personal accounts or keys for initial tests |
 | Remote debugging | Upstream uses loopback CDP and a fixed dedicated Edge debugging port (9227) | Document local attack surface and validate ownership, binding and collision behavior; do not expose to LAN |
 | Behavioral automation | CI smoke tests intentionally prohibit live Douyin, model requests and external messages | Separately prove one public video observation, one reasoned vision-model response, bounded idle/stop/resume, and evidence-backed memory behavior before any automation |
@@ -50,7 +50,8 @@ The verifier is **read-only**: no extraction, network, subprocess, shell, PowerS
 ## Next meaningful work, ordered by value
 
 1. Keep old successful CI evidence intact and **do not rerun the existing successful build**.
-2. Verify the **same existing EXE** in a no-secrets ephemeral Windows runner or independent disposable VM, but only after an audited test plan can reliably identify the EXE's spawned Edge. Do not run on the user's Windows.
-3. Run a constrained, no-login, public-video observation in disposable browser environment. Clearly separate a video loaded from a model having *understood* the video.
-4. Prove fail-closed behavior for the authenticated V3 bridge independently, including Drive metadata and concurrency on Windows. Never merge unrelated bridge protocols into this Douyin candidate without an explicit interface contract.
-5. Do not call any of this a release until source/dependency trust and live functionality gaps are closed.
+2. Rebuild a new candidate with the verified `NetworkServiceSandbox` launch flag; preserve the old EXE and its hashes as historical evidence.
+3. Run the new packaged EXE in a no-secrets ephemeral Windows runner and require renderer plus Network Service sandbox evidence, three launch/close cycles, unrelated Edge survival and zero residual processes.
+4. Run a constrained, no-login, public-video observation in a disposable browser environment. Clearly separate a video loaded from a model having *understood* the video.
+5. Prove fail-closed behavior for the authenticated V3 bridge independently, including Drive metadata and concurrency on Windows. Never merge unrelated bridge protocols into this Douyin candidate without an explicit interface contract.
+6. Do not call any of this a release until source/dependency trust and live functionality gaps are closed.
