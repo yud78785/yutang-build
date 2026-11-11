@@ -286,6 +286,9 @@ async function main() {
 }
 
 main().catch(error => {
-  console.error('YUTANG_NODE24_BROWSER_HOST_FATAL ' + category(error));
+  const details = safeText(error?.stack || error?.message || error, [
+    process.env.RUNNER_TEMP, process.env.USERPROFILE, process.env.YUTANG_RUNTIME
+  ]);
+  console.error('YUTANG_NODE24_BROWSER_HOST_FATAL ' + category(error) + ' ' + details);
   process.exitCode = 1;
 });
