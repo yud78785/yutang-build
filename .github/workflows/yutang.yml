@@ -320,6 +320,21 @@ jobs:
           node scripts/acquire-upstream.mjs --verify
           if ($LASTEXITCODE -ne 0) { throw 'Upstream cache verification failed' }
 
+      - name: Build and test Windows Job Object guard
+        shell: pwsh
+        working-directory: tools/jobguard
+        run: |
+          go version
+          go test -count=1 ./...
+          if ($LASTEXITCODE -ne 0) { throw 'Windows Job Object guard Go tests failed' }
+          go vet ./...
+          if ($LASTEXITCODE -ne 0) { throw 'Windows Job Object guard go vet failed' }
+          go build -trimpath -ldflags='-s -w' -o jobguard.exe .
+          if ($LASTEXITCODE -ne 0) { throw 'Windows Job Object guard build failed' }
+          if (-not (Test-Path -LiteralPath 'jobguard.exe' -PathType Leaf)) { throw 'Built Job Object helper is missing' }
+          $guardHash=(Get-FileHash -LiteralPath 'jobguard.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
+          Write-Host "WINDOWS_JOB_GUARD_SHA256 $guardHash"
+
       - name: Prepare official runtime and React UI
         shell: pwsh
         working-directory: upstream/desktop
@@ -335,12 +350,13 @@ jobs:
           } finally { Pop-Location }
           node scripts/stage-api-runtime.mjs
           if ($LASTEXITCODE -ne 0) { throw 'API runtime stage failed' }
+          Copy-Item -LiteralPath '../../tools/jobguard/jobguard.exe' -Destination '.cache/api-runtime/jobguard.exe' -Force
+          if (-not (Test-Path -LiteralPath '.cache/api-runtime/jobguard.exe' -PathType Leaf)) { throw 'Windows Job Object helper was not copied into the API runtime' }
           node ../../tools/verify-propagation.mjs ../browser-host.mjs .cache/api-runtime/browser-host.mjs
           if ($LASTEXITCODE -ne 0) { throw 'Sandbox or timeout fix was not staged into runtime' }
           if ((Get-FileHash -Algorithm SHA256 -LiteralPath '../core.mjs').Hash -ne (Get-FileHash -Algorithm SHA256 -LiteralPath '.cache/api-runtime/core.mjs').Hash) { throw 'Job Object requirement was not staged into runtime' }
           if ((Get-FileHash -Algorithm SHA256 -LiteralPath '../runtime-paths.mjs').Hash -ne (Get-FileHash -Algorithm SHA256 -LiteralPath '.cache/api-runtime/runtime-paths.mjs').Hash) { throw 'Private YuTang runtime path defaults did not propagate to the staged runtime' }
           if ((Get-FileHash -Algorithm SHA256 -LiteralPath '../browser-launcher.mjs').Hash -ne (Get-FileHash -Algorithm SHA256 -LiteralPath '.cache/api-runtime/browser-launcher.mjs').Hash) { throw 'Bounded BrowserLauncher navigation fix did not propagate to the staged runtime' }
-          if (-not (Test-Path -LiteralPath '.cache/api-runtime/jobguard.exe' -PathType Leaf)) { throw 'Windows Job Object helper was not built into the API runtime' }
           node scripts/build-api-desktop.mjs
           if ($LASTEXITCODE -ne 0) { throw 'Desktop application build failed' }
           $source=(Get-FileHash -Algorithm SHA256 -LiteralPath 'src/startup-navigation.mjs').Hash
@@ -353,21 +369,6 @@ jobs:
             if ($original -ne $staged) { throw "Candidate state isolation source was not copied into Electron app: $entry" }
           }
           Write-Host 'PASS new candidate has isolated Electron settings, shared state and Edge profile defaults.'
-
-      - name: Build and test Windows Job Object guard
-        shell: pwsh
-        working-directory: tools/jobguard
-        run: |
-          go version
-          go test -count=1 ./...
-          if ($LASTEXITCODE -ne 0) { throw 'Windows Job Object guard Go tests failed' }
-          go vet ./...
-          if ($LASTEXITCODE -ne 0) { throw 'Windows Job Object guard go vet failed' }
-          go build -trimpath -ldflags='-s -w' -o ../../upstream/desktop/.cache/api-runtime/jobguard.exe .
-          if ($LASTEXITCODE -ne 0) { throw 'Windows Job Object guard build failed' }
-          if (-not (Test-Path -LiteralPath '../../upstream/desktop/.cache/api-runtime/jobguard.exe' -PathType Leaf)) { throw 'Built Job Object helper is missing' }
-          $guardHash=(Get-FileHash -LiteralPath '../../upstream/desktop/.cache/api-runtime/jobguard.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
-          Write-Host "WINDOWS_JOB_GUARD_SHA256 $guardHash"
 
       - name: Run independent Edge sandbox process probe on Windows
         shell: pwsh
