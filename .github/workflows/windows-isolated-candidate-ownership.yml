@@ -90,6 +90,10 @@ jobs:
         run: |
           node tools/windows_isolated_candidate_edge_smoke.mjs '${{ steps.source.outputs.exe }}'
           if ($LASTEXITCODE -ne 0) { throw 'Packaged isolated candidate failed exact Edge ownership/lifecycle gate. NOT RELEASE.' }
+          node tools/windows_isolated_candidate_edge_smoke.mjs '${{ steps.source.outputs.exe }}' --force-host
+          if ($LASTEXITCODE -ne 0) { throw 'INTEGRATED Job Object host-only forced-termination regression failed. NOT RELEASE.' }
+          node tools/windows_isolated_candidate_edge_smoke.mjs '${{ steps.source.outputs.exe }}' --force-guard
+          if ($LASTEXITCODE -ne 0) { throw 'INTEGRATED Job Object helper-only forced-termination regression failed. NOT RELEASE.' }
 
       - name: Preserve release block
         if: always()
