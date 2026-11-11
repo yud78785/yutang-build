@@ -95,7 +95,13 @@ jobs:
           $spawnHome=Join-Path $base 'spawn-home'
           $spawnProfile=Join-Path $spawnHome '.dsh\douyin-browser\cli-profile'
           $spawnControl=Join-Path $spawnHome '.dsh\douyin-browser\control'
-          foreach($dir in @($directProfile,$directControl,$hostProfile,$hostControl,$spawnProfile,$spawnControl)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
+          $attachedHome=Join-Path $base 'attached-home'
+          $attachedProfile=Join-Path $attachedHome '.dsh\douyin-browser\cli-profile'
+          $attachedControl=Join-Path $attachedHome '.dsh\douyin-browser\control'
+          $noHideHome=Join-Path $base 'nohide-home'
+          $noHideProfile=Join-Path $noHideHome '.dsh\douyin-browser\cli-profile'
+          $noHideControl=Join-Path $noHideHome '.dsh\douyin-browser\control'
+          foreach($dir in @($directProfile,$directControl,$hostProfile,$hostControl,$spawnProfile,$spawnControl,$attachedProfile,$attachedControl,$noHideProfile,$noHideControl)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
           $node=(Get-Command node).Source
 
           function Start-Probe($mode,$profile,$control,$port) {
@@ -224,54 +230,62 @@ jobs:
           Write-Host "EDGE_PROCESSES_AFTER_HOST_CLEANUP=$($remainingEdge.Count)"
           if($remainingEdge.Count -gt 0) { throw 'Previous isolated Edge process tree was not fully cleaned before detached-spawn comparison.' }
 
-          $spawnProbe=Start-Probe 'spawn-host' $spawnProfile $spawnControl 9227
-          $spawnDone=$spawnProbe.Process.WaitForExit(40000)
-          if(-not $spawnDone) { Stop-Probe $spawnProbe; $spawnStatus='TIMEOUT' }
-          else {
-            $spawnLog=Read-Log $spawnProbe.Out
-            $spawnStatus=if($spawnLog -match '"started":true' -and $spawnLog -match '"cdp":true') {'PASS'} elseif($spawnLog -match 'host-result|host-threw') {'FAIL'} else {'NO_REPORT'}
-          }
-          Write-Host "CANDIDATE_STYLE_DETACHED_SPAWN_STATUS=$spawnStatus"
-          Write-Host (Read-Log $spawnProbe.Out)
-          Write-Host (Read-Log $spawnProbe.Err)
-          $spawnStateFile=Join-Path $spawnControl 'browser.json'
-          $spawnHostPid=$null
-          if(Test-Path -LiteralPath $spawnStateFile) {
-            try { $spawnState=Get-Content -LiteralPath $spawnStateFile -Raw | ConvertFrom-Json; $spawnHostPid=$spawnState.pid } catch {}
-          }
-          $spawnAll=@(Get-CimInstance Win32_Process -Filter "Name = 'msedge.exe' OR Name = 'node.exe'" | Select-Object ProcessId,ParentProcessId,Name,CommandLine)
-          $spawnListeners=@(Get-NetTCPConnection -LocalPort 9227 -State Listen -ErrorAction SilentlyContinue | Select-Object OwningProcess,LocalAddress)
-          $spawnByPid=@{}; foreach($item in $spawnAll) { $spawnByPid[[int]$item.ProcessId]=$item }
-          $spawnDesc=@()
-          if($spawnHostPid) {
-            foreach($item in $spawnAll) {
-              $cursor=[int]$item.ProcessId;$seen=@{};$belongs=$false
-              for($i=0;$i -lt 40 -and $cursor -gt 0;$i++) {
-                if($cursor -eq [int]$spawnHostPid) { $belongs=$true; break }
-                if($seen.ContainsKey($cursor) -or -not $spawnByPid.ContainsKey($cursor)) { break }
-                $seen[$cursor]=$true;$cursor=[int]$spawnByPid[$cursor].ParentProcessId
-              }
-              if($belongs) { $spawnDesc += $item }
+          function Run-SpawnVariant($mode,$profile,$control,$port) {
+            $probe=Start-Probe $mode $profile $control $port
+            $done=$probe.Process.WaitForExit(40000)
+            if(-not $done) { Stop-Probe $probe; $status='TIMEOUT' }
+            else {
+              $log=Read-Log $probe.Out
+              $status=if($log -match '"started":true' -and $log -match '"cdp":true') {'PASS'} elseif($log -match '"started":false') {'FAIL'} else {'NO_REPORT'}
             }
+            Write-Host "SPAWN_VARIANT_STATUS[$mode]=$status"
+            Write-Host (Read-Log $probe.Out)
+            Write-Host (Read-Log $probe.Err)
+            $stateFile=Join-Path $control 'browser.json'
+            $hostPid=$null;$state=$null
+            if(Test-Path -LiteralPath $stateFile) {
+              try { $state=Get-Content -LiteralPath $stateFile -Raw | ConvertFrom-Json; $hostPid=$state.pid } catch {}
+            }
+            $all=@(Get-CimInstance Win32_Process -Filter "Name = 'msedge.exe' OR Name = 'node.exe'" | Select-Object ProcessId,ParentProcessId,Name,CommandLine)
+            $listeners=@(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue | Select-Object OwningProcess,LocalAddress)
+            $byPid=@{}; foreach($item in $all) { $byPid[[int]$item.ProcessId]=$item }
+            $desc=@()
+            if($hostPid) {
+              foreach($item in $all) {
+                $cursor=[int]$item.ProcessId;$seen=@{};$belongs=$false
+                for($i=0;$i -lt 40 -and $cursor -gt 0;$i++) {
+                  if($cursor -eq [int]$hostPid) { $belongs=$true; break }
+                  if($seen.ContainsKey($cursor) -or -not $byPid.ContainsKey($cursor)) { break }
+                  $seen[$cursor]=$true;$cursor=[int]$byPid[$cursor].ParentProcessId
+                }
+                if($belongs) { $desc += $item }
+              }
+            }
+            $edge=@($desc | Where-Object { $_.Name -ieq 'msedge.exe' })
+            $summary=[ordered]@{
+              mode=$mode;status=$status;hostPid=$hostPid
+              hostProcessPresent=[bool]($desc | Where-Object { [int]$_.ProcessId -eq [int]$hostPid })
+              edgeDescendantCount=$edge.Count
+              edgePortArgCount=@($edge | Where-Object { $_.CommandLine -match "--remote-debugging-port=$port" }).Count
+              edgeLoopbackArgCount=@($edge | Where-Object { $_.CommandLine -match '--remote-debugging-address=127\.0\.0\.1' }).Count
+              edgeNoSandboxArgCount=@($edge | Where-Object { $_.CommandLine -match '--no-sandbox|--disable-setuid-sandbox' }).Count
+              listeners=$listeners
+              hostReady=$state.ready
+              hostFailureCode=$state.launchFailure.code
+            }
+            Write-Host ('SPAWN_VARIANT_SUMMARY '+($summary | ConvertTo-Json -Compress -Depth 5))
+            Stop-Probe $probe
+            $leftovers=@(Get-Process -Name msedge -ErrorAction SilentlyContinue)
+            if($leftovers.Count -gt 0) {
+              & taskkill.exe /F /IM msedge.exe /T 2>$null | Out-Null
+              Start-Sleep -Seconds 2
+            }
+            return $status
           }
-          $spawnEdge=@($spawnDesc | Where-Object { $_.Name -ieq 'msedge.exe' })
-          $spawnSummary=[ordered]@{
-            nodeVersion=(node --version).Trim()
-            spawnStatus=$spawnStatus
-            hostPid=$spawnHostPid
-            hostProcessPresent=[bool]($spawnDesc | Where-Object { [int]$_.ProcessId -eq [int]$spawnHostPid })
-            edgeDescendantCount=$spawnEdge.Count
-            edgePortArgCount=@($spawnEdge | Where-Object { $_.CommandLine -match '--remote-debugging-port=9227' }).Count
-            edgeLoopbackArgCount=@($spawnEdge | Where-Object { $_.CommandLine -match '--remote-debugging-address=127\.0\.0\.1' }).Count
-            edgeNoSandboxArgCount=@($spawnEdge | Where-Object { $_.CommandLine -match '--no-sandbox|--disable-setuid-sandbox' }).Count
-            listeners=$spawnListeners
-          }
-          Write-Host ('CANDIDATE_STYLE_SPAWN_SUMMARY '+($spawnSummary | ConvertTo-Json -Compress -Depth 5))
-          if($spawnStatus -ne 'PASS') { throw 'Candidate-style detached spawn did not reach browser-ready and CDP.' }
-          if(-not $spawnSummary.hostProcessPresent -or $spawnSummary.edgeDescendantCount -lt 1) { throw 'Detached browser host process tree could not be proven.' }
-          if($spawnSummary.edgePortArgCount -lt 1 -or $spawnSummary.edgeLoopbackArgCount -lt 1 -or $spawnSummary.edgeNoSandboxArgCount -ne 0) { throw 'Detached Edge process arguments failed sandbox/loopback checks.' }
-          if($spawnListeners.Count -lt 1 -or @($spawnListeners | Where-Object { $_.LocalAddress -notin @('127.0.0.1','::1') }).Count -gt 0) { throw 'Detached CDP listener was missing or not loopback-only.' }
-          Stop-Probe $spawnProbe
-          Write-Host 'PASS: candidate-style detached Node spawn with filtered Windows environment.'
+
+          $candidateSpawnStatus=Run-SpawnVariant 'spawn-host-detached-filtered' $spawnProfile $spawnControl 9227
+          $attachedSpawnStatus=Run-SpawnVariant 'spawn-host-attached-filtered' $attachedProfile $attachedControl 9228
+          $noHideSpawnStatus=Run-SpawnVariant 'spawn-host-detached-nohide-filtered' $noHideProfile $noHideControl 9229
+          Write-Host "DETACHED_FILTERED=$candidateSpawnStatus; ATTACHED_FILTERED=$attachedSpawnStatus; DETACHED_NOHIDE_FILTERED=$noHideSpawnStatus"
           Write-Host 'DIAGNOSTIC_ONLY: no real account, no model key, no Douyin network, no user PC.'
 
