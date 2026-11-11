@@ -616,7 +616,11 @@ async function readColdStartDiagnostics(userData, candidatePid, exeFile, redacti
           const record = JSON.parse(line);
           const event = /^[a-z.-]{1,60}$/.test(String(record.event)) ? record.event : 'unknown';
           const stage = /^[A-Za-z0-9_.-]{1,60}$/.test(String(record.stage || '')) ? record.stage : null;
-          report.startupEvents.push({ event, stage, seq: Number(record.seq), at: String(record.at).slice(0,30) });
+          const code=/^[A-Z][A-Z0-9_]{0,64}$/.test(String(record.code||''))?record.code:null;
+          const target=/^(?:blank|startup-root|same-origin|other|invalid)$/.test(String(record.target||''))?record.target:null;
+          const reason=/^[a-z0-9-]{1,60}$/.test(String(record.reason||''))?record.reason:null;
+          const attempt=Number.isSafeInteger(record.attempt)&&record.attempt>=1&&record.attempt<=3?record.attempt:null;
+          report.startupEvents.push({ event, stage, code, target, reason, attempt, seq: Number(record.seq), at: String(record.at).slice(0,30) });
         } catch { report.startupEvents.push({ event: 'unparseable-startup-record' }); }
       }
     }
