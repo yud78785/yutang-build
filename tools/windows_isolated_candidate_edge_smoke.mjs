@@ -425,6 +425,64 @@ async function waitForBrowserGone(hostPid, profile, controlDir, port) {
   }, 15000, 'browser-host and Edge process cleanup');
 }
 
+
+async function forceWindowsJobObjectExit({ mode, hostPid, backendPid, profile, controlDir, unrelatedProfile }) {
+  // This is only called in a disposable Windows CI runner after the EXE has been hash-verified.
+  // Never use /T: recursive taskkill would hide a broken KILL_ON_JOB_CLOSE implementation.
+  assert.ok(mode === 'host' || mode === 'guard', 'Unsupported force-exit test mode');
+  const rows = asRows(ps("Get-CimInstance Win32_Process -Filter \"Name = 'msedge.exe' OR Name = 'node.exe' OR Name = 'jobguard.exe'\" | Select-Object ProcessId,ParentProcessId,Name,CommandLine,ExecutablePath | ConvertTo-Json -Compress -Depth 4"));
+  const host = rows.find(p => Number(p.ProcessId) === hostPid);
+  assert.ok(host && /node\.exe$/i.test(String(host.Name || '')) &&
+    /browser-host\.mjs/i.test(String(host.CommandLine || '')) &&
+    String(host.CommandLine || '').toLowerCase().includes(profile.toLowerCase()) &&
+    Number(host.ParentProcessId) === backendPid, 'Refusing forced kill: browser-host PID ownership is not proven');
+  const guards = rows.filter(p => /jobguard\.exe$/i.test(String(p.Name || '')) &&
+    Number(p.ParentProcessId) === hostPid);
+  assert.equal(guards.length, 1, 'Expected exactly one live Job Object helper owned by the browser-host');
+  const guard = guards[0];
+  const guardPid = Number(guard.ProcessId);
+  assert.ok(Number.isSafeInteger(guardPid) && guardPid > 0, 'Invalid Job Object helper PID');
+  assert.match(String(guard.CommandLine || ''), new RegExp('--owner-pid\\s+' + String(hostPid) + '(?:\\s|$)', 'i'),
+    'Job Object helper was not launched for the exact host PID');
+  const guardPath = String(guard.ExecutablePath || '').replace(/\//g, '\\').toLowerCase();
+  assert.ok(guardPath.endsWith('\\api-runtime\\jobguard.exe'), 'Refusing forced kill: Job Object helper binary is not in the packaged API runtime');
+  const edgePids = rows.filter(p => /msedge\.exe$/i.test(String(p.Name || '')) &&
+    hasHostAncestor(Number(p.ProcessId), hostPid, rows)).map(p => Number(p.ProcessId));
+  assert.ok(edgePids.length > 0, 'No candidate-owned Edge descendants existed before forced kill');
+  const listeners = loopbackListeners(PORT);
+  assert.ok(listeners.length > 0 &&
+    listeners.every(item => edgePids.includes(Number(item.OwningProcess))),
+    'Candidate-owned CDP listener not proven before forced kill');
+  const unrelatedBefore = assertUnrelatedEdgeAlive(unrelatedProfile, 9231);
+  assert.ok(unrelatedBefore.processCount > 0, 'Unrelated Edge sentinel not ready before force-exit test');
+  const targetPid = mode === 'guard' ? guardPid : hostPid;
+  const started = Date.now();
+  execFileSync('taskkill.exe', ['/PID', String(targetPid), '/F'], {
+    encoding: 'utf8', windowsHide: true, timeout: 10000, maxBuffer: 1024 * 1024
+  });
+  const allTrackedPids = [...new Set([hostPid, guardPid, ...edgePids])];
+  const filter = allTrackedPids.map(pid => 'ProcessId = ' + String(pid)).join(' OR ');
+  const proof = await until(async () => {
+    const tracked = asRows(ps('Get-CimInstance Win32_Process -Filter "' + filter + '" | Select-Object ProcessId,Name | ConvertTo-Json -Compress -Depth 3'));
+    const remainingOwned = ownedProfileProcesses(profile, controlDir);
+    const remainingListeners = loopbackListeners(PORT);
+    if (tracked.length || remainingOwned.length || remainingListeners.length) return null;
+    return {trackedProcessesRemaining:0,profileProcessesRemaining:0,cdpListenersRemaining:0};
+  }, 20000, 'Job Object forced-exit cleanup without recursive taskkill');
+  const unrelatedAfter = assertUnrelatedEdgeAlive(unrelatedProfile, 9231);
+  assert.ok(unrelatedAfter.processCount > 0 && unrelatedAfter.listenerCount > 0,
+    'Unrelated Edge was terminated by the force-exit test');
+  return {
+    mode: mode === 'host' ? 'kill-host-only' : 'kill-jobguard-only',
+    forcedPid: targetPid, hostPid, guardPid,
+    ownedEdgeBefore: edgePids.length,
+    cdpListenersBefore: listeners.length,
+    elapsedMs: Date.now() - started,
+    ...proof, unrelatedEdgeSurvived: true,
+    recursiveTaskkillUsed: false
+  };
+}
+
 function assertUnrelatedEdgeAlive(profile, port) {
   const all = asRows(ps("Get-CimInstance Win32_Process -Filter \"Name = 'msedge.exe'\" | Select-Object ProcessId,ParentProcessId,Name,CommandLine | ConvertTo-Json -Compress -Depth 4"));
   const owned = all.filter(item => String(item.CommandLine || '').toLowerCase().includes(profile.toLowerCase()));
@@ -525,7 +583,8 @@ async function readColdStartDiagnostics(userData, candidatePid, exeFile, redacti
   return report;
 }
 
-async function run(exeFile) {
+async function run(exeFile, { forceMode = null } = {}) {
+  if (forceMode !== null && forceMode !== 'host' && forceMode !== 'guard') throw new Error('Invalid force-exit mode');
   if (process.platform!=='win32' || process.env.GITHUB_ACTIONS!=='true' || process.env.YUTANG_EDGE_FIREWALL_CONFIRMED!=='yes')
     throw new Error('Refusing candidate launch outside pre-guarded ephemeral Windows GitHub runner');
   assert.equal(path.basename(exeFile),FILE);
@@ -700,14 +759,28 @@ async function run(exeFile) {
     }
 
     const finalPid=state.pid;
-    const finalClose=await closeEdgeViaCdp(PORT);
-    const finalProof=await waitForBrowserGone(finalPid,profile,controlDir,PORT);
-    lifecycle.closeCount++;
-    lifecycle.finalCloseVerified=finalClose.closed===true&&finalProof.clean===true;
-    lifecycle.finalHostPid=finalPid;
-    lifecycle.finalProcessesRemaining=finalProof.edgeAndHostProcesses;
-    lifecycle.finalListenersRemaining=finalProof.listeners;
-    assert.equal(lifecycle.finalCloseVerified,true,'Final Edge/browser-host close left a process or listener behind');
+    if(forceMode){
+      report.forcedExit = await forceWindowsJobObjectExit({
+        mode: forceMode, hostPid:finalPid, backendPid:ready.backendPid, profile, controlDir, unrelatedProfile
+      });
+      lifecycle.closeCount++;
+      lifecycle.finalCloseVerified = report.forcedExit.trackedProcessesRemaining === 0 &&
+        report.forcedExit.profileProcessesRemaining === 0 && report.forcedExit.cdpListenersRemaining === 0;
+      lifecycle.finalTerminationMode = report.forcedExit.mode;
+      lifecycle.finalHostPid = finalPid;
+      lifecycle.finalProcessesRemaining = report.forcedExit.profileProcessesRemaining;
+      lifecycle.finalListenersRemaining = report.forcedExit.cdpListenersRemaining;
+      assert.equal(lifecycle.finalCloseVerified,true,'Job Object forced exit left candidate-owned processes or listeners');
+    } else {
+      const finalClose=await closeEdgeViaCdp(PORT);
+      const finalProof=await waitForBrowserGone(finalPid,profile,controlDir,PORT);
+      lifecycle.closeCount++;
+      lifecycle.finalCloseVerified=finalClose.closed===true&&finalProof.clean===true;
+      lifecycle.finalHostPid=finalPid;
+      lifecycle.finalProcessesRemaining=finalProof.edgeAndHostProcesses;
+      lifecycle.finalListenersRemaining=finalProof.listeners;
+      assert.equal(lifecycle.finalCloseVerified,true,'Final Edge/browser-host close left a process or listener behind');
+    }
     const unrelatedFinal=assertUnrelatedEdgeAlive(unrelatedProfile,9231);
     const unrelatedClose=await closeEdgeViaCdp(9231);
     const unrelatedClean=await waitForBrowserGone(unrelatedEdgeChild.pid,unrelatedProfile,unrelatedProfile,9231);
@@ -716,6 +789,7 @@ async function run(exeFile) {
     report.lifecycle=lifecycle;
     report.cleanupVerified=true;
     report.notProven=['Network Service lockdown/integrity restrictions beyond the verified AppContainer SID','Real Douyin video playback (outbound blocked by design)','Model reasoning','Long-term autonomy','Memory synchronization','Signed release trust','General user PC safety'];
+    if(forceMode) console.log('PASS_WINDOWS_PACKAGED_EXE_JOB_OBJECT_FORCED_EXIT '+JSON.stringify(report.forcedExit));
     console.log('PASS_WINDOWS_PACKAGED_EXE_RESTART_AND_CLEANUP '+JSON.stringify(report));
     return report;
   } catch (error) {
@@ -829,5 +903,8 @@ if(process.argv.includes('--self-test'))selfTest();
 else {
   const exe=process.argv[2];
   if(!exe)throw new Error('Specify exact candidate EXE path; only in GitHub Windows CI');
-  run(path.resolve(exe)).catch(e=>{console.error('FAIL_CLOSED_WINDOWS_EDGE_SMOKE:',e.message);process.exitCode=1;});
+  const modes = ['--force-host','--force-guard'].filter(flag => process.argv.includes(flag));
+  if(modes.length > 1) throw new Error('Only one forced-exit mode may be selected');
+  const forceMode = modes[0] === '--force-host' ? 'host' : modes[0] === '--force-guard' ? 'guard' : null;
+  run(path.resolve(exe), { forceMode }).catch(e=>{console.error('FAIL_CLOSED_WINDOWS_EDGE_SMOKE:',e.message);process.exitCode=1;});
 }
