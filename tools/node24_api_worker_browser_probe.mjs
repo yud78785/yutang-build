@@ -365,6 +365,7 @@ async function main() {
     modelKeyPresent: false,
     dedicatedProfileFresh: true,
     profileCookieCount: null,
+    coldStartRetryProfileReset: null,
     nativeWindowsProfileEnvironmentPreserved: true,
     edgeOutboundBlocked: true,
     diagnosticLaunchTimeoutMs: DIAGNOSTIC_LAUNCH_TIMEOUT_MS,
@@ -480,10 +481,32 @@ async function main() {
     } catch {}
     const firstHostPid = hostPid;
     const firstBrowserPid = report.processOwnership?.edgeLaunchSummaries?.[0]?.pid || null;
+    report.firstAttemptFailed = report.browserOpenStatus !== 200 || report.browserState?.ready !== true;
     try { await backend.stop(); } catch (error) { report.firstBackendStopError = redact(error?.message || error); }
     report.firstBackendExit = { code: backend.exitCode, signal: backend.exitSignal, stderrTail: redact(backend.stderr), clean: backend.exitCode === 0 && !backend.exitSignal && !/UV_HANDLE_CLOSING/.test(backend.stderr) };
     report.firstBackendStderrTail = redact(backend.stderr);
     await delay(750);
+
+    // Controlled experiment: if the initial cold launch failed, discard only this disposable
+    // profile *after* the owned host, its Edge descendants and localhost CDP listener exited.
+    // A fresh second profile distinguishes partially initialized profile reuse from OS warmup.
+    // This does NOT turn a failed first launch into an overall successful acceptance test.
+    if (report.firstAttemptFailed) {
+      const safe = await waitForBrowserClosed(profile, 9227, firstHostPid, 15000);
+      const entries = await fs.readdir(profile);
+      await fs.rm(profile, { recursive: true, force: true });
+      await fs.mkdir(profile, { recursive: true });
+      assert.equal((await fs.readdir(profile)).length, 0, 'Cold-start recovery comparison needs a genuinely fresh Edge profile.');
+      report.coldStartRetryProfileReset = {
+        performed: true,
+        reason: 'initial-api-open-non-200',
+        firstHostExited: !safe.hostAlive,
+        firstProfileEdgeCount: safe.profileEdges.length,
+        firstCdpListenerCount: safe.listeners.length,
+        priorProfileEntryCount: entries.length,
+        freshProfileEntryCount: 0
+      };
+    }
 
     backend = new ApiProcess(process.execPath, runtime, { env, timeoutMs: 30000 });
     const restarted = await backend.start(config, { htmlFile, staticRoot: publicRoot });
@@ -614,7 +637,7 @@ async function main() {
     report.hostPid = hostPid;
 
     const ownership = report.processOwnership || {};
-    pass = report.backendStarted && report.browserState?.ready === true && report.cdp &&
+    pass = !report.firstAttemptFailed && report.backendStarted && report.browserState?.ready === true && report.cdp &&
       report.browserOpenStatus === 200 && report.browserOpenResult?.opened === true && report.browserOpenResult?.mode === 'prepare' && report.browserOpenResult?.paused === true && report.localFixturePageCount === 1 && report.backendRestarted === true &&
       report.browserState.profileMatches && report.browserState.port === 9227 &&
       ownership.hostFound && ownership.hostIsNode && ownership.hostParentIsApiWorker &&
