@@ -73,6 +73,21 @@ jobs:
           node tools/windows_isolated_candidate_edge_smoke.mjs '${{ steps.source.outputs.exe }}' --force-desktop
           if ($LASTEXITCODE -ne 0) { throw 'INTEGRATED desktop-main forced-termination regression failed. NOT RELEASE.' }
 
+      - name: Prove eight independent packaged Electron desktop cold starts
+        shell: pwsh
+        timeout-minutes: 20
+        env:
+          YUTANG_EDGE_FIREWALL_CONFIRMED: 'yes'
+          YUTANG_EXPECTED_CANDIDATE_SHA256: ${{ steps.source.outputs.exe_sha }}
+        run: |
+          $ErrorActionPreference='Stop'
+          for ($round=1; $round -le 8; $round++) {
+            Write-Host "DESKTOP_COLD_START_ROUND $round of 8 (real EXE, UI/IPC/HTTP, no Edge)"
+            node tools/windows_isolated_candidate_edge_smoke.mjs '${{ steps.source.outputs.exe }}' --desktop-only
+            if ($LASTEXITCODE -ne 0) { throw "Packaged Electron desktop readiness failed in independent boot $round. CANDIDATE NOT RELEASE." }
+          }
+          Write-Host 'DESKTOP_COLD_START_GATE_VERIFIED: 8 independent EXE/UI/IPC/HTTP startups, all fail-closed and cleaned.'
+
       - name: Repeat bounded cold starts across two fresh candidate profiles
         shell: pwsh
         timeout-minutes: 25
