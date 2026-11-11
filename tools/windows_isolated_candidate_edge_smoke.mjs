@@ -655,8 +655,10 @@ async function readColdStartDiagnostics(userData, candidatePid, exeFile, redacti
   return report;
 }
 
-async function run(exeFile, { forceMode = null, stressRestarts = 2 } = {}) {
+async function run(exeFile, { forceMode = null, stressRestarts = 2, desktopOnly = false } = {}) {
   if (forceMode !== null && forceMode !== 'host' && forceMode !== 'guard' && forceMode !== 'desktop') throw new Error('Invalid force-exit mode');
+  if (typeof desktopOnly !== 'boolean') throw new Error('Invalid desktop-only cold-start mode');
+  if (desktopOnly && (forceMode !== null || stressRestarts !== 2)) throw new Error('Desktop-only cold start cannot mix forced-exit or browser stress options');
   if (!Number.isSafeInteger(stressRestarts) || stressRestarts < 2 || stressRestarts > 8) throw new Error('Cold-start restart count must be bounded to 2..8');
   if (forceMode !== null && stressRestarts !== 2) throw new Error('Do not mix forced-exit and cold-start stress tests');
   if (process.platform!=='win32' || process.env.GITHUB_ACTIONS!=='true' || process.env.YUTANG_EDGE_FIREWALL_CONFIRMED!=='yes')
@@ -690,6 +692,7 @@ async function run(exeFile, { forceMode = null, stressRestarts = 2 } = {}) {
   const preExistingEdgeValue=ps("Get-CimInstance Win32_Process -Filter \"Name = 'msedge.exe'\" | Select-Object ProcessId,Name,CommandLine | ConvertTo-Json -Compress -Depth 3");
   const preExistingEdge=Array.isArray(preExistingEdgeValue)?preExistingEdgeValue:(preExistingEdgeValue?[preExistingEdgeValue]:[]);
   assert.equal(preExistingEdge.length,0,'Cold-start test requires zero pre-existing Edge processes before candidate launch.');
+  const desktopBootStart=Date.now();
   const child=spawn(exeFile,['--remote-debugging-port=0','--remote-debugging-address=127.0.0.1'],{env,windowsHide:true,stdio:'ignore',shell:false});
   const candidateExit={error:null,exit:null};
   child.once('error',error=>{candidateExit.error=safeText(error?.message||error);});
@@ -723,6 +726,21 @@ async function run(exeFile, { forceMode = null, stressRestarts = 2 } = {}) {
     console.log('PHASE_EXE_DESKTOP_READY: true; isolated memory and no model key confirmed');
     const bootstrap=await (await fetch(ready.origin+'/api/bootstrap',{signal:AbortSignal.timeout(5000)})).json();
     assert.equal(typeof bootstrap.token,'string');assert.ok(bootstrap.token.length>10);
+    if(desktopOnly){
+      assert.equal(await fs.access(control).then(()=>true,()=>false),false,
+        'Desktop-only smoke unexpectedly spawned a dedicated browser host');
+      assert.equal(ownedProfileProcesses(profile,controlDir).length,0,
+        'Desktop-only smoke unexpectedly created an owned Edge/host process');
+      assert.equal(loopbackListeners(PORT).length,0,
+        'Desktop-only smoke unexpectedly opened the dedicated CDP port');
+      console.log('PASS_WINDOWS_DESKTOP_COLD_START '+JSON.stringify({
+        candidateSha256:EXPECTED_EXE,desktopReady:true,localApiReady:true,
+        configured:false,processId:child.pid,workerPid:backendPid,
+        coldStartupElapsedMs:Date.now()-desktopBootStart,
+        browserHostNotStarted:true,cdpListeners:0,uniqueIsolatedProfile:true
+      }));
+      return report;
+    }
     const redactionPaths=[base,home,userData,memory,profile,path.dirname(control),locationFile];
     const firstOpen=await requestBrowserOpen(ready.origin,bootstrap.token,redactionPaths);
     report.browserOpenHttpStatus=firstOpen.status;
@@ -1001,8 +1019,9 @@ else {
   const modes = ['--force-host','--force-guard','--force-desktop'].filter(flag => process.argv.includes(flag));
   if(modes.length > 1) throw new Error('Only one forced-exit mode may be selected');
   const forceMode = modes[0] === '--force-host' ? 'host' : modes[0] === '--force-guard' ? 'guard' : modes[0] === '--force-desktop' ? 'desktop' : null;
+  const desktopOnly=process.argv.includes('--desktop-only');
   const stressArgs=process.argv.filter(arg=>arg.startsWith('--stress-restarts='));
   if(stressArgs.length>1)throw new Error('Only one cold-start stress count may be selected');
   const stressRestarts=stressArgs.length ? Number(stressArgs[0].slice('--stress-restarts='.length)) : 2;
-  run(path.resolve(exe), { forceMode, stressRestarts }).catch(e=>{console.error('FAIL_CLOSED_WINDOWS_EDGE_SMOKE:',e.message);process.exitCode=1;});
+  run(path.resolve(exe), { forceMode, stressRestarts, desktopOnly }).catch(e=>{console.error('FAIL_CLOSED_WINDOWS_EDGE_SMOKE:',e.message);process.exitCode=1;});
 }
