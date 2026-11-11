@@ -43,11 +43,11 @@ jobs:
         run: |
           $ErrorActionPreference='Stop'
           $ProgressPreference='SilentlyContinue'
-          $artifactId=13871502345
+          $artifactId=13873651630
           $archive=Join-Path $env:RUNNER_TEMP 'YuTang-Isolated-EXE-Exact.zip'
           $headers=@{Authorization="Bearer $env:GH_TOKEN";Accept='application/vnd.github+json';'X-GitHub-Api-Version'='2022-11-28'}
           Invoke-WebRequest -Uri "https://api.github.com/repos/yud78785/yutang-build/actions/artifacts/$artifactId/zip" -Headers $headers -MaximumRedirection 5 -OutFile $archive
-          $expectedArchive='9da9e1f0f8ef5b401fd5ae77e683a890fb9230fcff0fb3c9a5041bc427681e7e'
+          $expectedArchive='07b265bd555b5676a819bb463524d249d8e52fe99318dcfb124fee4a3d0a51ef'
           if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expectedArchive) { throw 'Artifact ZIP SHA256 mismatch: refusing to extract or execute.' }
           Add-Type -AssemblyName System.IO.Compression.FileSystem
           $zip=[System.IO.Compression.ZipFile]::OpenRead($archive)
@@ -62,7 +62,7 @@ jobs:
           [System.IO.Compression.ZipFile]::ExtractToDirectory($archive,$directory)
           $exe=Join-Path $directory 'Dafeiyu-Douyin-API-1.4.6-win-x64.exe'
           if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw 'Expected candidate executable missing.' }
-          $expectedExe='ac02053ff2f95897d581518e8ce80fed28de6c101e5a3f2e767f1cf6c42bde7d'
+          $expectedExe='3d61154c4643a9b751b2bd911bb9cf1f167273db7b4312571ef5ef6178be7e5c'
           if ((Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expectedExe) { throw 'Candidate EXE SHA256 mismatch: refusing execution.' }
           "exe=$exe" | Out-File -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           Write-Host 'ISOLATED_CANDIDATE_IDENTITY_PASS: exact ZIP and EXE bytes; signing trust is NOT established.'
