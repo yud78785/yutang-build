@@ -651,8 +651,10 @@ async function readColdStartDiagnostics(userData, candidatePid, exeFile, redacti
   return report;
 }
 
-async function run(exeFile, { forceMode = null } = {}) {
+async function run(exeFile, { forceMode = null, stressRestarts = 2 } = {}) {
   if (forceMode !== null && forceMode !== 'host' && forceMode !== 'guard' && forceMode !== 'desktop') throw new Error('Invalid force-exit mode');
+  if (!Number.isSafeInteger(stressRestarts) || stressRestarts < 2 || stressRestarts > 8) throw new Error('Cold-start restart count must be bounded to 2..8');
+  if (forceMode !== null && stressRestarts !== 2) throw new Error('Do not mix forced-exit and cold-start stress tests');
   if (process.platform!=='win32' || process.env.GITHUB_ACTIONS!=='true' || process.env.YUTANG_EDGE_FIREWALL_CONFIRMED!=='yes')
     throw new Error('Refusing candidate launch outside pre-guarded ephemeral Windows GitHub runner');
   assert.equal(path.basename(exeFile),FILE);
@@ -671,6 +673,9 @@ async function run(exeFile, { forceMode = null } = {}) {
   await fs.writeFile(paths.mediaSettingsFile,JSON.stringify({enabled:false,backend:'local-whisper'}));
   const env=Object.fromEntries(Object.entries(process.env).filter(([key])=>allowedEnv.test(key)));
   Object.assign(env,{DSH_HOME:path.join(home,'.dsh'),DOUYIN_DESKTOP_USER_DATA:userData,DOUYIN_RUNTIME_LOCATION_FILE:locationFile,DOUYIN_DESKTOP_SMOKE:'1'});
+  // In ephemeral offline Windows CI only, capture Playwright browser lifecycle traces
+  // into the candidate's isolated browser-host.log; never print raw CLI arguments.
+  if (stressRestarts > 2) env.DEBUG = 'pw:browser*';
   // Keep native Windows user-profile paths. Only YuTang state, app userData and memory are redirected to disposable paths.
   // No GITHUB_TOKEN, CI tokens, personal credentials or model API keys are passed to the EXE.
   const edgeExe=process.env.YUTANG_EDGE_EXE;
@@ -776,7 +781,7 @@ async function run(exeFile, { forceMode = null } = {}) {
       if(!/(?:Edg|Chrome)/.test(String(version.Browser)))return null;
       return assertUnrelatedEdgeAlive(unrelatedProfile,9231);
     },20000,'independent unrelated Edge process and CDP listener started after cold candidate launch');
-    const lifecycle={launchCount:1,closeCount:0,hostPids:[state.pid],cycles:[]};
+    const lifecycle={launchCount:1,closeCount:0,hostPids:[state.pid],cycles:[],expectedLaunches:stressRestarts+1};
     Object.assign(report,initialCheck.ownership,{
       hostPid:state.pid,backendPid:ready.backendPid,hostSummary:initialCheck.hostSummary,
       browserVersion:initialCheck.browserVersion,browserReady:true,cdpResponded:true
@@ -795,7 +800,7 @@ async function run(exeFile, { forceMode = null } = {}) {
 
     // Close the owned Edge through its loopback CDP endpoint, then prove the host and every Edge child exit.
     // Repeat two restarts to exercise stale-state handling and the exact detached host spawn path.
-    for(let cycle=1;cycle<=2;cycle++) {
+    for(let cycle=1;cycle<=stressRestarts;cycle++) {
       const previousPid=state.pid, previousStartedAt=state.startedAt;
       const closeResult=await closeEdgeViaCdp(PORT);
       const closeProof=await waitForBrowserGone(previousPid,profile,controlDir,PORT);
@@ -804,6 +809,7 @@ async function run(exeFile, { forceMode = null } = {}) {
       const cycleReport={cycle,closedPid:previousPid,closeViaCdp:closeResult.closed===true,closeVerified:closeProof.clean===true,processesRemaining:closeProof.edgeAndHostProcesses,listenersRemaining:closeProof.listeners,unrelatedEdgeStillAlive:unrelatedAfterClose.processCount>0&&unrelatedAfterClose.listenerCount>0};
       assert.equal(cycleReport.closeVerified,true,'Owned Edge or browser-host remained after CDP Browser.close');
 
+      const restartStarted=Date.now();
       const nextOpen=await requestBrowserOpen(ready.origin,bootstrap.token,redactionPaths);
       const nextFirewallBlock=isExpectedFirewallBlock(nextOpen.status,nextOpen.body);
       assert.ok(nextOpen.status===200||nextFirewallBlock,'Restarted browser open failed unexpectedly: '+String(nextOpen.status)+' '+String(nextOpen.body||''));
@@ -819,6 +825,7 @@ async function run(exeFile, { forceMode = null } = {}) {
       cycleReport.restartEdgeProcessCount=nextCheck.ownership.edgeProcessCount;
       cycleReport.restartListenerCount=nextCheck.ownership.listenerCount;
       cycleReport.restartLoopbackOnly=nextCheck.ownership.loopbackOnly;
+      cycleReport.restartElapsedMs=Date.now()-restartStarted;
       lifecycle.launchCount++;
       lifecycle.hostPids.push(nextState.pid);
       lifecycle.cycles.push(cycleReport);
@@ -863,6 +870,17 @@ async function run(exeFile, { forceMode = null } = {}) {
     report.cleanupVerified=true;
     report.notProven=['Network Service lockdown/integrity restrictions beyond the verified AppContainer SID','Real Douyin video playback (outbound blocked by design)','Model reasoning','Long-term autonomy','Memory synchronization','Signed release trust','General user PC safety'];
     if(forceMode) console.log('PASS_WINDOWS_PACKAGED_EXE_JOB_OBJECT_FORCED_EXIT '+JSON.stringify(report.forcedExit));
+    if(stressRestarts>2) {
+      assert.equal(lifecycle.launchCount,stressRestarts+1,'Cold-start stress did not complete every requested launch');
+      console.log('PASS_WINDOWS_COLD_START_STRESS '+JSON.stringify({
+        candidateSha256:EXPECTED_EXE,launchCount:lifecycle.launchCount,
+        distinctHostPidCount:new Set(lifecycle.hostPids).size,
+        restarts:stressRestarts,cleanFinalShutdown:lifecycle.finalCloseVerified,
+        everyRestartReady:lifecycle.cycles.every(x=>x.restartReady && x.restartLoopbackOnly),
+        everyRestartClean:lifecycle.cycles.every(x=>x.closeVerified && x.processesRemaining===0 && x.listenersRemaining===0),
+        restartElapsedMs:lifecycle.cycles.map(x=>x.restartElapsedMs)
+      }));
+    }
     console.log('PASS_WINDOWS_PACKAGED_EXE_RESTART_AND_CLEANUP '+JSON.stringify(report));
     return report;
   } catch (error) {
@@ -979,5 +997,8 @@ else {
   const modes = ['--force-host','--force-guard','--force-desktop'].filter(flag => process.argv.includes(flag));
   if(modes.length > 1) throw new Error('Only one forced-exit mode may be selected');
   const forceMode = modes[0] === '--force-host' ? 'host' : modes[0] === '--force-guard' ? 'guard' : modes[0] === '--force-desktop' ? 'desktop' : null;
-  run(path.resolve(exe), { forceMode }).catch(e=>{console.error('FAIL_CLOSED_WINDOWS_EDGE_SMOKE:',e.message);process.exitCode=1;});
+  const stressArgs=process.argv.filter(arg=>arg.startsWith('--stress-restarts='));
+  if(stressArgs.length>1)throw new Error('Only one cold-start stress count may be selected');
+  const stressRestarts=stressArgs.length ? Number(stressArgs[0].slice('--stress-restarts='.length)) : 2;
+  run(path.resolve(exe), { forceMode, stressRestarts }).catch(e=>{console.error('FAIL_CLOSED_WINDOWS_EDGE_SMOKE:',e.message);process.exitCode=1;});
 }
