@@ -177,6 +177,106 @@ async function closeEdgeViaCdp(port) {
   return { closed: true, cdpHost: socketUrl.hostname, cdpPort: Number(socketUrl.port) };
 }
 
+async function cdpCommand(socket, id, method, params = {}, sessionId = null) {
+  return await Promise.race([
+    new Promise((resolve, reject) => {
+      const onMessage = event => {
+        let message;
+        try { message = JSON.parse(String(event.data)); } catch { return; }
+        if (message.id !== id) return;
+        socket.removeEventListener('message', onMessage);
+        if (message.error) reject(new Error(String(message.error.message || 'CDP command failed')));
+        else resolve(message.result || {});
+      };
+      socket.addEventListener('message', onMessage);
+      try { socket.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) })); }
+      catch (error) { socket.removeEventListener('message', onMessage); reject(error); }
+    }),
+    delay(5000).then(() => { throw new Error('CDP command timeout: ' + method); })
+  ]);
+}
+
+export async function inspectRendererSandbox(port = PORT) {
+  assert.equal(typeof WebSocket, 'function', 'Node runtime must provide WebSocket for sandbox diagnostics');
+  const versionResponse = await fetch('http://127.0.0.1:' + port + '/json/version', { signal: AbortSignal.timeout(5000) });
+  assert.equal(versionResponse.status, 200, 'CDP version endpoint must respond for sandbox diagnostics');
+  const version = await versionResponse.json();
+  const socketUrl = new URL(version.webSocketDebuggerUrl);
+  assert.equal(socketUrl.hostname, '127.0.0.1', 'Sandbox diagnostic CDP must be loopback-only');
+  assert.equal(socketUrl.port, String(port), 'Sandbox diagnostic CDP port mismatch');
+  const socket = new WebSocket(version.webSocketDebuggerUrl);
+  await Promise.race([
+    new Promise((resolve, reject) => {
+      socket.addEventListener('open', resolve, { once: true });
+      socket.addEventListener('error', () => reject(new Error('Sandbox diagnostic CDP connection failed')), { once: true });
+    }),
+    delay(5000).then(() => { throw new Error('Sandbox diagnostic CDP open timeout'); })
+  ]);
+  let nextId = 1;
+  const attempts = [];
+  try {
+    for (const url of ['edge://sandbox', 'chrome://sandbox']) {
+      let targetId = null;
+      try {
+        const target = await cdpCommand(socket, nextId++, 'Target.createTarget', { url });
+        targetId = target.targetId;
+        const attached = await cdpCommand(socket, nextId++, 'Target.attachToTarget', { targetId, flatten: true });
+        const sessionId = attached.sessionId;
+        await cdpCommand(socket, nextId++, 'Runtime.enable', {}, sessionId);
+        let snapshot = null;
+        for (let attempt = 0; attempt < 18; attempt++) {
+          const evaluated = await cdpCommand(socket, nextId++, 'Runtime.evaluate', {
+            expression: 'JSON.stringify({href:location.href,title:document.title,ready:document.readyState,text:document.body?document.body.innerText:""})',
+            returnByValue: true,
+            awaitPromise: true
+          }, sessionId);
+          const value = evaluated.result?.value;
+          if (typeof value === 'string') {
+            try { snapshot = JSON.parse(value); } catch {}
+          }
+          if (snapshot?.text?.trim().length > 20) break;
+          await delay(300);
+        }
+        attempts.push({
+          requestedUrl: url,
+          actualUrl: String(snapshot?.href || ''),
+          title: String(snapshot?.title || '').slice(0, 160),
+          readyState: String(snapshot?.ready || ''),
+          text: String(snapshot?.text || '').slice(0, 5000)
+        });
+        if (targetId) {
+          try { await cdpCommand(socket, nextId++, 'Target.closeTarget', { targetId }); } catch {}
+          targetId = null;
+        }
+        if (snapshot?.text?.trim().length > 20) {
+          const text = String(snapshot.text);
+          const normalized = text.toLowerCase();
+          return {
+            accessible: true,
+            requestedUrl: url,
+            actualUrl: String(snapshot.href || ''),
+            title: String(snapshot.title || '').slice(0, 160),
+            textSample: text.slice(0, 5000),
+            mentionsRenderer: /renderer/i.test(text),
+            mentionsSandbox: /sandbox/i.test(text),
+            explicitSandboxPositive: /sandbox.{0,80}(enabled|active|on|yes|sandboxed)/i.test(text),
+            explicitSandboxNegative: /sandbox.{0,80}(disabled|off|not enabled|not sandboxed)/i.test(text),
+            attempts
+          };
+        }
+      } catch (error) {
+        attempts.push({ requestedUrl: url, error: safeText(error?.message || error) });
+        if (targetId) {
+          try { await cdpCommand(socket, nextId++, 'Target.closeTarget', { targetId }); } catch {}
+        }
+      }
+    }
+    return { accessible: false, attempts };
+  } finally {
+    try { socket.close(); } catch {}
+  }
+}
+
 function ownedProfileProcesses(profile, controlDir) {
   const value = ps("Get-CimInstance Win32_Process -Filter \"Name = 'msedge.exe' OR Name = 'node.exe'\" | Select-Object ProcessId,ParentProcessId,Name,CommandLine,ExecutablePath | ConvertTo-Json -Compress -Depth 4");
   const p = profile.toLowerCase(), c = controlDir.toLowerCase();
@@ -332,6 +432,13 @@ async function run(exeFile) {
       assert.equal(firstOpen.status,200,'Browser open API must return HTTP 200 or the expected outbound-firewall denial; received '+String(firstOpen.status));
     }
     const initialCheck=await inspectReadyBrowser(state,ready.backendPid,profile,controlDir);
+    try {
+      report.rendererSandbox = await inspectRendererSandbox(PORT);
+      console.log('RENDERER_SANDBOX_DIAGNOSTIC '+JSON.stringify(report.rendererSandbox));
+    } catch (error) {
+      report.rendererSandbox = { accessible:false, error:safeText(error?.message || error, redactionPaths) };
+      console.log('RENDERER_SANDBOX_DIAGNOSTIC '+JSON.stringify(report.rendererSandbox));
+    }
     const lifecycle={launchCount:1,closeCount:0,hostPids:[state.pid],cycles:[]};
     Object.assign(report,initialCheck.ownership,{
       hostPid:state.pid,backendPid:ready.backendPid,hostSummary:initialCheck.hostSummary,
