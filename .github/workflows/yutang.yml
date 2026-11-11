@@ -228,6 +228,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Job Object patch script syntax failed' }
           node tests/test-jobguard-patch.mjs
           if ($LASTEXITCODE -ne 0) { throw 'Job Object patch tests failed' }
+          node --check tools/jobguard/patch-desktop-guard.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Desktop worker guard source syntax failed' }
+          node tests/test-desktop-guard-patch.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Desktop worker guard patch tests failed' }
 
       - name: Checkout exact upstream release commit and verify source identity
         shell: pwsh
@@ -253,12 +257,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'BrowserLauncher bounded same-origin navigation recovery patch failed' }
           node tools/jobguard/patch-jobguard.mjs (Resolve-Path upstream/browser-host.mjs).Path (Resolve-Path upstream/core.mjs).Path
           if ($LASTEXITCODE -ne 0) { throw 'Windows Job Object browser-host containment patch failed' }
-          foreach ($entry in @('upstream/runtime-paths.mjs', 'upstream/desktop/src/prepare-api-runtime.mjs', 'upstream/desktop/src/main.mjs', 'upstream/browser-launcher.mjs', 'upstream/browser-host.mjs', 'upstream/core.mjs')) {
+          node tools/jobguard/patch-desktop-guard.mjs (Resolve-Path upstream/desktop/src/api-process.mjs).Path
+          if ($LASTEXITCODE -ne 0) { throw 'Windows Job Object desktop API worker containment patch failed' }
+          foreach ($entry in @('upstream/runtime-paths.mjs', 'upstream/desktop/src/prepare-api-runtime.mjs', 'upstream/desktop/src/main.mjs', 'upstream/desktop/src/api-process.mjs', 'upstream/browser-launcher.mjs', 'upstream/browser-host.mjs', 'upstream/core.mjs')) {
             node --check $entry
             if ($LASTEXITCODE -ne 0) { throw "Patched candidate source failed syntax check: $entry" }
           }
           $changed = @(git -C upstream diff --name-only)
-          if ($changed.Count -ne 7 -or $changed -notcontains 'browser-host.mjs' -or $changed -notcontains 'core.mjs' -or $changed -notcontains 'runtime-paths.mjs' -or $changed -notcontains 'desktop/src/prepare-api-runtime.mjs' -or $changed -notcontains 'desktop/src/main.mjs' -or $changed -notcontains 'desktop/src/startup-navigation.mjs' -or $changed -notcontains 'browser-launcher.mjs') { throw 'Unexpected source differences' }
+          if ($changed.Count -ne 8 -or $changed -notcontains 'desktop/src/api-process.mjs' -or $changed -notcontains 'browser-host.mjs' -or $changed -notcontains 'core.mjs' -or $changed -notcontains 'runtime-paths.mjs' -or $changed -notcontains 'desktop/src/prepare-api-runtime.mjs' -or $changed -notcontains 'desktop/src/main.mjs' -or $changed -notcontains 'desktop/src/startup-navigation.mjs' -or $changed -notcontains 'browser-launcher.mjs') { throw 'Unexpected source differences' }
 
       - name: Install pinned pnpm and repository dependencies
         shell: pwsh
@@ -371,12 +377,12 @@ jobs:
           $copied=(Get-FileHash -Algorithm SHA256 -LiteralPath 'app/startup-navigation.mjs').Hash
           if ($source -ne $copied) { throw 'Renderer startup patch not copied into desktop app' }
           Write-Host 'PASS renderer startup patch is byte-identical in desktop application entry.'
-          foreach ($entry in @('main.mjs','prepare-api-runtime.mjs')) {
+          foreach ($entry in @('main.mjs','prepare-api-runtime.mjs','api-process.mjs')) {
             $original=(Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path 'src' $entry)).Hash
             $staged=(Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path 'app' $entry)).Hash
             if ($original -ne $staged) { throw "Candidate state isolation source was not copied into Electron app: $entry" }
           }
-          Write-Host 'PASS new candidate has isolated Electron settings, shared state and Edge profile defaults.'
+          Write-Host 'PASS new candidate has isolated Electron settings, shared state and Edge profile defaults; desktop API worker Job Object guard staged.'
 
       - name: Run independent Edge sandbox process probe on Windows
         shell: pwsh
@@ -398,6 +404,8 @@ jobs:
           if ((Get-FileHash -Algorithm SHA256 -LiteralPath '../core.mjs').Hash -ne (Get-FileHash -Algorithm SHA256 -LiteralPath 'release-api/win-unpacked/resources/api-runtime/core.mjs').Hash) { throw 'Packaged Core does not require the Windows Job Object guard' }
           if ((Get-FileHash -Algorithm SHA256 -LiteralPath '../browser-host.mjs').Hash -ne (Get-FileHash -Algorithm SHA256 -LiteralPath 'release-api/win-unpacked/resources/api-runtime/browser-host.mjs').Hash) { throw 'Packaged browser-host does not contain the Windows Job Object guard' }
           Write-Host 'PASS packaged Core/browser-host and Job Object helper are byte-identical to verified staged sources.'
+          if ((Get-FileHash -Algorithm SHA256 -LiteralPath 'src/api-process.mjs').Hash -ne (Get-FileHash -Algorithm SHA256 -LiteralPath 'app/api-process.mjs').Hash) { throw 'Desktop API worker guard did not propagate into Electron app source' }
+          Write-Host 'PASS guarded desktop API process is byte-identical to staged Electron app source.'
           if ((Get-FileHash -Algorithm SHA256 -LiteralPath '../runtime-paths.mjs').Hash -ne (Get-FileHash -Algorithm SHA256 -LiteralPath 'release-api/win-unpacked/resources/api-runtime/runtime-paths.mjs').Hash) { throw 'Packaged runtime did not retain isolated browser profile, memory and control defaults' }
           pnpm package:portable
           if ($LASTEXITCODE -ne 0) { throw 'Portable Windows packaging failed' }
