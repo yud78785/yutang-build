@@ -69,20 +69,38 @@ func win32Error(name string, callErr error) error {
 }
 
 func runGuard() error {
-	ownerPID, err := parseOwnerPID(os.Args[1:], os.Getppid())
+	request, err := parseGuardRequest(os.Args[1:], os.Getppid())
 	if err != nil {
-		return fmt.Errorf("invalid owner: %w", err)
+		return fmt.Errorf("invalid guard request: %w", err)
 	}
+	ownerPID := request.ownerPID
 
-	owner, _, callErr := procOpenProcess.Call(
-		uintptr(processTerminate|processSetQuota|synchronize),
-		0,
-		uintptr(ownerPID),
-	)
+	ownerRights := uintptr(synchronize)
+	if request.targetPID == ownerPID {
+		ownerRights = uintptr(processTerminate|processSetQuota|synchronize)
+	}
+	owner, _, callErr := procOpenProcess.Call(ownerRights, 0, uintptr(ownerPID))
 	if owner == 0 {
-		return win32Error("OpenProcess", callErr)
+		return win32Error("OpenProcess(owner)", callErr)
 	}
 	defer procCloseHandle.Call(owner)
+
+	// For the desktop mode, guard the API worker instead of Electron itself.
+	// The updater is an Electron child, and must not be dragged into this job.
+	target := owner
+	if request.targetPID != ownerPID {
+		parentPID, err := immediateParentOfPID(request.targetPID)
+		if err != nil { return fmt.Errorf("verify worker ancestry: %w", err) }
+		if parentPID != ownerPID {
+			return fmt.Errorf("refusing worker target: immediate parent is not desktop owner")
+		}
+		target, _, callErr = procOpenProcess.Call(
+			uintptr(processTerminate|processSetQuota|synchronize), 0,
+			uintptr(request.targetPID),
+		)
+		if target == 0 { return win32Error("OpenProcess(target worker)", callErr) }
+		defer procCloseHandle.Call(target)
+	}
 
 	job, _, callErr := procCreateJobObjectW.Call(0, 0)
 	if job == 0 {
@@ -102,7 +120,7 @@ func runGuard() error {
 		return win32Error("SetInformationJobObject", callErr)
 	}
 
-	ok, _, callErr = procAssignProcessToJob.Call(job, owner)
+	ok, _, callErr = procAssignProcessToJob.Call(job, target)
 	if ok == 0 {
 		return win32Error("AssignProcessToJobObject", callErr)
 	}
@@ -118,7 +136,23 @@ func runGuard() error {
 		return fmt.Errorf("unexpected owner wait state: 0x%08x", uint32(state))
 	}
 
-	if _, err := fmt.Fprintf(os.Stdout, "READY %d\n", ownerPID); err != nil {
+	if request.targetPID != ownerPID {
+		state, _, callErr = procWaitForSingleObject.Call(target, 0)
+		if state == waitObject0 {
+			return fmt.Errorf("target worker exited before the guard became ready")
+		}
+		if state != waitTimeout {
+			if state == waitFailed { return win32Error("WaitForSingleObject(target, 0)",callErr) }
+			return fmt.Errorf("unexpected worker wait state: 0x%08x", uint32(state))
+		}
+	}
+	var handshake string
+	if request.targetPID != ownerPID {
+		handshake = fmt.Sprintf("READY %d %d\n",ownerPID,request.targetPID)
+	} else {
+		handshake = fmt.Sprintf("READY %d\n", ownerPID)
+	}
+	if _, err := fmt.Fprint(os.Stdout, handshake); err != nil {
 		return fmt.Errorf("write readiness handshake: %w", err)
 	}
 	state, _, callErr = procWaitForSingleObject.Call(owner, infinite)
@@ -129,8 +163,9 @@ func runGuard() error {
 		return fmt.Errorf("unexpected owner exit wait state: 0x%08x", uint32(state))
 	}
 
-	// Closing the only job handle activates KILL_ON_JOB_CLOSE. Any Edge
-	// descendants still alive after the host exits are terminated by Windows.
+	// Closing the only job handle activates KILL_ON_JOB_CLOSE. For the desktop
+	// mode, it terminates the API worker and all its children (including Edge).
+	// For browser-host mode, it terminates Edge descendants.
 	return nil
 }
 
