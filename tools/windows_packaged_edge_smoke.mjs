@@ -402,17 +402,21 @@ async function run(exeFile) {
         if(ownedApp)try { execFileSync('taskkill.exe',['/PID',String(child.pid),'/T','/F'],{stdio:'ignore',windowsHide:true,timeout:10000}); } catch {}
       }
       await delay(1000);
+      const processFilter=`Name = 'msedge.exe' OR Name = 'node.exe' OR Name = '${FILE}'`;
+      const processQuery=`Get-CimInstance Win32_Process -Filter "${processFilter}" | Select-Object ProcessId,Name,CommandLine,ExecutablePath | ConvertTo-Json -Compress -Depth 3`;
       let rows=[];
-      try { const value=ps("Get-CimInstance Win32_Process -Filter \"Name = 'msedge.exe' OR Name = 'node.exe'\" | Select-Object ProcessId,Name,CommandLine | ConvertTo-Json -Compress -Depth 3"); rows=Array.isArray(value)?value:(value?[value]:[]); }
-      catch { process.exitCode=1; }
-      let survivors=rows.filter(p=>String(p.CommandLine||'').toLowerCase().includes(profile.toLowerCase())||String(p.CommandLine||'').toLowerCase().includes(controlDir.toLowerCase()));
-      for(const item of survivors) { try { execFileSync('taskkill.exe',['/PID',String(item.ProcessId),'/T','/F'],{stdio:'ignore',windowsHide:true,timeout:10000}); } catch {} }
+      try { const value=ps(processQuery); rows=Array.isArray(value)?value:(value?[value]:[]); }
+      catch { process.exitCode=1; rows=[{ProcessId:'unknown',Name:'unverified',CommandLine:profile}]; }
+      const belongsToCandidate=p=>Number(p.ProcessId)===child.pid&&String(p.ExecutablePath||'').toLowerCase()===path.resolve(exeFile).toLowerCase();
+      const belongsToBrowser=p=>String(p.CommandLine||'').toLowerCase().includes(profile.toLowerCase())||String(p.CommandLine||'').toLowerCase().includes(controlDir.toLowerCase());
+      let survivors=rows.filter(p=>belongsToBrowser(p)||belongsToCandidate(p));
+      for(const item of survivors) { if(Number.isSafeInteger(Number(item.ProcessId)))try { execFileSync('taskkill.exe',['/PID',String(item.ProcessId),'/T','/F'],{stdio:'ignore',windowsHide:true,timeout:10000}); } catch {} }
       if(survivors.length) {
         await delay(1000);
         try {
-          const value=ps("Get-CimInstance Win32_Process -Filter \"Name = 'msedge.exe' OR Name = 'node.exe'\" | Select-Object ProcessId,Name,CommandLine | ConvertTo-Json -Compress -Depth 3");
+          const value=ps(processQuery);
           const after=Array.isArray(value)?value:(value?[value]:[]);
-          survivors=after.filter(p=>String(p.CommandLine||'').toLowerCase().includes(profile.toLowerCase())||String(p.CommandLine||'').toLowerCase().includes(controlDir.toLowerCase()));
+          survivors=after.filter(p=>belongsToBrowser(p)||belongsToCandidate(p));
         } catch { survivors=[{ProcessId:'unknown',Name:'unverified'}]; }
       }
       if(survivors.length) {
