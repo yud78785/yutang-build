@@ -13,7 +13,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 export const EXPECTED_EXE = '84321ec6c827de90e95d0d03b76a693444f8ea8c22c9c71c709e2e496bde753a';
 const FILE = 'Dafeiyu-Douyin-API-1.4.6-win-x64.exe';
 const PORT = 9227;
-const allowedEnv = /^(?:path|systemroot|windir|comspec|pathext|programfiles|programfiles\(x86\)|programdata)$/i;
+const allowedEnv = /^(?:path|systemroot|windir|comspec|pathext|programfiles|programfiles\(x86\)|programdata|username|userdomain|public|allusersprofile|programw6432|os|processor_architecture|number_of_processors)$/i;
 
 export function hasHostAncestor(pid, hostPid, procs) {
   if (!Number.isSafeInteger(pid) || !Number.isSafeInteger(hostPid) || pid < 1 || hostPid < 1) return false;
@@ -53,14 +53,26 @@ export function verifyProcessSnapshot({ processes, hostPid, profile, listenerPid
 export function selfTest() {
   const profile = 'C:\\sandbox\\profile';
   const list = [
-    {ProcessId: 100, ParentProcessId: 9, Name:'node.exe',CommandLine:'node host.js'},
-    {ProcessId: 200, ParentProcessId: 100, Name:'msedge.exe',CommandLine:`msedge.exe --user-data-dir=${profile} --remote-debugging-port=9227`},
+    {ProcessId: 9, ParentProcessId: 4, Name:'node.exe',CommandLine:'node api-worker.mjs'},
+    {ProcessId: 100, ParentProcessId: 9, Name:'node.exe',CommandLine:`node browser-host.mjs ${profile} C:\\sandbox\\control 9227`},
+    {ProcessId: 200, ParentProcessId: 100, Name:'msedge.exe',CommandLine:`msedge.exe --user-data-dir=${profile} --remote-debugging-port=9227 --remote-debugging-address=127.0.0.1`},
     {ProcessId: 201, ParentProcessId: 200, Name:'msedge.exe',CommandLine:`msedge.exe --user-data-dir=${profile} --type=renderer`},
     {ProcessId: 300, ParentProcessId: 4, Name:'msedge.exe',CommandLine:'msedge.exe --remote-debugging-port=9227'}
   ];
   const good={processes:list,hostPid:100,profile,listenerPids:[200],portAddresses:['127.0.0.1']};
   assert.equal(verifyProcessSnapshot(good).listenerMatchesEdge,true);
   assert.equal(hasHostAncestor(201,100,list),true);
+  const summary=summarizeHostProcesses(list,100,9,profile,'C:\\sandbox\\control');
+  assert.equal(summary.hostFound,true);
+  assert.equal(summary.hostIsNode,true);
+  assert.equal(summary.hostCommandHasBrowserHost,true);
+  assert.equal(summary.hostCommandProfileMatches,true);
+  assert.equal(summary.hostCommandControlMatches,true);
+  assert.equal(summary.hostParentIsBackend,true);
+  assert.equal(summary.edgeWithPortArg,1);
+  assert.equal(summary.edgeWithLoopbackArg,1);
+  assert.equal(summarizeHostProcesses(list,100,8,profile,'C:\\sandbox\\control').hostParentIsBackend,false);
+  assert.doesNotMatch(safeText('Bearer test-secret sk-1234567890'),/test-secret|sk-1234567890/);
   assert.equal(hasHostAncestor(300,100,list),false);
   assert.throws(()=>verifyProcessSnapshot({...good,listenerPids:[300]}),/listener PID/);
   assert.throws(()=>verifyProcessSnapshot({...good,portAddresses:['0.0.0.0']}),/loopback/);
@@ -85,6 +97,36 @@ async function until(work, milliseconds, label) {
   throw new Error(`${label} unavailable after ${milliseconds}ms: ${last?.message || 'no evidence'}`);
 }
 async function readJSON(file) {return JSON.parse(await fs.readFile(file,'utf8'));}
+function safeText(value, paths = []) {
+  let text = String(value ?? '');
+  for (const item of paths) if (typeof item === 'string' && item) text = text.split(item).join('[isolated-path]');
+  return text.replace(/Bearer\s+[^\s,;"']+/gi, 'Bearer [redacted]')
+    .replace(/\bsk-[A-Za-z0-9_-]{8,}\b/g, '[redacted]').slice(-8000);
+}
+async function readTail(file, max = 8000) {
+  try { return (await fs.readFile(file, 'utf8')).slice(-max); } catch { return null; }
+}
+function summarizeHostProcesses(processes, hostPid, backendPid, profile, control) {
+  const list = processes.filter(p => p && typeof p === 'object');
+  const host = list.find(p => Number(p.ProcessId) === hostPid);
+  const descendants = list.filter(p => hasHostAncestor(Number(p.ProcessId), hostPid, list));
+  const edge = descendants.filter(p => /msedge\.exe$/i.test(String(p.Name)));
+  const command = String(host?.CommandLine || '');
+  return {
+    hostFound: Boolean(host),
+    hostIsNode: /node\.exe$/i.test(String(host?.Name || '')),
+    hostCommandHasBrowserHost: /browser-host\.mjs/i.test(command),
+    hostCommandProfileMatches: command.toLowerCase().includes(profile.toLowerCase()),
+    hostCommandControlMatches: command.toLowerCase().includes(control.toLowerCase()),
+    hostParentIsBackend: Number(host?.ParentProcessId) === backendPid,
+    descendantCount: descendants.length,
+    edgeProcessCount: edge.length,
+    edgeWithPortArg: edge.filter(p => /--remote-debugging-port=9227/i.test(String(p.CommandLine || ''))).length,
+    edgeWithProfileArg: edge.filter(p => String(p.CommandLine || '').toLowerCase().includes(profile.toLowerCase())).length,
+    edgeWithLoopbackArg: edge.filter(p => /--remote-debugging-address=127\.0\.0\.1/i.test(String(p.CommandLine || ''))).length,
+    edgeWithNoSandbox: edge.filter(p => /--no-sandbox|--disable-setuid-sandbox/i.test(String(p.CommandLine || ''))).length
+  };
+}
 const ps = script => {
   const out=execFileSync('powershell.exe',['-NoProfile','-NonInteractive','-Command',script],{encoding:'utf8',timeout:25000,maxBuffer:8*1024*1024});
   const json=out.trim();return json?JSON.parse(json):[];
@@ -103,31 +145,50 @@ async function run(exeFile) {
   await fs.writeFile(paths.mediaEnvFile,'');
   await fs.writeFile(paths.mediaSettingsFile,JSON.stringify({enabled:false,backend:'local-whisper'}));
   const env=Object.fromEntries(Object.entries(process.env).filter(([key])=>allowedEnv.test(key)));
-  Object.assign(env,{HOME:home,USERPROFILE:home,APPDATA:path.join(base,'app-data'),LOCALAPPDATA:path.join(base,'local-app-data'),TEMP:path.join(base,'temp'),TMP:path.join(base,'temp'),DSH_HOME:path.join(home,'.dsh'),DOUYIN_DESKTOP_USER_DATA:userData,DOUYIN_RUNTIME_LOCATION_FILE:locationFile,DOUYIN_DESKTOP_SMOKE:'1'});
+  const homeDrive=path.parse(home).root.replace(/[\\/]+$/,'');
+  const homePath=home.slice(homeDrive.length);
+  Object.assign(env,{HOME:home,USERPROFILE:home,HOMEDRIVE:homeDrive,HOMEPATH:homePath,SystemDrive:homeDrive,APPDATA:path.join(base,'app-data'),LOCALAPPDATA:path.join(base,'local-app-data'),TEMP:path.join(base,'temp'),TMP:path.join(base,'temp'),DSH_HOME:path.join(home,'.dsh'),DOUYIN_DESKTOP_USER_DATA:userData,DOUYIN_RUNTIME_LOCATION_FILE:locationFile,DOUYIN_DESKTOP_SMOKE:'1'});
   // No GITHUB_TOKEN, CI tokens, personal credentials, API keys or existing profile paths are passed to the EXE.
   const child=spawn(exeFile,['--remote-debugging-port=0','--remote-debugging-address=127.0.0.1'],{env,windowsHide:true,stdio:'ignore',shell:false});
   const control=path.join(home,'.dsh','douyin-browser','control','browser.json');
   const profile=path.join(home,'.dsh','douyin-browser','cli-profile');
-  const report={type:'WINDOWS_EDGE_LAUNCH_IN_EPHEMERAL_CI_ONLY',candidateSha256:EXPECTED_EXE,realAccount:false,modelKey:false,externalEdgeNetworkBlocked:true};
+  const envKeys=['HOMEDRIVE','HOMEPATH','USERNAME','USERDOMAIN','SystemDrive','ProgramFiles','ProgramFiles(x86)','ProgramData','SystemRoot','TEMP','TMP'];
+  const report={type:'WINDOWS_EDGE_LAUNCH_IN_EPHEMERAL_CI_ONLY',candidateSha256:EXPECTED_EXE,realAccount:false,modelKey:false,externalEdgeNetworkBlocked:true,environmentProfile:'isolated-safe-expanded',safeEnvPresence:Object.fromEntries(envKeys.map(key=>[key,Boolean(env[key])]))};
   try {
     const ready=await until(async()=>{const x=await readJSON(path.join(userData,'desktop-smoke.json'));return x.ready===true?x:null;},85000,'packaged EXE startup');
     assert.equal(ready.configured,false,'EXE must not be configured with a model key');
     assert.equal(path.resolve(ready.memoryFolder).toLowerCase(),path.resolve(memory).toLowerCase(),'unexpected memory folder');
     assert.match(ready.origin,/^http:\/\/127\.0\.0\.1:\d{4,5}$/);
     report.desktopReady=true;
+    report.backendPid=ready.backendPid;
     console.log('PHASE_EXE_DESKTOP_READY: true; isolated memory and no model key confirmed');
     const bootstrap=await (await fetch(ready.origin+'/api/bootstrap',{signal:AbortSignal.timeout(5000)})).json();
     assert.equal(typeof bootstrap.token,'string');assert.ok(bootstrap.token.length>10);
-    let openStatus=null;
+    let openStatus=null, openBody=null;
     try {
       const response=await fetch(ready.origin+'/api/browser/open',{
         method:'POST',headers:{'content-type':'application/json','x-session-token':bootstrap.token},body:'{}',signal:AbortSignal.timeout(49000)
       });
       openStatus=response.status;
-    } catch(e) {openStatus=e.name==='TimeoutError'?'HTTP_TIMEOUT':`HTTP_${e.name}`;}
+      const body=await response.text();
+      if(!response.ok)openBody=safeText(body,[base,home,userData,memory,profile,path.dirname(control),locationFile]);
+    } catch(e) {openStatus=e.name==='TimeoutError'?'HTTP_TIMEOUT':'HTTP_'+e.name;openBody=safeText(e.message,[base,home,userData,memory,profile,path.dirname(control),locationFile]);}
     report.browserOpenHttpStatus=openStatus;
+    report.browserOpenHttpBody=openBody;
     console.log('PHASE_OPEN_BROWSER_REQUEST: '+String(openStatus));
-    const state=await until(async()=>{const x=await readJSON(control);return x.ready===true?x:null;},20000,'dedicated browser ready state');
+    const outcome=await until(async()=>{
+      const x=await readJSON(control);
+      if(x.ready===true)return {kind:'ready',state:x};
+      if(x.launchFailure)return {kind:'failed',state:x};
+      return null;
+    },20000,'dedicated browser ready/failure state');
+    if(outcome.kind==='failed'){
+      const failure=outcome.state.launchFailure||{};
+      report.hostFailure={code:typeof failure.code==='string'?failure.code.slice(0,80):null,message:safeText(failure.message,[base,home,userData,memory,profile,path.dirname(control),locationFile]),details:safeText(failure.details,[base,home,userData,memory,profile,path.dirname(control),locationFile])};
+      throw new Error('Browser host reported '+(report.hostFailure.code||'unknown failure'));
+    }
+    const state=outcome.state;
+    assert.equal(openStatus,200,'Browser open API must return HTTP 200; received '+String(openStatus));
     assert.equal(path.resolve(state.profile).toLowerCase(),path.resolve(profile).toLowerCase(),'Dedicated browser profile not isolated');
     assert.equal(state.port,PORT);
     assert.ok(Number.isSafeInteger(state.pid)&&state.pid>0);
@@ -137,26 +198,51 @@ async function run(exeFile) {
     const items=Array.isArray(processes)?processes:[processes];
     const listeners=ps(`Get-NetTCPConnection -LocalPort ${PORT} -State Listen -ErrorAction SilentlyContinue | Select-Object OwningProcess,LocalAddress | ConvertTo-Json -Compress -Depth 4`);
     const sockets=Array.isArray(listeners)?listeners:(!listeners?[]:[listeners]);
+    const hostSummary=summarizeHostProcesses(items,state.pid,ready.backendPid,profile,path.dirname(control));
+    assert.equal(hostSummary.hostFound,true,'Browser host PID is not present in the process snapshot');
+    assert.equal(hostSummary.hostIsNode,true,'Browser host is not the expected Node process');
+    assert.equal(hostSummary.hostCommandHasBrowserHost,true,'Browser host command line does not identify browser-host.mjs');
+    assert.equal(hostSummary.hostCommandProfileMatches,true,'Browser host profile argument does not match the isolated profile');
+    assert.equal(hostSummary.hostCommandControlMatches,true,'Browser host control argument does not match the isolated control directory');
+    assert.equal(hostSummary.hostParentIsBackend,true,'Browser host is not a child of the expected API backend');
+    assert.ok(hostSummary.edgeWithPortArg>0,'Edge command line does not include the expected CDP port');
+    assert.ok(hostSummary.edgeWithLoopbackArg>0,'Edge command line does not include the loopback-only CDP address');
     const ownership=verifyProcessSnapshot({processes:items,hostPid:state.pid,profile,listenerPids:sockets.map(p=>Number(p.OwningProcess)),portAddresses:sockets.map(p=>p.LocalAddress)});
-    Object.assign(report,ownership,{browserReady:true,cdpResponded:true,notProven:['Effective renderer sandbox integrity','Douyin video playback','Model reasoning','Long-term autonomy','General user PC safety']});
+    Object.assign(report,ownership,{hostPid:state.pid,backendPid:ready.backendPid,hostSummary,browserReady:true,cdpResponded:true,notProven:['Effective renderer sandbox integrity','Douyin video playback','Model reasoning','Long-term autonomy','General user PC safety']});
     console.log('PASS_WINDOWS_PACKAGED_EXE_TO_EDGE_OWNERSHIP '+JSON.stringify(report));
     return report;
   } catch (error) {
-    // Explicitly allowlisted facts only; never log file bodies, tokens, full paths or process command lines.
-    let state = null;
+    // Only redacted state, response text and browser-host log tail are emitted; no credentials or raw command lines.
+    const redactPaths=[base,home,userData,memory,profile,path.dirname(control),locationFile];
+    let state = null, hostLogTail=null, hostProcessSummary=null;
     try { state = await readJSON(control); } catch {}
+    try { hostLogTail=safeText(await readTail(path.join(path.dirname(control),'browser-host.log')),redactPaths); } catch {}
     let edgeProcessCount=null, hostAlive=null, debugListenerCount=null;
     try { edgeProcessCount=ps('Get-Process -Name msedge -ErrorAction SilentlyContinue | Measure-Object | Select-Object -ExpandProperty Count'); } catch {}
     if(Number.isSafeInteger(state?.pid)&&state.pid>0) {
-      try { hostAlive=ps(`Get-Process -Id ${state.pid} -ErrorAction SilentlyContinue | Measure-Object | Select-Object -ExpandProperty Count`)>0; } catch {}
+      try { hostAlive=ps('Get-Process -Id '+state.pid+' -ErrorAction SilentlyContinue | Measure-Object | Select-Object -ExpandProperty Count')>0; } catch {}
+      try {
+        const processes=ps("Get-CimInstance Win32_Process -Filter \"Name = 'msedge.exe' OR Name = 'node.exe'\" | Select-Object ProcessId,ParentProcessId,Name,CommandLine | ConvertTo-Json -Compress -Depth 4");
+        const items=Array.isArray(processes)?processes:[processes];
+        hostProcessSummary=summarizeHostProcesses(items,state.pid,Number.isSafeInteger(report.backendPid)?report.backendPid:null,profile,path.dirname(control));
+      } catch {}
     }
     try { debugListenerCount=ps('Get-NetTCPConnection -LocalPort 9227 -State Listen -ErrorAction SilentlyContinue | Measure-Object | Select-Object -ExpandProperty Count'); } catch {}
     console.error('FAIL_CLOSED_DIAGNOSTICS '+JSON.stringify({
       desktopReady:report.desktopReady===true, browserOpenHttpStatus:report.browserOpenHttpStatus??null,
+      browserOpenHttpBody:report.browserOpenHttpBody??null,
+      safeEnvPresence:report.safeEnvPresence??null,
       hostStatePresent:Boolean(state), hostReady:state?.ready===true,
+      hostStatePid:Number.isSafeInteger(state?.pid)?state.pid:null,
+      hostProfileMatches:state?.profile===profile,hostPort:state?.port??null,
+      hostStartedAt:Number.isFinite(state?.startedAt)?state.startedAt:null,
+      hostAgeMs:Number.isFinite(state?.startedAt)?Math.max(0,Date.now()-state.startedAt):null,
       hostFailureCode:typeof state?.launchFailure?.code==='string'?state.launchFailure.code.slice(0,80):null,
-      hostAlive, edgeProcessCount, debugListenerCount,
-      phaseErrorCode:typeof error?.code==='string'?error.code.slice(0,80):null
+      hostFailureMessage:safeText(state?.launchFailure?.message,redactPaths),
+      hostFailureDetails:safeText(state?.launchFailure?.details,redactPaths),
+      hostAlive, edgeProcessCount, debugListenerCount, hostProcessSummary, hostLogTail,
+      phaseErrorCode:typeof error?.code==='string'?error.code.slice(0,80):null,
+      phaseErrorMessage:safeText(error?.message,redactPaths)
     }));
     throw error;
   } finally {
