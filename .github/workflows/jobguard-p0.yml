@@ -1,0 +1,76 @@
+name: Windows Job Object crash safety - isolated prototype
+
+on:
+  pull_request:
+    paths:
+      - 'experiments/jobguard-p0/**'
+      - '.github/workflows/jobguard-p0.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  jobguard-win:
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.2'
+          cache: false
+      - name: Verify immutable source archive
+        shell: pwsh
+        run: |
+          $src = 'experiments/jobguard-p0/jobguard-src.zip'
+          $expected = 'a39c04e8838f66403d088fccaf133920084400b9c8d98ebbebef8bf53383ea35'
+          $actual = (Get-FileHash -LiteralPath $src -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $expected) { throw "Source archive SHA256 mismatch: $actual" }
+          Expand-Archive -LiteralPath $src -DestinationPath jobguard-test -ErrorAction Stop
+          if (-not (Test-Path jobguard-test/src/jobguard_windows.go)) { throw 'Windows source missing' }
+      - name: Execute real Win32 process-tree crash regression (three runs)
+        working-directory: jobguard-test/src
+        shell: pwsh
+        run: |
+          go version
+          go test -count=3 -timeout 150s -v ./... 2>&1 | Tee-Object -FilePath ../../jobguard-windows-evidence.log
+          if ($LASTEXITCODE -ne 0) { throw 'Windows Job Object crash regression failed' }
+      - name: Vet Windows code
+        working-directory: jobguard-test/src
+        shell: pwsh
+        run: |
+          go vet ./...
+          if ($LASTEXITCODE -ne 0) { throw 'go vet failed' }
+      - name: Upload diagnostic evidence, including on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jobguard-win32-p0-evidence
+          path: jobguard-windows-evidence.log
+          if-no-files-found: warn
+          retention-days: 7
+
+  jobguard-linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.2'
+          cache: false
+      - name: Verify archive and run ordinary + race regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "a39c04e8838f66403d088fccaf133920084400b9c8d98ebbebef8bf53383ea35  experiments/jobguard-p0/jobguard-src.zip" | sha256sum -c -
+          unzip -q experiments/jobguard-p0/jobguard-src.zip -d jobguard-test
+          cd jobguard-test/src
+          go test -count=5 ./...
+          go test -race -count=3 ./...
+          go vet ./...
