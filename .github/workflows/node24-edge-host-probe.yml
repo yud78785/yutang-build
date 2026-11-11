@@ -246,9 +246,7 @@ jobs:
               if($belongs) { $spawnDesc += $item }
             }
           }
-          $spawnEdge=@($spawnDesc | Where-Object { $_.Name -match '^msedge\.exe
-
- })
+          $spawnEdge=@($spawnDesc | Where-Object { $_.Name -ieq 'msedge.exe' })
           $spawnSummary=[ordered]@{
             nodeVersion=(node --version).Trim()
             spawnStatus=$spawnStatus
