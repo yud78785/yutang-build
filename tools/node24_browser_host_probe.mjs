@@ -87,7 +87,7 @@ function processSummary(processes, hostPid, profile, port, listeners) {
     edgeWithProfile: edge.filter(item => String(item.CommandLine || '').toLowerCase().includes(profile.toLowerCase())).length,
     edgeWithPortArg: edge.filter(item => String(item.CommandLine || '').includes('--remote-debugging-port=' + port)).length,
     edgeWithLoopbackArg: edge.filter(item => /--remote-debugging-address=127\.0\.0\.1/i.test(String(item.CommandLine || ''))).length,
-    edgeWithNoSandbox: edge.filter(item => /--no-sandbox|--disable-setuid-sandbox/i.test(String(item.CommandLine || ''))).length,
+    edgeWithNoSandbox: edge.filter(item => /--no-sandbox|--disable-setuid-sandbox/i.test(String(item.CommandLine || ''))).length,\n    edgeWithNetworkSandboxArg: edge.filter(item => /--enable-features=[^\\s\"]*NetworkServiceSandbox/i.test(String(item.CommandLine || ''))).length,
     listenerCount: listeners.length,
     listenerOwnersAreEdgeDescendants: listenerRows.length > 0 && listenerRows.every(item => item.ownerIsEdgeDescendant),
     listenersLoopbackOnly: listenerRows.length > 0 && listenerRows.every(item => item.loopback)
@@ -143,7 +143,7 @@ async function main() {
       rawContext = await chromium.launchPersistentContext(rawProfile, {
         channel: 'msedge', headless: false, viewport: null, chromiumSandbox: true,
         ignoreDefaultArgs: ['--mute-audio'],
-        args: ['--remote-debugging-port=' + rawPort, '--remote-debugging-address=127.0.0.1', '--autoplay-policy=no-user-gesture-required'],
+        args: ['--remote-debugging-port=' + rawPort, '--remote-debugging-address=127.0.0.1', '--autoplay-policy=no-user-gesture-required', '--enable-features=NetworkServiceSandbox'],
         env: safeEnv, timeout: 30000
       });
       const rawPage = rawContext.pages()[0] || await rawContext.newPage();
@@ -243,7 +243,7 @@ async function main() {
       report.host.stateProfileMatches && report.host.statePortMatches && hostProcess.hostFound &&
       hostProcess.hostIsNode && hostProcess.hostParentIsProbe && hostProcess.edgeProcessCount > 0 &&
       hostProcess.edgeWithProfile > 0 && hostProcess.edgeWithPortArg > 0 && hostProcess.edgeWithLoopbackArg > 0 &&
-      hostProcess.edgeWithNoSandbox === 0 && hostProcess.listenerOwnersAreEdgeDescendants && hostProcess.listenersLoopbackOnly;
+      hostProcess.edgeWithNoSandbox === 0 && hostProcess.edgeWithNetworkSandboxArg > 0 && hostProcess.listenerOwnersAreEdgeDescendants && hostProcess.listenersLoopbackOnly;
     if (!report.raw.launch || !report.raw.cdp || !hostPass) process.exitCode = 1;
   } finally {
     if (rawContext) await rawContext.close().catch(() => {});
