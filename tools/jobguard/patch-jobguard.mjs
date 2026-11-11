@@ -5,7 +5,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 
-const EXPECTED_BROWSER_HOST_BLOB='a1c8522365f4e02d9ef83a6f6700ebe93acba2f6';
+const EXPECTED_BROWSER_HOST_BLOB='da7630aa3cc30bd426768f15eccacdb1b5e002c1';
 const EXPECTED_CORE_BLOB='f99808d98735ff5a4894bd33baccb2f743fef2b9';
 const gitBlob=bytes=>createHash('sha1').update(Buffer.from('blob '+bytes.length+'\0')).update(bytes).digest('hex');
 
