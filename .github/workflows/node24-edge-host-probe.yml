@@ -37,6 +37,10 @@ jobs:
           if($LASTEXITCODE -ne 0) { throw 'Pinned source checkout failed' }
           $actual=(git -C upstream rev-parse HEAD).Trim()
           if($actual -ne '912873e2556d16a088d81dcbc6f7c0060614dd58') { throw 'Upstream source identity mismatch' }
+          node tools/patch_candidate_browser_host.mjs upstream/browser-host.mjs
+          if($LASTEXITCODE -ne 0) { throw 'Exact candidate sandbox patch failed' }
+          node --check upstream/browser-host.mjs
+          if($LASTEXITCODE -ne 0) { throw 'Patched browser-host syntax failed' }
           node --version
           if((node --version).Trim() -ne 'v24.17.0') { throw 'Candidate Node version mismatch' }
           $lock=Get-Content -LiteralPath 'upstream/desktop/runtime-api-template/package-lock.json' -Raw
