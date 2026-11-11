@@ -183,7 +183,7 @@ async function instrumentRuntime() {
     [
       "  } catch (error) {\n    try { await context?.close(); } catch {}",
       "  } catch (error) {\n    console.error('PROBE_STAGE:host_catch:' + String(error?.code || error?.name || 'Error'));\n    try { await context?.close(); } catch {}"
-    ]
+    ],
     [
       "    context.on('close', () => processImpl.exit(focusFailed ? 1 : 0));",
       "    context.on('close', () => { try { logger.error('PROBE_STAGE:context_close_event at=' + Date.now() + ' pid=' + processImpl.pid); } catch {} processImpl.exit(focusFailed ? 1 : 0); });"
@@ -213,12 +213,12 @@ async function instrumentRuntime() {
   const launcherGotoAfter = "    if (page.url() === 'about:blank') { console.error('LAUNCHER_PROBE:before_home_goto at=' + Date.now() + ' url=' + String(this.homeUrl)); await abortable(page.goto(this.homeUrl, { waitUntil: 'domcontentloaded', timeout: 25_000 }), signal); console.error('LAUNCHER_PROBE:after_home_goto at=' + Date.now()); await abortable(page.evaluate(installPreparePause, { label:PREPARE_PAGE_NAME, token, claimInitial:true }), signal); }";
   if (launcher.split(launcherGotoBefore).length !== 2) throw new Error('BrowserLauncher navigation diagnostic anchor mismatch.');
   launcher = launcher.replace(launcherGotoBefore, launcherGotoAfter);
-  await fs.writeFile(launcherPath, launcher);
 
   const launcherBefore = "function allowedPage(url) { try { return url === 'about:blank' || new URL(url).origin === 'https://www.douyin.com'; } catch { return false; } }";
   const launcherAfter = "function allowedPage(url) { try { return url === 'about:blank' || url === process.env.DOUYIN_TEST_HOME_URL || new URL(url).origin === 'https://www.douyin.com'; } catch { return false; } }";
-  if (originalLauncher.split(launcherBefore).length !== 2) throw new Error('BrowserLauncher local fixture allow-list anchor mismatch.');
-  await fs.writeFile(launcherPath, originalLauncher.replace(launcherBefore, launcherAfter));
+  if (launcher.split(launcherBefore).length !== 2) throw new Error('BrowserLauncher local fixture allow-list anchor mismatch.');
+  launcher = launcher.replace(launcherBefore, launcherAfter);
+  await fs.writeFile(launcherPath, launcher);
 
   const originalWorker = await fs.readFile(apiWorkerPath, 'utf8');
   let worker = originalWorker;
