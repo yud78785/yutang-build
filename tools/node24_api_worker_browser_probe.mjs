@@ -146,7 +146,7 @@ function inspectOwnership(processes, hostPid, backendPid, profile, listeners) {
     })
   };
 }
-async function tail(file, maximum = 6000) {
+async function tail(file, maximum = 20000) {
   try { return redact((await fs.readFile(file, 'utf8')).slice(-maximum)); } catch { return ''; }
 }
 async function killTree(pid) {
@@ -184,6 +184,18 @@ async function instrumentRuntime() {
       "  } catch (error) {\n    try { await context?.close(); } catch {}",
       "  } catch (error) {\n    console.error('PROBE_STAGE:host_catch:' + String(error?.code || error?.name || 'Error'));\n    try { await context?.close(); } catch {}"
     ]
+    [
+      "    context.on('close', () => processImpl.exit(focusFailed ? 1 : 0));",
+      "    context.on('close', () => { try { logger.error('PROBE_STAGE:context_close_event at=' + Date.now() + ' pid=' + processImpl.pid); } catch {} processImpl.exit(focusFailed ? 1 : 0); });"
+    ],
+    [
+      "    for (const signal of ['SIGINT', 'SIGTERM']) processImpl.on(signal, () => context.close().finally(() => processImpl.exit(0)));",
+      "    for (const signal of ['SIGINT', 'SIGTERM']) processImpl.on(signal, () => { try { logger.error('PROBE_STAGE:host_signal ' + signal + ' at=' + Date.now() + ' pid=' + processImpl.pid); } catch {} context.close().finally(() => processImpl.exit(0)); });"
+    ],
+    [
+      "    writeState(true, { browserVersion: versionOf(installation?.version) });",
+      "    writeState(true, { browserVersion: versionOf(installation?.version) });\\n    logger.error('PROBE_STAGE:ready_written at=' + Date.now() + ' pid=' + processImpl.pid);"
+    ],
   ];
   for (const [before, after] of hostPatches) {
     if (host.split(before).length !== 2) throw new Error('Browser-host instrumentation anchor mismatch.');
@@ -192,6 +204,17 @@ async function instrumentRuntime() {
   await fs.writeFile(hostPath, host);
 
   const originalLauncher = await fs.readFile(launcherPath, 'utf8');
+  let launcher = originalLauncher;
+  const launcherOpenBefore = "    const browser = await this.getBrowser(signal); cancelled(signal);";
+  const launcherOpenAfter = "    console.error('LAUNCHER_PROBE:before_get_browser at=' + Date.now());\\n    const browser = await this.getBrowser(signal); cancelled(signal);\\n    console.error('LAUNCHER_PROBE:after_get_browser at=' + Date.now());";
+  if (launcher.split(launcherOpenBefore).length !== 2) throw new Error('BrowserLauncher getBrowser diagnostic anchor mismatch.');
+  launcher = launcher.replace(launcherOpenBefore, launcherOpenAfter);
+  const launcherGotoBefore = "    if (page.url() === 'about:blank') { await abortable(page.goto(this.homeUrl, { waitUntil: 'domcontentloaded', timeout: 25_000 }), signal); await abortable(page.evaluate(installPreparePause, { label:PREPARE_PAGE_NAME, token, claimInitial:true }), signal); }";
+  const launcherGotoAfter = "    if (page.url() === 'about:blank') { console.error('LAUNCHER_PROBE:before_home_goto at=' + Date.now() + ' url=' + String(this.homeUrl)); await abortable(page.goto(this.homeUrl, { waitUntil: 'domcontentloaded', timeout: 25_000 }), signal); console.error('LAUNCHER_PROBE:after_home_goto at=' + Date.now()); await abortable(page.evaluate(installPreparePause, { label:PREPARE_PAGE_NAME, token, claimInitial:true }), signal); }";
+  if (launcher.split(launcherGotoBefore).length !== 2) throw new Error('BrowserLauncher navigation diagnostic anchor mismatch.');
+  launcher = launcher.replace(launcherGotoBefore, launcherGotoAfter);
+  await fs.writeFile(launcherPath, launcher);
+
   const launcherBefore = "function allowedPage(url) { try { return url === 'about:blank' || new URL(url).origin === 'https://www.douyin.com'; } catch { return false; } }";
   const launcherAfter = "function allowedPage(url) { try { return url === 'about:blank' || url === process.env.DOUYIN_TEST_HOME_URL || new URL(url).origin === 'https://www.douyin.com'; } catch { return false; } }";
   if (originalLauncher.split(launcherBefore).length !== 2) throw new Error('BrowserLauncher local fixture allow-list anchor mismatch.');
@@ -219,6 +242,18 @@ async function instrumentRuntime() {
   const launcherReplacement = "        this.browserLauncher ??= new BrowserLauncher({ homeUrl: process.env.DOUYIN_TEST_HOME_URL || undefined,";
   if (core.split(launcherAnchor).length !== 2) throw new Error('BrowserLauncher diagnostic home URL anchor mismatch.');
   core = core.replace(launcherAnchor, launcherReplacement);
+  const endpointLockBefore = "async function endpoint(signal) {\n  const release = await lock('launch', signal);";
+  const endpointLockAfter = "async function endpoint(signal) {\n  console.error('CORE_PROBE:endpoint_lock_wait at=' + Date.now());\n  const release = await lock('launch', signal);\n  console.error('CORE_PROBE:endpoint_lock_acquired at=' + Date.now());";
+  if (core.split(endpointLockBefore).length !== 2) throw new Error('Endpoint lock diagnostic anchor mismatch.');
+  core = core.replace(endpointLockBefore, endpointLockAfter);
+  const endpointDeadlineBefore = "    const deadline = Date.now() + 25_000;";
+  const endpointDeadlineAfter = "    const deadline = Date.now() + 25_000;\\n    console.error('CORE_PROBE:endpoint_wait_start at=' + Date.now() + ' hostPid=' + String(hostPid));";
+  if (core.split(endpointDeadlineBefore).length !== 2) throw new Error('Endpoint deadline diagnostic anchor mismatch.');
+  core = core.replace(endpointDeadlineBefore, endpointDeadlineAfter);
+  const endpointFailedBefore = "      if (readiness === 'failed') throw new Error('专用浏览器启动失败；请正常关闭仍使用 cli-profile 的旧专用窗口后重试。');";
+  const endpointFailedAfter = "      if (readiness === 'failed') { console.error('CORE_PROBE:endpoint_failed at=' + Date.now() + ' hostPid=' + String(hostPid) + ' state=' + JSON.stringify(state)); throw new Error('专用浏览器启动失败；请正常关闭仍使用 cli-profile 的旧专用窗口后重试。'); }";
+  if (core.split(endpointFailedBefore).length !== 2) throw new Error('Endpoint failure diagnostic anchor mismatch.');
+  core = core.replace(endpointFailedBefore, endpointFailedAfter);
   const beforeSpawn = "        const child = spawn(resolveNodeExecutable(), [";
   const afterSpawn = [
     "        console.error('CORE_PROBE:api_worker_env ' + JSON.stringify({envKeyNames:Object.keys(process.env).sort(),hasNodeChannelFd:Object.hasOwn(process.env,'NODE_CHANNEL_FD'),hasNodeChannelSerializationMode:Object.hasOwn(process.env,'NODE_CHANNEL_SERIALIZATION_MODE'),hasNodeUniqueId:Object.hasOwn(process.env,'NODE_UNIQUE_ID'),processConnected:process.connected===true,hasProcessSend:typeof process.send==='function',hasNodeOptions:Boolean(process.env.NODE_OPTIONS),hasNodePath:Boolean(process.env.NODE_PATH),hasElectronRunAsNode:Boolean(process.env.ELECTRON_RUN_AS_NODE),cwdName:path.basename(process.cwd()),nodeVersion:process.versions.node}));",
@@ -371,6 +406,7 @@ async function main() {
     if (!bootstrapResponse.ok || typeof bootstrap.token !== 'string' || bootstrap.token.length < 10) throw new Error('API bootstrap did not provide a local session token.');
 
     openAbort = new AbortController();
+    const openStartedAt = Date.now();
     openPromise = fetch(backend.origin + '/api/browser/open', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-session-token': bootstrap.token },
@@ -378,7 +414,8 @@ async function main() {
       signal: openAbort.signal
     }).then(async response => ({
       status: response.status,
-      body: redact(await response.text())
+      body: redact(await response.text()),
+      durationMs: Date.now() - openStartedAt
     })).catch(error => ({ status: 'ABORTED_OR_FAILED', body: redact(error?.message || error) }));
 
     const deadline = Date.now() + 35000;
@@ -393,7 +430,8 @@ async function main() {
       profileMatches: state.profile === profile,
       startedAtPresent: Number.isFinite(state.startedAt),
       failureCode: String(state.launchFailure?.code || ''),
-      failureMessage: redact(state.launchFailure?.message || '')
+      failureMessage: redact(state.launchFailure?.message || ''),
+      failureDetails: redact(state.launchFailure?.details || '')
     } : null;
     hostPid = Number.isSafeInteger(state?.pid) ? state.pid : null;
     report.browserHostLogTail = await tail(logFile);
@@ -417,6 +455,7 @@ async function main() {
       if (settled) {
         report.browserOpenStatus = settled.status;
         report.browserOpenBody = settled.body;
+        report.browserOpenDurationMs = settled.durationMs;
         try {
           const body = JSON.parse(settled.body);
           report.browserOpenResult = { opened: body.opened === true, mode: body.mode || null, reused: body.reused === true, paused: body.paused === true, watchPreserved: body.watchPreserved === true };
