@@ -494,7 +494,7 @@ async function main() {
           processes = Array.isArray(snapshot.processes) ? snapshot.processes : snapshot.processes ? [snapshot.processes] : [];
         }
         const netstat = execFileSync('netstat.exe', ['-ano', '-p', 'tcp'], { encoding: 'utf8', windowsHide: true, timeout: 10000 });
-        listeners = netstat.split(/\\r?\\n/).flatMap(line => { const match = /^\\s*TCP\\s+(\\S+):9227\\s+\\S+\\s+LISTENING\\s+(\\d+)\\s*$/i.exec(line); return match ? [{ LocalAddress: match[1], OwningProcess: Number(match[2]) }] : []; });
+        listeners = netstat.split(/\r?\n/).flatMap(line => { const match = /^\s*TCP\s+(\S+):9227\s+\S+\s+LISTENING\s+(\d+)\s*$/i.exec(line); return match ? [{ LocalAddress: match[1], OwningProcess: Number(match[2]) }] : []; });
         listenerSnapshotVerified = true;
       } catch {}
       const hostStillAlive = processes.some(item => Number(item.ProcessId) === Number(hostPid));
