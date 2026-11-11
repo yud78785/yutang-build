@@ -131,6 +131,110 @@ const ps = script => {
   const out=execFileSync('powershell.exe',['-NoProfile','-NonInteractive','-Command',script],{encoding:'utf8',timeout:25000,maxBuffer:8*1024*1024});
   const json=out.trim();return json?JSON.parse(json):[];
 };
+const asRows = value => Array.isArray(value) ? value : value ? [value] : [];
+const isExpectedFirewallBlock = (status, body) => status === 500 &&
+  /ERR_NETWORK_ACCESS_DENIED/i.test(String(body || '')) &&
+  /douyin\.com/i.test(String(body || ''));
+
+async function requestBrowserOpen(origin, token, redactPaths) {
+  try {
+    const response = await fetch(origin + '/api/browser/open', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-session-token': token },
+      body: '{}',
+      signal: AbortSignal.timeout(49000)
+    });
+    const body = await response.text();
+    return { status: response.status, body: response.ok ? null : safeText(body, redactPaths) };
+  } catch (error) {
+    return { status: error.name === 'TimeoutError' ? 'HTTP_TIMEOUT' : 'HTTP_' + error.name,
+      body: safeText(error.message, redactPaths) };
+  }
+}
+
+async function closeEdgeViaCdp(port) {
+  assert.equal(typeof WebSocket, 'function', 'Node runtime must provide WebSocket for graceful CDP close');
+  const response = await fetch('http://127.0.0.1:' + port + '/json/version', { signal: AbortSignal.timeout(5000) });
+  assert.equal(response.status, 200, 'CDP version endpoint must respond before close');
+  const info = await response.json();
+  const socketUrl = new URL(info.webSocketDebuggerUrl);
+  assert.equal(socketUrl.hostname, '127.0.0.1', 'CDP WebSocket must be loopback-only');
+  assert.equal(socketUrl.port, String(port), 'CDP WebSocket port mismatch');
+  const socket = new WebSocket(info.webSocketDebuggerUrl);
+  await Promise.race([
+    new Promise((resolve, reject) => {
+      socket.addEventListener('open', resolve, { once: true });
+      socket.addEventListener('error', () => reject(new Error('CDP WebSocket connection failed')), { once: true });
+    }),
+    delay(5000).then(() => { throw new Error('CDP WebSocket open timeout'); })
+  ]);
+  const closed = new Promise(resolve => socket.addEventListener('close', resolve, { once: true }));
+  socket.send(JSON.stringify({ id: 1, method: 'Browser.close' }));
+  await Promise.race([
+    closed,
+    delay(10000).then(() => { try { socket.close(); } catch {} throw new Error('Edge did not close after CDP Browser.close'); })
+  ]);
+  return { closed: true, cdpHost: socketUrl.hostname, cdpPort: Number(socketUrl.port) };
+}
+
+function ownedProfileProcesses(profile, controlDir) {
+  const value = ps("Get-CimInstance Win32_Process -Filter \"Name = 'msedge.exe' OR Name = 'node.exe'\" | Select-Object ProcessId,ParentProcessId,Name,CommandLine,ExecutablePath | ConvertTo-Json -Compress -Depth 4");
+  const p = profile.toLowerCase(), c = controlDir.toLowerCase();
+  return asRows(value).filter(item => {
+    const command = String(item.CommandLine || '').toLowerCase();
+    return command.includes(p) || command.includes(c);
+  });
+}
+
+function loopbackListeners(port) {
+  return asRows(ps('Get-NetTCPConnection -LocalPort ' + port + ' -State Listen -ErrorAction SilentlyContinue | Select-Object OwningProcess,LocalAddress | ConvertTo-Json -Compress -Depth 3'));
+}
+
+async function waitForBrowserGone(hostPid, profile, controlDir, port) {
+  return until(async () => {
+    const owned = ownedProfileProcesses(profile, controlDir);
+    const listeners = loopbackListeners(port);
+    if (!owned.length && !listeners.length) return { clean: true, hostPid, edgeAndHostProcesses: 0, listeners: 0 };
+    return null;
+  }, 15000, 'browser-host and Edge process cleanup');
+}
+
+async function waitForNewBrowserState(control, previousPid, previousStartedAt, profile) {
+  return until(async () => {
+    const state = await readJSON(control);
+    if (state.launchFailure) throw new Error('Restarted browser host reported ' + String(state.launchFailure.code || 'failure'));
+    if (state.ready === true && state.profile === profile && state.port === PORT &&
+        Number.isSafeInteger(state.pid) && state.pid > 0 &&
+        state.pid !== previousPid && Number(state.startedAt) > Number(previousStartedAt)) return state;
+    return null;
+  }, 25000, 'new browser-host PID and ready state after restart');
+}
+
+async function inspectReadyBrowser(state, backendPid, profile, controlDir) {
+  assert.equal(path.resolve(state.profile).toLowerCase(), path.resolve(profile).toLowerCase(), 'Dedicated browser profile not isolated');
+  assert.equal(state.port, PORT);
+  assert.ok(Number.isSafeInteger(state.pid) && state.pid > 0);
+  const version = await (await fetch('http://127.0.0.1:' + PORT + '/json/version', { signal: AbortSignal.timeout(5000) })).json();
+  assert.match(String(version.Browser), /(?:Edg|Chrome)/);
+  const processes = asRows(ps("Get-CimInstance Win32_Process -Filter \"Name = 'msedge.exe' OR Name = 'node.exe'\" | Select-Object ProcessId,ParentProcessId,Name,CommandLine | ConvertTo-Json -Compress -Depth 4"));
+  const listeners = loopbackListeners(PORT);
+  const hostSummary = summarizeHostProcesses(processes, state.pid, backendPid, profile, controlDir);
+  assert.equal(hostSummary.hostFound, true, 'Browser host PID is not present in the process snapshot');
+  assert.equal(hostSummary.hostIsNode, true, 'Browser host is not the expected Node process');
+  assert.equal(hostSummary.hostCommandHasBrowserHost, true, 'Browser host command line does not identify browser-host.mjs');
+  assert.equal(hostSummary.hostCommandProfileMatches, true, 'Browser host profile argument does not match the isolated profile');
+  assert.equal(hostSummary.hostCommandControlMatches, true, 'Browser host control argument does not match the isolated control directory');
+  assert.equal(hostSummary.hostParentIsBackend, true, 'Browser host is not a child of the expected API backend');
+  assert.ok(hostSummary.edgeWithPortArg > 0, 'Edge command line does not include the expected CDP port');
+  assert.ok(hostSummary.edgeWithLoopbackArg > 0, 'Edge command line does not include the loopback-only CDP address');
+  const ownership = verifyProcessSnapshot({
+    processes, hostPid: state.pid, profile,
+    listenerPids: listeners.map(item => Number(item.OwningProcess)),
+    portAddresses: listeners.map(item => item.LocalAddress)
+  });
+  assert.equal(hostSummary.edgeWithNoSandbox, 0, 'A sandbox-disabling Edge argument was detected');
+  return { state, browserVersion: version.Browser, hostSummary, ownership };
+}
 async function run(exeFile) {
   if (process.platform!=='win32' || process.env.GITHUB_ACTIONS!=='true' || process.env.YUTANG_EDGE_FIREWALL_CONFIRMED!=='yes')
     throw new Error('Refusing candidate launch outside pre-guarded ephemeral Windows GitHub runner');
