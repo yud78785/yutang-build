@@ -192,7 +192,16 @@ async function run(exeFile) {
       throw new Error('Browser host reported '+(report.hostFailure.code||'unknown failure'));
     }
     const state=outcome.state;
-    assert.equal(openStatus,200,'Browser open API must return HTTP 200; received '+String(openStatus));
+    const expectedFirewallNavigationBlock = openStatus===500 &&
+      /ERR_NETWORK_ACCESS_DENIED/i.test(String(openBody||'')) &&
+      /douyin\.com/i.test(String(openBody||''));
+    report.douyinNavigationBlockedByFirewall=expectedFirewallNavigationBlock;
+    report.videoPlaybackTested=false;
+    if(expectedFirewallNavigationBlock) {
+      console.log('EXPECTED_FIREWALL_BLOCK: browser host is ready; Douyin navigation is intentionally blocked in this no-network test.');
+    } else {
+      assert.equal(openStatus,200,'Browser open API must return HTTP 200 or the expected outbound-firewall denial; received '+String(openStatus));
+    }
     assert.equal(path.resolve(state.profile).toLowerCase(),path.resolve(profile).toLowerCase(),'Dedicated browser profile not isolated');
     assert.equal(state.port,PORT);
     assert.ok(Number.isSafeInteger(state.pid)&&state.pid>0);
@@ -212,7 +221,7 @@ async function run(exeFile) {
     assert.ok(hostSummary.edgeWithPortArg>0,'Edge command line does not include the expected CDP port');
     assert.ok(hostSummary.edgeWithLoopbackArg>0,'Edge command line does not include the loopback-only CDP address');
     const ownership=verifyProcessSnapshot({processes:items,hostPid:state.pid,profile,listenerPids:sockets.map(p=>Number(p.OwningProcess)),portAddresses:sockets.map(p=>p.LocalAddress)});
-    Object.assign(report,ownership,{hostPid:state.pid,backendPid:ready.backendPid,hostSummary,browserReady:true,cdpResponded:true,notProven:['Effective renderer sandbox integrity','Douyin video playback','Model reasoning','Long-term autonomy','General user PC safety']});
+    Object.assign(report,ownership,{hostPid:state.pid,backendPid:ready.backendPid,hostSummary,browserReady:true,cdpResponded:true,notProven:['Effective renderer sandbox integrity','Douyin video playback (outbound blocked by design)','Model reasoning','Long-term autonomy','General user PC safety']});
     console.log('PASS_WINDOWS_PACKAGED_EXE_TO_EDGE_OWNERSHIP '+JSON.stringify(report));
     return report;
   } catch (error) {
