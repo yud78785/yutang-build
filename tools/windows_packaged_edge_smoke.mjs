@@ -187,7 +187,10 @@ function ownedProfileProcesses(profile, controlDir) {
 }
 
 function loopbackListeners(port) {
-  return asRows(ps('Get-NetTCPConnection -LocalPort ' + port + ' -State Listen -ErrorAction SilentlyContinue | Select-Object OwningProcess,LocalAddress | ConvertTo-Json -Compress -Depth 3'));
+  const script = '$items=@(); try { $items=@(Get-NetTCPConnection -LocalPort ' + port +
+    ' -State Listen -ErrorAction Stop) } catch { $items=@() }; if($items.Count -gt 0) {' +
+    '$items | Select-Object OwningProcess,LocalAddress | ConvertTo-Json -Compress -Depth 3 } else { "[]" }';
+  return asRows(ps(script));
 }
 
 async function waitForBrowserGone(hostPid, profile, controlDir, port) {
