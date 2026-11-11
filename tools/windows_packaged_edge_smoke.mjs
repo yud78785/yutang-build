@@ -13,7 +13,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 export const EXPECTED_EXE = '84321ec6c827de90e95d0d03b76a693444f8ea8c22c9c71c709e2e496bde753a';
 const FILE = 'Dafeiyu-Douyin-API-1.4.6-win-x64.exe';
 const PORT = 9227;
-const allowedEnv = /^(?:path|systemroot|windir|comspec|pathext|programfiles|programfiles\(x86\)|programdata|username|userdomain|public|allusersprofile|programw6432|os|processor_architecture|number_of_processors)$/i;
+const allowedEnv = /^(?:path|systemroot|windir|comspec|pathext|programfiles|programfiles\(x86\)|programdata|username|userdomain|public|allusersprofile|programw6432|os|processor_architecture|number_of_processors|homedrive|homepath|userprofile|appdata|localappdata|temp|tmp|systemdrive|home)$/i;
 
 export function hasHostAncestor(pid, hostPid, procs) {
   if (!Number.isSafeInteger(pid) || !Number.isSafeInteger(hostPid) || pid < 1 || hostPid < 1) return false;
@@ -137,21 +137,25 @@ async function run(exeFile) {
   assert.equal(path.basename(exeFile),FILE);
   assert.equal(await sha256(exeFile),EXPECTED_EXE,'Candidate EXE does not match immutable build');
   const base=await fs.mkdtemp(path.join(process.env.RUNNER_TEMP || tmpdir(),'yutang-edge-ci-'));
-  const home=path.join(base,'home'),userData=path.join(base,'user-data'),memory=path.join(base,'memory');
+  const home=process.env.USERPROFILE || process.env.HOME;
+  if(typeof home!=='string'||!path.isAbsolute(home))throw new Error('Native Windows USERPROFILE is unavailable; refusing to launch candidate.');
+  const common=path.join(home,'.dsh','douyin-browser');
+  if(await fs.access(common).then(()=>true,()=>false))throw new Error('Pre-existing browser state found on disposable runner; refusing to overwrite it.');
+  const userData=path.join(base,'user-data'),memory=path.join(base,'memory');
   const locationFile=path.join(base,'runtime-location.json');
   const paths={stateDir:path.join(base,'state'),memoryDir:memory,memoryDbPath:path.join(memory,'shared.sqlite'),mediaEnvFile:path.join(base,'media','.env'),mediaSettingsFile:path.join(base,'media','settings.local.json'),mediaRuntimeRoot:path.join(base,'media'),mediaModelsDir:path.join(base,'media','models')};
-  for(const d of [home,userData,memory,paths.stateDir,paths.mediaRuntimeRoot,path.join(base,'temp'),path.join(base,'app-data'),path.join(base,'local-app-data')])await fs.mkdir(d,{recursive:true});
+  for(const d of [userData,memory,paths.stateDir,paths.mediaRuntimeRoot])await fs.mkdir(d,{recursive:true});
   await fs.writeFile(locationFile,JSON.stringify({version:1,...paths}));
   await fs.writeFile(paths.mediaEnvFile,'');
   await fs.writeFile(paths.mediaSettingsFile,JSON.stringify({enabled:false,backend:'local-whisper'}));
   const env=Object.fromEntries(Object.entries(process.env).filter(([key])=>allowedEnv.test(key)));
-  const homeDrive=path.parse(home).root.replace(/[\\/]+$/,'');
-  const homePath=home.slice(homeDrive.length);
-  Object.assign(env,{HOME:home,USERPROFILE:home,HOMEDRIVE:homeDrive,HOMEPATH:homePath,SystemDrive:homeDrive,APPDATA:path.join(base,'app-data'),LOCALAPPDATA:path.join(base,'local-app-data'),TEMP:path.join(base,'temp'),TMP:path.join(base,'temp'),DSH_HOME:path.join(home,'.dsh'),DOUYIN_DESKTOP_USER_DATA:userData,DOUYIN_RUNTIME_LOCATION_FILE:locationFile,DOUYIN_DESKTOP_SMOKE:'1'});
-  // No GITHUB_TOKEN, CI tokens, personal credentials, API keys or existing profile paths are passed to the EXE.
+  Object.assign(env,{DSH_HOME:path.join(home,'.dsh'),DOUYIN_DESKTOP_USER_DATA:userData,DOUYIN_RUNTIME_LOCATION_FILE:locationFile,DOUYIN_DESKTOP_SMOKE:'1'});
+  // Keep native Windows user-profile paths. Only YuTang state, app userData and memory are redirected to disposable paths.
+  // No GITHUB_TOKEN, CI tokens, personal credentials or model API keys are passed to the EXE.
   const child=spawn(exeFile,['--remote-debugging-port=0','--remote-debugging-address=127.0.0.1'],{env,windowsHide:true,stdio:'ignore',shell:false});
-  const control=path.join(home,'.dsh','douyin-browser','control','browser.json');
-  const profile=path.join(home,'.dsh','douyin-browser','cli-profile');
+  const controlDir=path.join(common,'control');
+  const control=path.join(controlDir,'browser.json');
+  const profile=path.join(common,'cli-profile');
   const envKeys=['HOMEDRIVE','HOMEPATH','USERNAME','USERDOMAIN','SystemDrive','ProgramFiles','ProgramFiles(x86)','ProgramData','SystemRoot','TEMP','TMP'];
   const report={type:'WINDOWS_EDGE_LAUNCH_IN_EPHEMERAL_CI_ONLY',candidateSha256:EXPECTED_EXE,realAccount:false,modelKey:false,externalEdgeNetworkBlocked:true,environmentProfile:'isolated-safe-expanded',safeEnvPresence:Object.fromEntries(envKeys.map(key=>[key,Boolean(env[key])]))};
   try {
@@ -246,9 +250,39 @@ async function run(exeFile) {
     }));
     throw error;
   } finally {
-    // The GitHub-hosted VM is discarded. Never terminate any unrelated Edge or user browser process.
-    try {child.kill();}catch{}
-    // Keep test files for only this disposable VM; no upload of profiles, tokens, or logs.
+    // The GitHub-hosted VM is disposable. Only terminate processes whose command line contains this unique profile.
+    try {
+      const state=await readJSON(control);
+      if(Number.isSafeInteger(state?.pid)&&state.pid>0) {
+        try { execFileSync('taskkill.exe',['/PID',String(state.pid),'/T','/F'],{stdio:'ignore',windowsHide:true,timeout:10000}); } catch {}
+      }
+      try { execFileSync('taskkill.exe',['/PID',String(child.pid),'/T','/F'],{stdio:'ignore',windowsHide:true,timeout:10000}); } catch {}
+      await delay(1000);
+      let rows=[];
+      try { const value=ps("Get-CimInstance Win32_Process -Filter \"Name = 'msedge.exe' OR Name = 'node.exe'\" | Select-Object ProcessId,Name,CommandLine | ConvertTo-Json -Compress -Depth 3"); rows=Array.isArray(value)?value:(value?[value]:[]); }
+      catch { process.exitCode=1; }
+      let survivors=rows.filter(p=>String(p.CommandLine||'').toLowerCase().includes(profile.toLowerCase())||String(p.CommandLine||'').toLowerCase().includes(controlDir.toLowerCase()));
+      for(const item of survivors) { try { execFileSync('taskkill.exe',['/PID',String(item.ProcessId),'/T','/F'],{stdio:'ignore',windowsHide:true,timeout:10000}); } catch {} }
+      if(survivors.length) {
+        await delay(1000);
+        try {
+          const value=ps("Get-CimInstance Win32_Process -Filter \"Name = 'msedge.exe' OR Name = 'node.exe'\" | Select-Object ProcessId,Name,CommandLine | ConvertTo-Json -Compress -Depth 3");
+          const after=Array.isArray(value)?value:(value?[value]:[]);
+          survivors=after.filter(p=>String(p.CommandLine||'').toLowerCase().includes(profile.toLowerCase())||String(p.CommandLine||'').toLowerCase().includes(controlDir.toLowerCase()));
+        } catch { survivors=[{ProcessId:'unknown',Name:'unverified'}]; }
+      }
+      if(survivors.length) {
+        console.error('CANDIDATE_PROCESS_CLEANUP_FAILED '+JSON.stringify(survivors.map(p=>({pid:p.ProcessId,name:p.Name}))));
+        process.exitCode=1;
+      } else {
+        await fs.rm(common,{recursive:true,force:true});
+        console.log('CANDIDATE_PROCESS_CLEANUP_VERIFIED: no host or Edge process remains');
+      }
+    } catch(error) {
+      console.error('CANDIDATE_PROCESS_CLEANUP_UNVERIFIED '+safeText(error.message,[base,home,userData,memory,profile,controlDir]));
+      process.exitCode=1;
+    }
+    await fs.rm(base,{recursive:true,force:true}).catch(()=>{});
   }
 }
 
