@@ -396,7 +396,8 @@ async function run(exeFile) {
   try { await fs.access(edgeExe); } catch { throw new Error('Verified Microsoft Edge executable path is required'); }
   const unrelatedProfile=path.join(base,'unrelated-edge-profile');
   let unrelatedEdgeChild=null;
-  const preExistingEdge=asRows(ps("Get-CimInstance Win32_Process -Filter \"Name = 'msedge.exe'\" | Select-Object ProcessId,Name,CommandLine | ConvertTo-Json -Compress -Depth 3"));
+  const preExistingEdgeValue=ps("Get-CimInstance Win32_Process -Filter \"Name = 'msedge.exe'\" | Select-Object ProcessId,Name,CommandLine | ConvertTo-Json -Compress -Depth 3");
+  const preExistingEdge=Array.isArray(preExistingEdgeValue)?preExistingEdgeValue:(preExistingEdgeValue?[preExistingEdgeValue]:[]);
   assert.equal(preExistingEdge.length,0,'Cold-start test requires zero pre-existing Edge processes before candidate launch.');
   const child=spawn(exeFile,['--remote-debugging-port=0','--remote-debugging-address=127.0.0.1'],{env,windowsHide:true,stdio:'ignore',shell:false});
   const candidateExit={error:null,exit:null};
