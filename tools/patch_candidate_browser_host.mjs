@@ -5,9 +5,9 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const ORIGINAL_BLOB = 'a1c8522365f4e02d9ef83a6f6700ebe93acba2f6';
-const EXPECTED_PATCHED_SHA256 = '29e77cca0cb3c0bdf3750de3727ffde9e2e761a70d90f992eb24cd7bcbbb1a9d';
+const EXPECTED_PATCHED_SHA256 = 'a6114bb6e84e95090023ce0be9a4fc22c621d9f7811f73968d99de0d59a3a024';
 const BEFORE = "channel: 'msedge', headless: false, viewport: null, ignoreDefaultArgs: ['--mute-audio'],";
-const AFTER = "channel: 'msedge', headless: false, viewport: null, chromiumSandbox: true, ignoreDefaultArgs: ['--mute-audio'],";
+const AFTER = "channel: 'msedge', headless: false, viewport: null, chromiumSandbox: true, timeout: 20_000, ignoreDefaultArgs: ['--mute-audio'],";
 const BEFORE_ARGS = "args: [`--remote-debugging-port=${port}`, '--remote-debugging-address=127.0.0.1', '--autoplay-policy=no-user-gesture-required'],";
 const AFTER_ARGS = "args: [`--remote-debugging-port=${port}`, '--remote-debugging-address=127.0.0.1', '--autoplay-policy=no-user-gesture-required', '--enable-features=NetworkServiceSandbox'],";
 function gitBlobSha(bytes) {
@@ -18,7 +18,7 @@ export function applyCandidateSandboxPatch(bytes) {
   if (gitBlobSha(original) !== ORIGINAL_BLOB) throw new Error('Pinned browser-host source blob mismatch; refusing patch.');
   const source = original.toString('utf8');
   if (source.split(BEFORE).length !== 2 || source.split(BEFORE_ARGS).length !== 2 ||
-      source.includes('chromiumSandbox: true') || source.includes('--enable-features=NetworkServiceSandbox')) {
+      source.includes('chromiumSandbox: true') || source.includes('timeout: 20_000') || source.includes('--enable-features=NetworkServiceSandbox')) {
     throw new Error('Expected one exact unpatched Edge launch block and argument list.');
   }
   const start = source.indexOf('chromiumImpl.launchPersistentContext(profile, {');
@@ -28,11 +28,11 @@ export function applyCandidateSandboxPatch(bytes) {
   if (argsLocation <= location || argsLocation > start + 800) throw new Error('Network Service sandbox argument is not in the dedicated Edge launch block.');
   const patched = source.replace(BEFORE, AFTER).replace(BEFORE_ARGS, AFTER_ARGS);
   const launch = patched.slice(start, start + 900);
-  if (!launch.includes('chromiumSandbox: true') || !launch.includes('--enable-features=NetworkServiceSandbox') ||
+  if (!launch.includes('chromiumSandbox: true') || !launch.includes('timeout: 20_000') || !launch.includes('--enable-features=NetworkServiceSandbox') ||
       launch.includes('--no-sandbox') || launch.includes('--disable-setuid-sandbox')) {
-    throw new Error('Renderer or Network Service sandbox patch did not pass the local guard.');
+    throw new Error('Sandbox or bounded Edge launch patch did not pass the local guard.');
   }
-  if (createHash('sha256').update(patched).digest('hex') !== EXPECTED_PATCHED_SHA256) throw new Error('Patched browser-host SHA256 differs from the verified renderer/network sandbox patch.');
+  if (createHash('sha256').update(patched).digest('hex') !== EXPECTED_PATCHED_SHA256) throw new Error('Patched browser-host SHA256 differs from the verified renderer/network sandbox and bounded startup patch.');
   if (patched.replace(AFTER_ARGS, BEFORE_ARGS).replace(AFTER, BEFORE) !== source) throw new Error('Patch changed more than the two verified launch options.');
   return patched;
 }

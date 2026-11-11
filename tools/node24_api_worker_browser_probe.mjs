@@ -19,7 +19,7 @@ const require = createRequire(path.join(runtime, 'probe-require.cjs'));
 const playwrightPackage = require('playwright-core/package.json');
 const { chromium } = require('playwright-core');
 assert.equal(playwrightPackage.version, '1.64.0-alpha-1790635538000', 'Pinned Playwright package required.');
-const EXPECTED_HOST_SHA256 = '29e77cca0cb3c0bdf3750de3727ffde9e2e761a70d90f992eb24cd7bcbbb1a9d';
+const EXPECTED_HOST_SHA256 = 'a6114bb6e84e95090023ce0be9a4fc22c621d9f7811f73968d99de0d59a3a024';
 const DIAGNOSTIC_LAUNCH_TIMEOUT_MS = 20_000;
 const hostPath = path.join(runtime, 'browser-host.mjs');
 const corePath = path.join(runtime, 'core.mjs');
@@ -166,7 +166,7 @@ async function instrumentRuntime() {
   const hostPatches = [
     [
       "    writeState(false);\n    try { installation = await probeInstallation(); } catch {}\n    context = await chromiumImpl.launchPersistentContext(profile, {",
-      "    console.error('PROBE_STAGE:host_env ' + JSON.stringify({hasNodeChannelFd:Object.hasOwn(process.env,'NODE_CHANNEL_FD'),hasNodeChannelSerializationMode:Object.hasOwn(process.env,'NODE_CHANNEL_SERIALIZATION_MODE'),hasNodeUniqueId:Object.hasOwn(process.env,'NODE_UNIQUE_ID'),processConnected:process.connected===true,hasProcessSend:typeof process.send==='function',hasNodeOptions:Boolean(process.env.NODE_OPTIONS),hasNodePath:Boolean(process.env.NODE_PATH),hasElectronRunAsNode:Boolean(process.env.ELECTRON_RUN_AS_NODE),parentPid:process.ppid}));\n    console.error('PROBE_STAGE:before_edge_probe');\n    writeState(false);\n    try { installation = await probeInstallation(); console.error('PROBE_STAGE:edge_probe_finished'); } catch (probeError) { console.error('PROBE_STAGE:edge_probe_failed:' + String(probeError?.name || 'Error')); }\n    console.error('PROBE_STAGE:before_launch_persistent_context timeoutMs=20000');\n    context = await chromiumImpl.launchPersistentContext(profile, { timeout: 20000,"
+      "    console.error('PROBE_STAGE:host_env ' + JSON.stringify({hasNodeChannelFd:Object.hasOwn(process.env,'NODE_CHANNEL_FD'),hasNodeChannelSerializationMode:Object.hasOwn(process.env,'NODE_CHANNEL_SERIALIZATION_MODE'),hasNodeUniqueId:Object.hasOwn(process.env,'NODE_UNIQUE_ID'),processConnected:process.connected===true,hasProcessSend:typeof process.send==='function',hasNodeOptions:Boolean(process.env.NODE_OPTIONS),hasNodePath:Boolean(process.env.NODE_PATH),hasElectronRunAsNode:Boolean(process.env.ELECTRON_RUN_AS_NODE),parentPid:process.ppid}));\n    console.error('PROBE_STAGE:before_edge_probe');\n    writeState(false);\n    try { installation = await probeInstallation(); console.error('PROBE_STAGE:edge_probe_finished'); } catch (probeError) { console.error('PROBE_STAGE:edge_probe_failed:' + String(probeError?.name || 'Error')); }\n    console.error('PROBE_STAGE:before_launch_persistent_context timeoutMs=20000');\n    context = await chromiumImpl.launchPersistentContext(profile, {"
     ],
     [
       "    const nativeFocus = await installNativeFocusReset(context, { onFailure:",
