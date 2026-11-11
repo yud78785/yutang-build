@@ -144,24 +144,40 @@ async function instrumentRuntime() {
   const originalCore = await fs.readFile(corePath, 'utf8');
   let core = originalCore.replace("import { spawn } from 'node:child_process';", "import { spawn, execFileSync } from 'node:child_process';");
   if (core === originalCore) throw new Error('Core child-process import anchor mismatch.');
-  const corePatches = [
-    [
-      "        const child = spawn(resolveNodeExecutable(), [",
-      "        console.error('CORE_PROBE:api_worker_env ' + JSON.stringify({hasNodeChannelFd:Object.hasOwn(process.env,'NODE_CHANNEL_FD'),hasNodeChannelSerializationMode:Object.hasOwn(process.env,'NODE_CHANNEL_SERIALIZATION_MODE'),hasNodeUniqueId:Object.hasOwn(process.env,'NODE_UNIQUE_ID'),processConnected:process.connected===true,hasProcessSend:typeof process.send==='function',hasNodeOptions:Boolean(process.env.NODE_OPTIONS),hasNodePath:Boolean(process.env.NODE_PATH),hasElectronRunAsNode:Boolean(process.env.ELECTRON_RUN_AS_NODE),cwdName:path.basename(process.cwd()),nodeVersion:process.versions.node}));\n        const directProfile = path.join(CONTROL, 'direct-edge-control-profile');\n        mkdirSync(directProfile, { recursive: true });\n        const edgeRoots = [process.env.LOCALAPPDATA, process.env.PROGRAMFILES, process.env['PROGRAMFILES(X86)'], process.env.ProgramW6432].filter(Boolean);\n        const edgeExecutable = edgeRoots.map(root => path.join(root, 'Microsoft', 'Edge', 'Application', 'msedge.exe')).find(file => { try { return statSync(file).isFile(); } catch { return false; } });\n        const directControl = { executableFound: Boolean(edgeExecutable), launched: false, cdp: false, browser: '', profileExistsAfter: false, leftoverEdgeCountAfterCleanup: null, port9340ListenerCountAfterCleanup: null };\n        if (edgeExecutable) {\n          const directEdge = spawn(edgeExecutable, ['--remote-debugging-port=9340', '--remote-debugging-address=127.0.0.1', '--user-data-dir=' + directProfile, '--no-first-run', '--no-default-browser-check', 'about:blank'], { env: process.env, detached: true, windowsHide: true, stdio: 'ignore' });\n          directEdge.unref();\n          directControl.launched = Number.isSafeInteger(directEdge.pid) && directEdge.pid > 0;\n          const directDeadline = Date.now() + 12000;\n          while (Date.now() < directDeadline) {\n            try { const response = await fetch('http://127.0.0.1:9340/json/version', { signal: AbortSignal.timeout(1000) }); if (response.ok) { const value = await response.json(); if (/Edg|Chrome/.test(String(value.Browser))) { directControl.cdp = true; directControl.browser = String(value.Browser).slice(0, 100); break; } } } catch {}\n            await delay(250);\n          }\n          try { execFileSync('taskkill.exe', ['/PID', String(directEdge.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true, timeout: 10000 }); } catch {}\n          await delay(700);\n          try { statSync(directProfile); directControl.profileExistsAfter = true; } catch {}\n          try {\n            const edgeCountText = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', 'Get-Process -Name msedge -ErrorAction SilentlyContinue | Measure-Object | Select-Object -ExpandProperty Count'], { encoding: 'utf8', windowsHide: true, timeout: 10000 }).trim();
-            directControl.edgeProcessCountAfterCleanup = Number(edgeCountText || 0);
-            const socketsText = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', 'Get-NetTCPConnection -LocalPort 9340 -State Listen -ErrorAction SilentlyContinue | Measure-Object | Select-Object -ExpandProperty Count'], { encoding: 'utf8', windowsHide: true, timeout: 10000 }).trim();
-            directControl.port9340ListenerCountAfterCleanup = Number(socketsText || 0);
-          } catch {}\n        }\n        console.error('CORE_PROBE:direct_edge_control ' + JSON.stringify(directControl));\n        console.error('CORE_PROBE:before_node_resolve');\n        const resolvedNode = resolveNodeExecutable();\n        console.error('CORE_PROBE:after_node_resolve');\n        const child = spawn(resolvedNode, ["
-    ],
-    [
-      "        hostPid = child.pid;\n        child.unref();",
-      "        hostPid = child.pid;\n        console.error('CORE_PROBE:after_host_spawn pid=' + String(hostPid));\n        child.unref();"
-    ]
-  ];
-  for (const [before, after] of corePatches) {
-    if (core.split(before).length !== 2) throw new Error('Core instrumentation anchor mismatch.');
-    core = core.replace(before, after);
-  }
+  const beforeSpawn = "        const child = spawn(resolveNodeExecutable(), [";
+  const afterSpawn = [
+    "        console.error('CORE_PROBE:api_worker_env ' + JSON.stringify({hasNodeChannelFd:Object.hasOwn(process.env,'NODE_CHANNEL_FD'),hasNodeChannelSerializationMode:Object.hasOwn(process.env,'NODE_CHANNEL_SERIALIZATION_MODE'),hasNodeUniqueId:Object.hasOwn(process.env,'NODE_UNIQUE_ID'),processConnected:process.connected===true,hasProcessSend:typeof process.send==='function',hasNodeOptions:Boolean(process.env.NODE_OPTIONS),hasNodePath:Boolean(process.env.NODE_PATH),hasElectronRunAsNode:Boolean(process.env.ELECTRON_RUN_AS_NODE),cwdName:path.basename(process.cwd()),nodeVersion:process.versions.node}));",
+    "        const directProfile = path.join(CONTROL, 'direct-edge-control-profile');",
+    "        mkdirSync(directProfile, { recursive: true });",
+    "        const edgeRoots = [process.env.LOCALAPPDATA, process.env.PROGRAMFILES, process.env['PROGRAMFILES(X86)'], process.env.ProgramW6432].filter(Boolean);",
+    "        const edgeExecutable = edgeRoots.map(root => path.join(root, 'Microsoft', 'Edge', 'Application', 'msedge.exe')).find(file => { try { return statSync(file).isFile(); } catch { return false; } });",
+    "        const directControl = { executableFound: Boolean(edgeExecutable), launched: false, cdp: false, browser: '', edgeProcessCountAfterCleanup: null, port9340ListenerCountAfterCleanup: null };",
+    "        if (edgeExecutable) {",
+    "          const directEdge = spawn(edgeExecutable, ['--remote-debugging-port=9340', '--remote-debugging-address=127.0.0.1', '--user-data-dir=' + directProfile, '--no-first-run', '--no-default-browser-check', 'about:blank'], { env: process.env, detached: true, windowsHide: true, stdio: 'ignore' });",
+    "          directEdge.unref();",
+    "          directControl.launched = Number.isSafeInteger(directEdge.pid) && directEdge.pid > 0;",
+    "          const directDeadline = Date.now() + 12000;",
+    "          while (Date.now() < directDeadline) {",
+    "            try { const response = await fetch('http://127.0.0.1:9340/json/version', { signal: AbortSignal.timeout(1000) }); if (response.ok) { const value = await response.json(); if (/Edg|Chrome/.test(String(value.Browser))) { directControl.cdp = true; directControl.browser = String(value.Browser).slice(0, 100); break; } } } catch {}",
+    "            await delay(250);",
+    "          }",
+    "          try { execFileSync('taskkill.exe', ['/PID', String(directEdge.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true, timeout: 10000 }); } catch {}",
+    "          await delay(700);",
+    "          try { directControl.edgeProcessCountAfterCleanup = Number(execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', 'Get-Process -Name msedge -ErrorAction SilentlyContinue | Measure-Object | Select-Object -ExpandProperty Count'], { encoding: 'utf8', windowsHide: true, timeout: 10000 }).trim() || 0); } catch {}",
+    "          try { directControl.port9340ListenerCountAfterCleanup = Number(execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', 'Get-NetTCPConnection -LocalPort 9340 -State Listen -ErrorAction SilentlyContinue | Measure-Object | Select-Object -ExpandProperty Count'], { encoding: 'utf8', windowsHide: true, timeout: 10000 }).trim() || 0); } catch {}",
+    "        }",
+    "        console.error('CORE_PROBE:direct_edge_control ' + JSON.stringify(directControl));",
+    "        console.error('CORE_PROBE:before_node_resolve');",
+    "        const resolvedNode = resolveNodeExecutable();",
+    "        console.error('CORE_PROBE:after_node_resolve');",
+    "        const child = spawn(resolvedNode, ["
+  ].join('\n');
+  if (core.split(beforeSpawn).length !== 2) throw new Error('Core spawn instrumentation anchor mismatch.');
+  core = core.replace(beforeSpawn, afterSpawn);
+  const beforePid = "        hostPid = child.pid;\n        child.unref();";
+  const afterPid = "        hostPid = child.pid;\n        console.error('CORE_PROBE:after_host_spawn pid=' + String(hostPid));\n        child.unref();";
+  if (core.split(beforePid).length !== 2) throw new Error('Core host PID instrumentation anchor mismatch.');
+  core = core.replace(beforePid, afterPid);
   await fs.writeFile(corePath, core);
 }
 function sanitizedEnvironment(base, paths) {
