@@ -1,6 +1,12 @@
 name: YuTang public Douyin video capture probe (NO LOGIN / NO MODEL / NOT RELEASE)
 
 on:
+  push:
+    branches:
+      - hardening/candidate-fresh-profile-bounded-launch-20261111
+    paths:
+      - .github/workflows/windows-public-douyin-video-probe.yml
+      - tools/windows_public_douyin_video_probe.mjs
   pull_request:
     paths:
       - .github/workflows/windows-public-douyin-video-probe.yml
