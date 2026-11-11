@@ -424,6 +424,7 @@ async function main() {
       paused: secondOpenBody.paused === true,
       hostReady: stateAfterRestart?.ready === true,
       hostPid: restartHostPid,
+      browserPid: restartOwnership?.edgeLaunchSummaries?.[0]?.pid || firstBrowserPid,
       reusedSameHost: restartHostPid === firstHostPid,
       cdp: Boolean(restartVersion),
       browserVersion: String(restartVersion?.Browser || '').slice(0, 100),
@@ -461,8 +462,11 @@ async function main() {
   } finally {
     if (openAbort && !openAbort.signal.aborted) openAbort.abort(new Error('Diagnostic cleanup.'));
     try { await backend.stop(); } catch (error) { report.backendStopError = redact(error?.message || error); }
+    const browserPidToClose = Number(report.backendRestart?.browserPid || report.firstBrowserPid || 0);
+    if (browserPidToClose > 0) await killTree(browserPidToClose);
+    report.dedicatedEdgeCloseIssued = browserPidToClose > 0;
     let cleanup = null;
-    for (let attempt = 0; attempt < 24; attempt++) {
+    for (let attempt = 0; attempt < 60; attempt++) {
       let processes = [], listeners = [], processSnapshotVerified = false, listenerSnapshotVerified = false;
       try {
         processes = powershellJson("Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'msedge.exe' -or $_.Name -eq 'node.exe' } | Select-Object ProcessId,ParentProcessId,Name,CommandLine | ConvertTo-Json -Compress -Depth 4");
@@ -473,13 +477,15 @@ async function main() {
         listenerSnapshotVerified = true;
       } catch {}
       const hostStillAlive = processes.some(item => Number(item.ProcessId) === Number(hostPid));
-      const profileEdges = processes.filter(item => /msedge\\.exe$/i.test(String(item.Name)) && String(item.CommandLine || '').toLowerCase().includes(profile.toLowerCase()));
-      cleanup = { processSnapshotVerified, listenerSnapshotVerified, hostProcessExited: hostPid ? !hostStillAlive : null, profileEdgeProcessCount: profileEdges.length, port9227ListenerCount: listeners.length };
-      if (processSnapshotVerified && listenerSnapshotVerified && !hostStillAlive && profileEdges.length === 0 && listeners.length === 0) break;
+      const edgeProcesses = processes.filter(item => /msedge\\.exe$/i.test(String(item.Name)));
+      const profileEdges = edgeProcesses.filter(item => String(item.CommandLine || '').toLowerCase().includes(profile.toLowerCase()));
+      const listenerDetails = listeners.map(item => { const owner = processes.find(proc => Number(proc.ProcessId) === Number(item.OwningProcess)); return { pid:Number(item.OwningProcess), localAddress:String(item.LocalAddress), ownerName:String(owner?.Name || ''), ownerIsHost:Number(item.OwningProcess) === Number(hostPid), ownerHasProfile:String(owner?.CommandLine || '').toLowerCase().includes(profile.toLowerCase()) }; });
+      cleanup = { processSnapshotVerified, listenerSnapshotVerified, hostProcessExited: hostPid ? !hostStillAlive : null, edgeProcessCount: edgeProcesses.length, profileEdgeProcessCount: profileEdges.length, port9227ListenerCount: listeners.length, listenerDetails };
+      if (processSnapshotVerified && listenerSnapshotVerified && !hostStillAlive && edgeProcesses.length === 0 && listeners.length === 0) break;
       await delay(250);
     }
     report.cleanup = cleanup;
-    report.cleanupClean = !report.backendStopError && cleanup?.processSnapshotVerified === true && cleanup?.listenerSnapshotVerified === true && cleanup?.hostProcessExited === true && cleanup.profileEdgeProcessCount === 0 && cleanup.port9227ListenerCount === 0;
+    report.cleanupClean = !report.backendStopError && cleanup?.processSnapshotVerified === true && cleanup?.listenerSnapshotVerified === true && report.dedicatedEdgeCloseIssued && cleanup?.hostProcessExited === true && cleanup.edgeProcessCount === 0 && cleanup.profileEdgeProcessCount === 0 && cleanup.port9227ListenerCount === 0;
     pass = pass && report.cleanupClean;
     if (hostPid && cleanup?.hostProcessExited !== true) await killTree(hostPid);
     await killProfileProcesses(profile);
