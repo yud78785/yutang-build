@@ -326,6 +326,8 @@ async function run(exeFile) {
       const nextOpen=await requestBrowserOpen(ready.origin,bootstrap.token,redactionPaths);
       const nextFirewallBlock=isExpectedFirewallBlock(nextOpen.status,nextOpen.body);
       assert.ok(nextOpen.status===200||nextFirewallBlock,'Restarted browser open failed unexpectedly: '+String(nextOpen.status)+' '+String(nextOpen.body||''));
+      cycleReport.restartOpenStatus=nextOpen.status;
+      cycleReport.restartNavigationBlockedByFirewall=nextFirewallBlock;
       const nextState=await waitForNewBrowserState(control,previousPid,previousStartedAt,profile);
       const nextCheck=await inspectReadyBrowser(nextState,ready.backendPid,profile,controlDir);
       cycleReport.restartedPid=nextState.pid;
