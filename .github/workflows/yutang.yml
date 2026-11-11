@@ -181,7 +181,7 @@ jobs:
           const script = fileURLToPath(new URL('../tools/verify-propagation.mjs', import.meta.url));
           try {
             const a = path.join(base,'original.mjs'), b=path.join(base,'staged.mjs'), c=path.join(base,'packed.mjs');
-            const value = 'const browser = { chromiumSandbox: true };';
+            const value = "const browser = { chromiumSandbox: true, args: ['--enable-features=NetworkServiceSandbox'] };";
             for (const p of [a,b,c]) writeFileSync(p,value);
             const pass = execFileSync(process.execPath,[script,a,b,c],{encoding:'utf8'});
             assert.match(pass,/PASS 3 byte-for-byte identical/);
@@ -339,7 +339,6 @@ jobs:
             "SHA256: $hash"
             'PASSED: pinned source patch, upstream tar.gz/tree verification, staged/packaged source, packaged API smoke, renderer AppContainer sandbox, NetworkServiceSandbox feature'
             'NOT PROVEN: real Douyin playback, model reasoning, continuous autonomy, memory synchronization, signed release trust'
-            'NOT PROVEN: Douyin playback, model reasoning, continuous autonomy, memory synchronization'
           ) | Set-Content -LiteralPath release-api/YUTANG-RESULT.txt -Encoding utf8
           Write-Host "CANDIDATE SHA256 $hash"
 
