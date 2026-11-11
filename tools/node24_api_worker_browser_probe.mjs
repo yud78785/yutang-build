@@ -21,6 +21,7 @@ assert.equal(playwrightPackage.version, '1.64.0-alpha-1790635538000', 'Pinned Pl
 const EXPECTED_HOST_SHA256 = '5716a705e19663f1f6faed52569508b72cf091d3a31766828a7a5434a6eca1bc';
 const hostPath = path.join(runtime, 'browser-host.mjs');
 const corePath = path.join(runtime, 'core.mjs');
+const launcherPath = path.join(runtime, 'browser-launcher.mjs');
 
 const sha256 = value => createHash('sha256').update(value).digest('hex');
 const redact = value => String(value ?? '')
@@ -140,6 +141,12 @@ async function instrumentRuntime() {
     host = host.replace(before, after);
   }
   await fs.writeFile(hostPath, host);
+
+  const originalLauncher = await fs.readFile(launcherPath, 'utf8');
+  const launcherBefore = "function allowedPage(url) { try { return url === 'about:blank' || new URL(url).origin === 'https://www.douyin.com'; } catch { return false; } }";
+  const launcherAfter = "function allowedPage(url) { try { return url === 'about:blank' || url === process.env.DOUYIN_TEST_HOME_URL || new URL(url).origin === 'https://www.douyin.com'; } catch { return false; } }";
+  if (originalLauncher.split(launcherBefore).length !== 2) throw new Error('BrowserLauncher local fixture allow-list anchor mismatch.');
+  await fs.writeFile(launcherPath, originalLauncher.replace(launcherBefore, launcherAfter));
 
   const originalCore = await fs.readFile(corePath, 'utf8');
   let core = originalCore.replace("import { spawn } from 'node:child_process';", "import { spawn, execFileSync } from 'node:child_process';");
@@ -270,7 +277,7 @@ async function main() {
   await fs.mkdir(control, { recursive: true });
   const stateFile = path.join(control, 'browser.json');
   const logFile = path.join(control, 'browser-host.log');
-  const backend = new ApiProcess(process.execPath, runtime, { env, timeoutMs: 30000 });
+  let backend = new ApiProcess(process.execPath, runtime, { env, timeoutMs: 30000 });
   const config = { apiKey: '', baseUrl: 'https://api.deepseek.com', model: 'deepseek-flash', keySource: '未配置' };
   const report = {
     node: process.versions.node,
@@ -280,6 +287,7 @@ async function main() {
     modelKeyPresent: false,
     edgeOutboundBlocked: true,
     backendStarted: false,
+    backendRestart: null,
     browserOpenStatus: null,
     browserOpenBody: null,
     browserOpenResult: null,
