@@ -6,14 +6,14 @@ param(
 )
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
-$expectedZip='b5febe43b2e947a86feda01484fbbc475776649ed7687d8d984f5992af6370e9'
-$expectedExe='e9f07dbed400bd77a8ab6350ea3a54d338d02d7a8f0c04d87cc621e148160290'
+$expectedZip='07ce5af17f78a7d0e9f5d730652fe7c0e887cb7910df5cf73ce0c6192b6c6eb1'
+$expectedExe='8acc8de7ba07e725ec04c06fb00e741998c4d1c887b596bf9daaf5ebfb0cc917'
 $expectedName='Dafeiyu-Douyin-API-1.4.6-win-x64.exe'
 if (-not (Test-Path -LiteralPath $Archive -PathType Leaf)) {throw 'Missing immutable Actions artifact ZIP'}
 $zipHash=(Get-FileHash -LiteralPath $Archive -Algorithm SHA256).Hash.ToLowerInvariant()
 if ($zipHash -ne $expectedZip) {throw 'Immutable ZIP SHA-256 mismatch'}
 $zipBytes=(Get-Item -LiteralPath $Archive).Length
-if ($zipBytes -ne 124753189) {throw 'Immutable ZIP byte count mismatch'}
+if ($zipBytes -ne 124753218) {throw 'Immutable ZIP byte count mismatch'}
 $reportRoot=[System.IO.Path]::GetFullPath($ReportDirectory)
 if (Test-Path -LiteralPath $reportRoot) {throw 'Report directory must be new; refusing overwrite'}
 [void][System.IO.Directory]::CreateDirectory($reportRoot)

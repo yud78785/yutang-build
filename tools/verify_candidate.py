@@ -14,15 +14,15 @@ import sys
 import zipfile
 
 EXPECTED = {
-    "zip_sha256": "b5febe43b2e947a86feda01484fbbc475776649ed7687d8d984f5992af6370e9",
-    "zip_size": 124753189,
+    "zip_sha256": "07ce5af17f78a7d0e9f5d730652fe7c0e887cb7910df5cf73ce0c6192b6c6eb1",
+    "zip_size": 124753218,
     "exe_name": "Dafeiyu-Douyin-API-1.4.6-win-x64.exe",
-    "exe_sha256": "e9f07dbed400bd77a8ab6350ea3a54d338d02d7a8f0c04d87cc621e148160290",
-    "exe_size": 124737042,
+    "exe_sha256": "8acc8de7ba07e725ec04c06fb00e741998c4d1c887b596bf9daaf5ebfb0cc917",
+    "exe_size": 124737099,
     "result_name": "YUTANG-RESULT.txt",
     "source_commit": "912873e2556d16a088d81dcbc6f7c0060614dd58",
-    "actions_run": 42942891622,
-    "runner_commit": "74fae764b9c510f745b4a9f45fad88b662bd00d3",
+    "actions_run": 43020485704,
+    "runner_commit": "c9fe8e8d9a59a53715ee3b4290d5c37dca85554e",
 }
 
 class VerificationError(ValueError):
@@ -114,7 +114,6 @@ def verify(archive: Path, expected=None):
             "PINNED COMMIT: " + expected["source_commit"],
             "FILE: " + expected["exe_name"],
             "SHA256: " + expected["exe_sha256"],
-            "NOT PROVEN: real Douyin playback, model reasoning, continuous autonomy, memory synchronization, signed release trust",
             "NOT PROVEN: real Douyin playback, model reasoning, continuous autonomy, memory synchronization, signed release trust",
         ]
         if not all(line in txt.splitlines() for line in required_lines):

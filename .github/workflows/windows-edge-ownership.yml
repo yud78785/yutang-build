@@ -44,8 +44,8 @@ jobs:
           $ProgressPreference='SilentlyContinue'
           $archive=Join-Path $env:RUNNER_TEMP 'YuTang-Unmodified-GitHub-Candidate.zip'
           $headers=@{Authorization="Bearer $env:GH_TOKEN";Accept='application/vnd.github+json';'X-GitHub-Api-Version'='2022-11-28'}
-          Invoke-WebRequest -Uri 'https://api.github.com/repos/yud78785/yutang-build/actions/artifacts/13822230296/zip' -Headers $headers -MaximumRedirection 5 -OutFile $archive
-          $expected='b5febe43b2e947a86feda01484fbbc475776649ed7687d8d984f5992af6370e9'
+          Invoke-WebRequest -Uri 'https://api.github.com/repos/yud78785/yutang-build/actions/artifacts/13854203932/zip' -Headers $headers -MaximumRedirection 5 -OutFile $archive
+          $expected='07ce5af17f78a7d0e9f5d730652fe7c0e887cb7910df5cf73ce0c6192b6c6eb1'
           if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected) { throw 'Identity mismatch: EXE must not execute' }
           $result=python tools/verify_candidate.py $archive
           if ($LASTEXITCODE -ne 0) { throw 'Safety preflight failed: EXE must not execute' }

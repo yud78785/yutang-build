@@ -5,14 +5,15 @@
 ## Candidate identities and evidence (2026-11-11 UTC)
 
 - Repository: https://github.com/yud78785/yutang-build
-- New candidate build: https://github.com/yud78785/yutang-build/actions/runs/42942891622
-- New candidate build commit: `74fae764b9c510f745b4a9f45fad88b662bd00d3`
-- Historical old candidate build: https://github.com/yud78785/yutang-build/actions/runs/42815316953
+- Current candidate build: https://github.com/yud78785/yutang-build/actions/runs/43020485704
+- Current candidate build commit: `c9fe8e8d9a59a53715ee3b4290d5c37dca85554e`
+- Historical candidate builds: https://github.com/yud78785/yutang-build/actions/runs/42942891622 and https://github.com/yud78785/yutang-build/actions/runs/42815316953
 - Pinned upstream source: `LockyBee/dsh-douyin-agent@912873e2556d16a088d81dcbc6f7c0060614dd58`
-- New candidate ZIP: 124,753,189 bytes, SHA-256 `b5febe43b2e947a86feda01484fbbc475776649ed7687d8d984f5992af6370e9`
-- New candidate EXE: `Dafeiyu-Douyin-API-1.4.6-win-x64.exe`, 124,737,042 bytes, SHA-256 `e9f07dbed400bd77a8ab6350ea3a54d338d02d7a8f0c04d87cc621e148160290`
-- GitHub artifact ID: `13822230296`, expires at `2026-11-18T02:05:10Z`; the candidate is unsigned and not released.
-- Old candidate EXE (historical only): SHA-256 `84321ec6c827de90e95d0d03b76a693444f8ea8c22c9c71c709e2e496bde753a`.
+- Current candidate ZIP: 124,753,218 bytes, SHA-256 `07ce5af17f78a7d0e9f5d730652fe7c0e887cb7910df5cf73ce0c6192b6c6eb1`
+- Current candidate EXE: `Dafeiyu-Douyin-API-1.4.6-win-x64.exe`, 124,737,099 bytes, SHA-256 `8acc8de7ba07e725ec04c06fb00e741998c4d1c887b596bf9daaf5ebfb0cc917`
+- Current GitHub artifact ID: `13854203932`, expires at `2026-11-18T12:32:37Z`; code signing trust has not been reverified; not released.
+- Prior EXE SHA-256 values (historical only): `84321ec6c827de90e95d0d03b76a693444f8ea8c22c9c71c709e2e496bde753a` and `e9f07dbed400bd77a8ab6350ea3a54d338d02d7a8f0c04d87cc621e148160290`.
+- New candidate has an additional pinned renderer-ready IPC wait-budget adjustment (3,000 to 7,000 ms), retaining a required true renderer result; actual startup reliability awaits fresh Windows tests.
 
 ## How to independently check the candidate without executing it
 
