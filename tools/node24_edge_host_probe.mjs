@@ -16,7 +16,6 @@ const hostSource = await readFile(path.join(root, 'browser-host.mjs'));
 const hostSha256 = createHash('sha256').update(hostSource).digest('hex');
 const expectedHostSha256 = '5716a705e19663f1f6faed52569508b72cf091d3a31766828a7a5434a6eca1bc';
 if (hostSha256 !== expectedHostSha256 || !hostSource.toString('utf8').includes('chromiumSandbox: true')) throw new Error('Probe requires the exact candidate-patched browser-host source.');
-
 let instrumentedHost = hostSource.toString('utf8');
 const stagePatches = [
   ["    writeState(false);\n    try { installation = await probeInstallation(); } catch {}\n    context = await chromiumImpl.launchPersistentContext(profile, {",
@@ -34,7 +33,10 @@ for (const [before, after] of stagePatches) {
   if (instrumentedHost.split(before).length !== 2) throw new Error('Candidate host diagnostic patch anchor is not unique.');
   instrumentedHost = instrumentedHost.replace(before, after);
 }
-await writeFile(path.join(root, 'browser-host.mjs'), instrumentedHost);
+const probeHostPath = path.join(root, 'browser-host-probe.mjs');
+await writeFile(probeHostPath, instrumentedHost);
+const instrumentedHostSha256 = createHash('sha256').update(instrumentedHost).digest('hex');
+
 
 const { chromium } = await import(pathToFileURL(path.join(root, 'playwright-runtime.mjs')).href);
 const emit = (stage, detail = {}) => process.stdout.write('STAGE ' + JSON.stringify({ stage, ...detail, at: new Date().toISOString() }) + '\n');
@@ -70,7 +72,7 @@ if (mode === 'direct') {
     if (context) await context.close().catch(() => {});
   }
 } else if (mode === 'host') {
-  const { runBrowserHost, sanitizeBrowserFailure } = await import(pathToFileURL(path.join(root, 'browser-host.mjs')).href);
+  const { runBrowserHost, sanitizeBrowserFailure } = await import(pathToFileURL(path.join(root, 'browser-host-probe.mjs')).href);
   const instrumentedChromium = {
     async launchPersistentContext(...args) {
       emit('host-before-launch', { node: process.versions.node, port, headless: args[1]?.headless, channel: args[1]?.channel });
@@ -186,7 +188,7 @@ if (mode === 'direct') {
   const output = openSync(logFile, 'a');
   let child;
   try {
-    child = spawn(node, [path.join(root, 'browser-host.mjs'), runtimePaths.browserProfileDir, runtimePaths.browserControlDir, String(port)], {
+    child = spawn(node, [path.join(root, 'browser-host-probe.mjs'), runtimePaths.browserProfileDir, runtimePaths.browserControlDir, String(port)], {
       detached: true, windowsHide: true, stdio: ['ignore', output, output], env: childEnv, shell: false, cwd: root,
     });
   } finally { closeSync(output); }
