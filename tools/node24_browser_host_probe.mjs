@@ -102,8 +102,11 @@ async function main() {
   assert.equal(packageInfo.version, EXPECTED_PLAYWRIGHT, 'Must use the exact locked Playwright package');
 
   const firewall = powershellJson("Get-NetFirewallRule -DisplayName 'YuTangNode24HostProbeBlockOutbound' | Select-Object Enabled,Action,Direction | ConvertTo-Json -Compress");
-  assert.ok(firewall.length === 1 && firewall[0].Enabled === 'True' && firewall[0].Action === 'Block' && firewall[0].Direction === 'Outbound',
-    'Edge outbound firewall rule is not active');
+  const firewallEnabled = firewall.length === 1 && (firewall[0].Enabled === true || String(firewall[0].Enabled).toLowerCase() === 'true');
+  const firewallBlocked = firewall.length === 1 && String(firewall[0].Action).toLowerCase() === 'block';
+  const firewallOutbound = firewall.length === 1 && String(firewall[0].Direction).toLowerCase() === 'outbound';
+  assert.ok(firewallEnabled && firewallBlocked && firewallOutbound,
+    'Edge outbound firewall rule is not active: ' + JSON.stringify(firewall));
 
   const base = await fsp.mkdtemp(path.join(process.env.RUNNER_TEMP, 'yutang-node24-host-'));
   const home = process.env.USERPROFILE;
