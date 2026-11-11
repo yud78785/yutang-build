@@ -111,6 +111,8 @@ async function main() {
   const userData = path.join(base, 'user-data');
   await fsp.mkdir(userData, { recursive: true });
   let commonDir = null;
+  let profileDir = null;
+  let rawProfileDir = null;
   const envAllow = /^(?:path|systemroot|windir|comspec|pathext|programfiles|programfiles\(x86\)|programdata|username|userdomain|public|allusersprofile|programw6432|os|processor_architecture|number_of_processors|homedrive|homepath|userprofile|appdata|localappdata|temp|tmp|systemdrive|home)$/i;
   const safeEnv = Object.fromEntries(Object.entries(process.env).filter(([key]) => envAllow.test(key)));
   Object.assign(safeEnv, {
@@ -132,6 +134,7 @@ async function main() {
   try {
     const rawPort = 9341;
     const rawProfile = path.join(base, 'raw-profile');
+    rawProfileDir = rawProfile;
     await fsp.mkdir(rawProfile, { recursive: true });
     try {
       rawContext = await chromium.launchPersistentContext(rawProfile, {
@@ -156,7 +159,8 @@ async function main() {
     if (fs.existsSync(candidateCommon)) throw new Error('Unexpected pre-existing YuTang browser state on the disposable runner; refusing to overwrite it.');
     commonDir = candidateCommon;
     const common = commonDir;
-    const profile = path.join(common, 'cli-profile');
+    profileDir = path.join(common, 'cli-profile');
+    const profile = profileDir;
     const control = path.join(common, 'control');
     const stateDir = path.join(common, 'state');
     const mediaRoot = path.join(common, 'media');
@@ -244,7 +248,36 @@ async function main() {
       try { execFileSync('taskkill.exe', ['/PID', String(hostChild.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true, timeout: 10000 }); } catch {}
       await Promise.race([new Promise(resolve => hostChild.once('exit', resolve)), delay(3000)]);
     }
-    if (commonDir) await fsp.rm(commonDir, { recursive: true, force: true }).catch(() => {});
+    let survivors = [];
+    try {
+      const rows = powershellJson("Get-CimInstance Win32_Process -Filter \"Name = 'msedge.exe' OR Name = 'node.exe'\" | Select-Object ProcessId,Name,CommandLine | ConvertTo-Json -Compress -Depth 3");
+      const tracked = [profileDir, rawProfileDir].filter(Boolean).map(value => value.toLowerCase());
+      survivors = rows.filter(item => {
+        const name = String(item.Name || '').toLowerCase();
+        const command = String(item.CommandLine || '').toLowerCase();
+        return (name === 'msedge.exe' || name === 'node.exe') && tracked.some(value => command.includes(value));
+      });
+      for (const item of survivors) {
+        try { execFileSync('taskkill.exe', ['/PID', String(item.ProcessId), '/T', '/F'], { stdio: 'ignore', windowsHide: true, timeout: 10000 }); } catch {}
+      }
+      if (survivors.length) {
+        await delay(1000);
+        const after = powershellJson("Get-CimInstance Win32_Process -Filter \"Name = 'msedge.exe' OR Name = 'node.exe'\" | Select-Object ProcessId,Name,CommandLine | ConvertTo-Json -Compress -Depth 3");
+        const stillAlive = after.filter(item => {
+          const name = String(item.Name || '').toLowerCase();
+          const command = String(item.CommandLine || '').toLowerCase();
+          return (name === 'msedge.exe' || name === 'node.exe') && tracked.some(value => command.includes(value));
+        });
+        if (stillAlive.length) {
+          console.error('YUTANG_PROCESS_CLEANUP_FAILED ' + JSON.stringify(stillAlive.map(item => ({ pid: item.ProcessId, name: item.Name }))));
+          process.exitCode = 1;
+        }
+      }
+    } catch {
+      console.error('YUTANG_PROCESS_CLEANUP_UNVERIFIED');
+      process.exitCode = 1;
+    }
+    if (commonDir && survivors.length === 0) await fsp.rm(commonDir, { recursive: true, force: true }).catch(() => {});
     await fsp.rm(base, { recursive: true, force: true }).catch(() => {});
   }
 }
