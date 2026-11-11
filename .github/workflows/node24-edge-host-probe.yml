@@ -111,7 +111,7 @@ jobs:
           if(-not $directDone) { Stop-Probe $direct; $directStatus='TIMEOUT' }
           else {
             $directLog=Read-Log $direct.Out
-            $directStatus=if($directLog -match '"launch":"PASS"') {'PASS'} elseif($directLog -match '"launch":"FAIL"') {'FAIL'} else {'NO_REPORT'}
+            $directStatus=if($directLog -match '"launch":"PASS"') {'PASS'} elseif($directLog -match '"launch":"CDP_MISSING"') {'CDP_MISSING'} elseif($directLog -match '"launch":"FAIL"') {'FAIL'} else {'NO_REPORT'}
           }
           Write-Host "DIRECT_NODE24_STATUS=$directStatus"
           Write-Host (Read-Log $direct.Out)
