@@ -179,7 +179,7 @@ async function instrumentRuntime() {
     ],
     [
       "    nativeFocus.assertHealthy();\n    writeState(true,",
-      "    console.error('PROBE_STAGE:after_focus_reset');\n    nativeFocus.assertHealthy();\n    console.error('PROBE_STAGE:before_ready_state');\n    writeState(true,"
+      "    console.error('PROBE_STAGE:after_focus_reset');\n    nativeFocus.assertHealthy();\n    const profileCookieCount = (await context.cookies()).length;\n    logger.error('PROBE_STAGE:profile_cookie_count=' + profileCookieCount);\n    console.error('PROBE_STAGE:before_ready_state');\n    writeState(true,"
     ],
     [
       "  } catch (error) {\n    try { await context?.close(); } catch {}",
@@ -369,6 +369,7 @@ async function main() {
     backendEnvKeys: Object.keys(env).sort(),
     modelKeyPresent: false,
     dedicatedProfileFresh: true,
+    profileCookieCount: null,
     nativeWindowsProfileEnvironmentPreserved: true,
     edgeOutboundBlocked: true,
     diagnosticLaunchTimeoutMs: DIAGNOSTIC_LAUNCH_TIMEOUT_MS,
@@ -436,6 +437,8 @@ async function main() {
     } : null;
     hostPid = Number.isSafeInteger(state?.pid) ? state.pid : null;
     report.browserHostLogTail = await tail(logFile);
+    const cookieCountMatch = report.browserHostLogTail.match(/PROBE_STAGE:profile_cookie_count=(\d+)/);
+    report.profileCookieCount = cookieCountMatch ? Number(cookieCountMatch[1]) : null;
     report.launchReachedAfterMarker = report.browserHostLogTail.includes('PROBE_STAGE:after_launch_persistent_context');
     report.launchFailureCategory = report.browserHostLogTail.match(/TimeoutError|TargetClosedError|browserType\\.launchPersistentContext/i)?.[0] || null;
     report.backendStderrTail = redact(backend.stderr);
@@ -622,7 +625,7 @@ async function main() {
       ownership.hostFound && ownership.hostIsNode && ownership.hostParentIsApiWorker &&
       ownership.edgeDescendantCount > 0 && ownership.edgeWithProfileCount === ownership.edgeDescendantCount &&
       ownership.edgeWithPortArgCount > 0 && ownership.edgeWithLoopbackArgCount > 0 &&
-      ownership.edgeNoSandboxArgCount === 0 && ownership.edgeWithNetworkSandboxArgCount > 0 && ownership.listenerOwnersAreEdgeDescendants &&
+      ownership.edgeNoSandboxArgCount === 0 && ownership.edgeWithNetworkSandboxArgCount > 0 && report.profileCookieCount === 0 && ownership.listenerOwnersAreEdgeDescendants &&
       ownership.listenersLoopbackOnly && report.hostPidMatchesBackendLog;
   } finally {
     if (openAbort && !openAbort.signal.aborted) openAbort.abort(new Error('Diagnostic cleanup.'));
