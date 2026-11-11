@@ -277,6 +277,7 @@ async function main() {
       }
     } catch {
       console.error('YUTANG_PROCESS_CLEANUP_UNVERIFIED');
+      remaining = [{ ProcessId: 'unknown', Name: 'unverified' }];
       process.exitCode = 1;
     }
     if (commonDir && remaining.length === 0) await fsp.rm(commonDir, { recursive: true, force: true }).catch(() => {});
