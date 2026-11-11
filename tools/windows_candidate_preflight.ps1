@@ -13,7 +13,7 @@ if (-not (Test-Path -LiteralPath $Archive -PathType Leaf)) {throw 'Missing immut
 $zipHash=(Get-FileHash -LiteralPath $Archive -Algorithm SHA256).Hash.ToLowerInvariant()
 if ($zipHash -ne $expectedZip) {throw 'Immutable ZIP SHA-256 mismatch'}
 $zipBytes=(Get-Item -LiteralPath $Archive).Length
-if ($zipBytes -ne 124753117) {throw 'Immutable ZIP byte count mismatch'}
+if ($zipBytes -ne 124753189) {throw 'Immutable ZIP byte count mismatch'}
 $reportRoot=[System.IO.Path]::GetFullPath($ReportDirectory)
 if (Test-Path -LiteralPath $reportRoot) {throw 'Report directory must be new; refusing overwrite'}
 [void][System.IO.Directory]::CreateDirectory($reportRoot)
