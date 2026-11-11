@@ -106,14 +106,16 @@ async function main() {
     'Edge outbound firewall rule is not active');
 
   const base = await fsp.mkdtemp(path.join(process.env.RUNNER_TEMP, 'yutang-node24-host-'));
-  const home = path.join(base, 'isolated-state-home');
+  const home = process.env.USERPROFILE;
+  assert.ok(typeof home === 'string' && path.isAbsolute(home), 'Native Windows USERPROFILE must be preserved');
   const userData = path.join(base, 'user-data');
-  for (const directory of [home, userData]) await fsp.mkdir(directory, { recursive: true });
+  await fsp.mkdir(userData, { recursive: true });
+  let commonDir = null;
   const envAllow = /^(?:path|systemroot|windir|comspec|pathext|programfiles|programfiles\(x86\)|programdata|username|userdomain|public|allusersprofile|programw6432|os|processor_architecture|number_of_processors|homedrive|homepath|userprofile|appdata|localappdata|temp|tmp|systemdrive|home)$/i;
   const safeEnv = Object.fromEntries(Object.entries(process.env).filter(([key]) => envAllow.test(key)));
   Object.assign(safeEnv, {
     DSH_HOME: path.join(home, '.dsh'),
-    DOUYIN_DESKTOP_USER_DATA: userData, DOUYIN_RUNTIME_LOCATION_FILE: path.join(base, 'runtime-location.json')
+    DOUYIN_DESKTOP_USER_DATA: userData
   });
 
   let rawContext = null;
@@ -150,27 +152,39 @@ async function main() {
     }
 
     const hostPort = 9342;
-    const common = path.join(home, '.dsh', 'douyin-browser');
+    commonDir = path.join(home, '.dsh', 'douyin-browser');
+    if (fs.existsSync(commonDir)) throw new Error('Unexpected pre-existing YuTang browser state on the disposable runner; refusing to overwrite it.');
+    const common = commonDir;
     const profile = path.join(common, 'cli-profile');
     const control = path.join(common, 'control');
     const stateDir = path.join(common, 'state');
     const mediaRoot = path.join(common, 'media');
     const memoryDir = path.join(common, 'memory');
+    const mediaEnvFile = path.join(mediaRoot, '.env');
+    const mediaSettingsFile = path.join(mediaRoot, 'settings.local.json');
+    const mediaModelsDir = path.join(mediaRoot, '.models');
+    const memoryDbPath = path.join(memoryDir, 'shared.sqlite');
     await Promise.all([
       fsp.mkdir(profile, { recursive: true }),
       fsp.mkdir(control, { recursive: true }),
       fsp.mkdir(stateDir, { recursive: true }),
       fsp.mkdir(mediaRoot, { recursive: true }),
-      fsp.mkdir(memoryDir, { recursive: true })
+      fsp.mkdir(memoryDir, { recursive: true }),
+      fsp.mkdir(mediaModelsDir, { recursive: true })
     ]);
+    const locationFile = path.join(common, 'runtime-location.json');
+    const locationRecord = { version: 1, stateDir, mediaEnvFile, mediaSettingsFile, mediaRuntimeRoot: mediaRoot, mediaModelsDir, memoryDir, memoryDbPath };
+    await fsp.writeFile(locationFile, JSON.stringify(locationRecord, null, 2) + '\n', { flag: 'wx' });
+    await fsp.writeFile(mediaEnvFile, '', { flag: 'wx' });
+    await fsp.writeFile(mediaSettingsFile, JSON.stringify({ enabled: false, backend: 'local-whisper' }), { flag: 'wx' });
     Object.assign(safeEnv, {
-      DOUYIN_RUNTIME_LOCATION_FILE: path.join(common, 'runtime-location.json'),
-      DEEPSEEK_SHARED_MEMORY_DB: path.join(memoryDir, 'shared.sqlite'),
+      DOUYIN_RUNTIME_LOCATION_FILE: locationFile,
+      DEEPSEEK_SHARED_MEMORY_DB: memoryDbPath,
       DOUYIN_STATE_DIR: stateDir,
-      DOUYIN_MEDIA_ENV_FILE: path.join(mediaRoot, '.env'),
-      DOUYIN_MEDIA_SETTINGS_FILE: path.join(mediaRoot, 'settings.local.json'),
+      DOUYIN_MEDIA_ENV_FILE: mediaEnvFile,
+      DOUYIN_MEDIA_SETTINGS_FILE: mediaSettingsFile,
       DOUYIN_MEDIA_RUNTIME_ROOT: mediaRoot,
-      DOUYIN_MEDIA_MODELS_DIR: path.join(mediaRoot, '.models')
+      DOUYIN_MEDIA_MODELS_DIR: mediaModelsDir
     });
     const logFile = path.join(control, 'browser-host.log');
     const logFd = fs.openSync(logFile, 'a');
@@ -229,6 +243,7 @@ async function main() {
       try { execFileSync('taskkill.exe', ['/PID', String(hostChild.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true, timeout: 10000 }); } catch {}
       await Promise.race([new Promise(resolve => hostChild.once('exit', resolve)), delay(3000)]);
     }
+    if (commonDir) await fsp.rm(commonDir, { recursive: true, force: true }).catch(() => {});
     await fsp.rm(base, { recursive: true, force: true }).catch(() => {});
   }
 }
