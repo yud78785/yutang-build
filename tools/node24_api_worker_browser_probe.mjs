@@ -144,6 +144,10 @@ async function instrumentRuntime() {
   const originalCore = await fs.readFile(corePath, 'utf8');
   let core = originalCore.replace("import { spawn } from 'node:child_process';", "import { spawn, execFileSync } from 'node:child_process';");
   if (core === originalCore) throw new Error('Core child-process import anchor mismatch.');
+  const launcherAnchor = "        this.browserLauncher ??= new BrowserLauncher({";
+  const launcherReplacement = "        this.browserLauncher ??= new BrowserLauncher({\\n          homeUrl: process.env.DOUYIN_TEST_HOME_URL || undefined,";
+  if (core.split(launcherAnchor).length !== 2) throw new Error('BrowserLauncher diagnostic home URL anchor mismatch.');
+  core = core.replace(launcherAnchor, launcherReplacement);
   const beforeSpawn = "        const child = spawn(resolveNodeExecutable(), [";
   const afterSpawn = [
     "        console.error('CORE_PROBE:api_worker_env ' + JSON.stringify({hasNodeChannelFd:Object.hasOwn(process.env,'NODE_CHANNEL_FD'),hasNodeChannelSerializationMode:Object.hasOwn(process.env,'NODE_CHANNEL_SERIALIZATION_MODE'),hasNodeUniqueId:Object.hasOwn(process.env,'NODE_UNIQUE_ID'),processConnected:process.connected===true,hasProcessSend:typeof process.send==='function',hasNodeOptions:Boolean(process.env.NODE_OPTIONS),hasNodePath:Boolean(process.env.NODE_PATH),hasElectronRunAsNode:Boolean(process.env.ELECTRON_RUN_AS_NODE),cwdName:path.basename(process.cwd()),nodeVersion:process.versions.node}));",
@@ -255,7 +259,9 @@ async function main() {
   const publicRoot = path.join(runtime, 'public');
   await fs.mkdir(publicRoot, { recursive: true });
   const htmlFile = path.join(publicRoot, 'index.html');
-  await fs.writeFile(htmlFile, '<!doctype html><html><head><meta charset="utf-8"></head><body>isolated browser-host probe</body></html>\n');
+  await fs.writeFile(htmlFile, '<!doctype html><html><head><meta charset="utf-8"><title>YuTang isolated browser probe</title></head><body>isolated browser-host probe</body></html>\n');
+  const fixtureUrl = pathToFileURL(htmlFile).href;
+  env.DOUYIN_TEST_HOME_URL = fixtureUrl;
 
   const control = path.join(home, '.dsh', 'douyin-browser', 'control');
   const profile = path.join(home, '.dsh', 'douyin-browser', 'cli-profile');
@@ -274,6 +280,9 @@ async function main() {
     backendStarted: false,
     browserOpenStatus: null,
     browserOpenBody: null,
+    browserOpenResult: null,
+    localFixturePageCount: 0,
+    pageTargetCount: 0,
     backendStderrTail: '',
     browserHostLogTail: '',
     browserState: null,
@@ -332,13 +341,17 @@ async function main() {
       report.hostPidMatchesBackendLog = backend.stderr.includes('CORE_PROBE:after_host_spawn pid=' + String(hostPid));
     }
     if (openPromise) {
-      const settled = await Promise.race([openPromise, delay(1500).then(() => null)]);
+      const settled = await Promise.race([openPromise, delay(20000).then(() => null)]);
       if (settled) {
         report.browserOpenStatus = settled.status;
         report.browserOpenBody = settled.body;
+        try {
+          const body = JSON.parse(settled.body);
+          report.browserOpenResult = { opened: body.opened === true, mode: body.mode || null, reused: body.reused === true, paused: body.paused === true, watchPreserved: body.watchPreserved === true };
+        } catch {}
       } else {
-        report.browserOpenStatus = 'PENDING_AFTER_HOST_CHECK';
-        openAbort.abort(new Error('Diagnostic host check complete.'));
+        report.browserOpenStatus = 'PENDING_AFTER_20_SECONDS';
+        openAbort.abort(new Error('Diagnostic browser-open request timed out.'));
         const aborted = await Promise.race([openPromise, delay(1500).then(() => null)]);
         if (aborted) {
           report.browserOpenStatus = aborted.status;
@@ -346,6 +359,15 @@ async function main() {
         }
       }
     }
+    try {
+      const response = await fetch('http://127.0.0.1:9227/json/list', { signal: AbortSignal.timeout(3000) });
+      if (response.ok) {
+        const targets = await response.json();
+        const pages = targets.filter(item => item.type === 'page');
+        report.pageTargetCount = pages.length;
+        report.localFixturePageCount = pages.filter(item => item.url === fixtureUrl).length;
+      }
+    } catch {}
     report.backendStderrTail = redact(backend.stderr);
     report.browserHostLogTail = await tail(logFile);
     report.hostPid = hostPid;
@@ -353,6 +375,7 @@ async function main() {
 
     const ownership = report.processOwnership || {};
     const pass = report.backendStarted && report.browserState?.ready === true && report.cdp &&
+      report.browserOpenStatus === 200 && report.browserOpenResult?.opened === true && report.browserOpenResult?.mode === 'prepare' && report.browserOpenResult?.paused === true && report.localFixturePageCount === 1 &&
       report.browserState.profileMatches && report.browserState.port === 9227 &&
       ownership.hostFound && ownership.hostIsNode && ownership.hostParentIsApiWorker &&
       ownership.edgeDescendantCount > 0 && ownership.edgeWithProfileCount > 0 &&
