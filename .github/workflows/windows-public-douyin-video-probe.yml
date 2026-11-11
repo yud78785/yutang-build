@@ -6,6 +6,8 @@ on:
       - .github/workflows/windows-public-douyin-video-probe.yml
       - tools/windows_public_douyin_video_probe.mjs
       - tools/resolve-candidate-artifact.ps1
+      - tools/patch-core-direct-video.mjs
+      - tests/test-core-direct-video-patch.mjs
 
 permissions:
   contents: read

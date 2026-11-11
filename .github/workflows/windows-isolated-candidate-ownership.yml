@@ -6,6 +6,8 @@ on:
       - .github/workflows/windows-isolated-candidate-ownership.yml
       - tools/windows_isolated_candidate_edge_smoke.mjs
       - tools/resolve-candidate-artifact.ps1
+      - tools/patch-core-direct-video.mjs
+      - tests/test-core-direct-video-patch.mjs
 
 permissions:
   contents: read

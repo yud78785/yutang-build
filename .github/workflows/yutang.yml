@@ -11,6 +11,8 @@ on:
       - .github/workflows/windows-isolated-candidate-ownership.yml
       - .github/workflows/windows-public-douyin-video-probe.yml
       - tools/jobguard/**
+      - tools/patch-core-direct-video.mjs
+      - tests/test-core-direct-video-patch.mjs
       - tools/windows_isolated_candidate_edge_smoke.mjs
       - tools/windows_public_douyin_video_probe.mjs
       - tools/resolve-candidate-artifact.ps1
@@ -228,6 +230,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Job Object patch script syntax failed' }
           node tests/test-jobguard-patch.mjs
           if ($LASTEXITCODE -ne 0) { throw 'Job Object patch tests failed' }
+          node --check tools/patch-core-direct-video.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Direct public video canonical patch syntax failed' }
+          node tests/test-core-direct-video-patch.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Direct public video fail-closed route regressions failed' }
           node --check tools/jobguard/patch-desktop-guard.mjs
           if ($LASTEXITCODE -ne 0) { throw 'Desktop worker guard source syntax failed' }
           node tests/test-desktop-guard-patch.mjs
@@ -257,6 +263,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'BrowserLauncher bounded same-origin navigation recovery patch failed' }
           node tools/jobguard/patch-jobguard.mjs (Resolve-Path upstream/browser-host.mjs).Path (Resolve-Path upstream/core.mjs).Path
           if ($LASTEXITCODE -ne 0) { throw 'Windows Job Object browser-host containment patch failed' }
+          node tools/patch-core-direct-video.mjs (Resolve-Path upstream/core.mjs).Path
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned direct public video fastpath patch failed' }
           node tools/jobguard/patch-desktop-guard.mjs (Resolve-Path upstream/desktop/src/api-process.mjs).Path
           if ($LASTEXITCODE -ne 0) { throw 'Windows Job Object desktop API worker containment patch failed' }
           foreach ($entry in @('upstream/runtime-paths.mjs', 'upstream/desktop/src/prepare-api-runtime.mjs', 'upstream/desktop/src/main.mjs', 'upstream/desktop/src/api-process.mjs', 'upstream/browser-launcher.mjs', 'upstream/browser-host.mjs', 'upstream/core.mjs')) {
@@ -369,6 +377,7 @@ jobs:
           node ../../tools/verify-propagation.mjs ../browser-host.mjs .cache/api-runtime/browser-host.mjs
           if ($LASTEXITCODE -ne 0) { throw 'Sandbox or timeout fix was not staged into runtime' }
           if ((Get-FileHash -Algorithm SHA256 -LiteralPath '../core.mjs').Hash -ne (Get-FileHash -Algorithm SHA256 -LiteralPath '.cache/api-runtime/core.mjs').Hash) { throw 'Job Object requirement was not staged into runtime' }
+          if (-not (Select-String -LiteralPath '.cache/api-runtime/core.mjs' -SimpleMatch -Pattern 'function normalizeDirectVideoUrl' -Quiet)) { throw 'Verified direct public video fastpath was not staged into runtime' }
           if ((Get-FileHash -Algorithm SHA256 -LiteralPath '../runtime-paths.mjs').Hash -ne (Get-FileHash -Algorithm SHA256 -LiteralPath '.cache/api-runtime/runtime-paths.mjs').Hash) { throw 'Private YuTang runtime path defaults did not propagate to the staged runtime' }
           if ((Get-FileHash -Algorithm SHA256 -LiteralPath '../browser-launcher.mjs').Hash -ne (Get-FileHash -Algorithm SHA256 -LiteralPath '.cache/api-runtime/browser-launcher.mjs').Hash) { throw 'Bounded BrowserLauncher navigation fix did not propagate to the staged runtime' }
           node scripts/build-api-desktop.mjs
@@ -402,6 +411,7 @@ jobs:
           Write-Host 'PASS bounded same-origin BrowserLauncher navigation recovery is byte-identical in packaged runtime.'
           if ((Get-FileHash -Algorithm SHA256 -LiteralPath '.cache/api-runtime/jobguard.exe').Hash -ne (Get-FileHash -Algorithm SHA256 -LiteralPath 'release-api/win-unpacked/resources/api-runtime/jobguard.exe').Hash) { throw 'Packaged Windows Job Object helper is missing or changed' }
           if ((Get-FileHash -Algorithm SHA256 -LiteralPath '../core.mjs').Hash -ne (Get-FileHash -Algorithm SHA256 -LiteralPath 'release-api/win-unpacked/resources/api-runtime/core.mjs').Hash) { throw 'Packaged Core does not require the Windows Job Object guard' }
+          if (-not (Select-String -LiteralPath 'release-api/win-unpacked/resources/api-runtime/core.mjs' -SimpleMatch -Pattern 'function normalizeDirectVideoUrl' -Quiet)) { throw 'Packaged Core lacks the reviewed direct video navigation fastpath' }
           if ((Get-FileHash -Algorithm SHA256 -LiteralPath '../browser-host.mjs').Hash -ne (Get-FileHash -Algorithm SHA256 -LiteralPath 'release-api/win-unpacked/resources/api-runtime/browser-host.mjs').Hash) { throw 'Packaged browser-host does not contain the Windows Job Object guard' }
           Write-Host 'PASS packaged Core/browser-host and Job Object helper are byte-identical to verified staged sources.'
           if ((Get-FileHash -Algorithm SHA256 -LiteralPath 'src/api-process.mjs').Hash -ne (Get-FileHash -Algorithm SHA256 -LiteralPath 'app/api-process.mjs').Hash) { throw 'Desktop API worker guard did not propagate into Electron app source' }
