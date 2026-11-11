@@ -72,6 +72,7 @@ jobs:
           if ($edgeHash.Status -ne 'Valid') { throw "Installed Microsoft Edge not validly signed. Refusing launch." }
           $rule=New-NetFirewallRule -DisplayName 'YuTangEphemeralEdgeOutboundBlock' -Direction Outbound -Program $edge[0] -Action Block -Profile Any -ErrorAction Stop
           if ($rule.Action -ne 'Block' -or $rule.Direction -ne 'Outbound' -or $rule.Enabled -ne 'True') { throw 'Outbound firewall block unproven; refusing launch' }
+          "YUTANG_EDGE_EXE=$($edge[0])" | Out-File -LiteralPath $env:GITHUB_ENV -Encoding utf8 -Append
           Write-Host 'EDGE_OUTBOUND_BLOCK: installed Microsoft Edge traffic blocked in disposable CI VM, no Douyin requests by browser.'
 
       - name: Launch verified candidate with empty CI profile; prove Edge process and CDP binding ownership
