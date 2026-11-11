@@ -526,7 +526,7 @@ async function main() {
       hostReady: stateAfterRestart?.ready === true,
       hostPid: restartHostPid,
       browserPid: restartOwnership?.edgeLaunchSummaries?.[0]?.pid || firstBrowserPid,
-      reusedSameHost: restartHostPid === firstHostPid,
+      reusedSameHost: Number.isSafeInteger(firstHostPid) && Number.isSafeInteger(restartHostPid) && restartHostPid === firstHostPid,
       cdp: Boolean(restartVersion),
       browserVersion: String(restartVersion?.Browser || '').slice(0, 100),
       browserHostProcessCount: restartHostCount,
