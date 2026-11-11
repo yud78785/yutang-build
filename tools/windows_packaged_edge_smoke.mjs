@@ -480,6 +480,24 @@ async function run(exeFile) {
       console.error('CANDIDATE_PROCESS_CLEANUP_UNVERIFIED '+safeText(error.message,[base,home,userData,memory,profile,controlDir]));
       process.exitCode=1;
     }
+    try {
+      let unrelatedRows=ownedProfileProcesses(unrelatedProfile,unrelatedProfile);
+      for(const item of unrelatedRows) {
+        if(Number.isSafeInteger(Number(item.ProcessId)))try { execFileSync('taskkill.exe',['/PID',String(item.ProcessId),'/T','/F'],{stdio:'ignore',windowsHide:true,timeout:10000}); } catch {}
+      }
+      if(unrelatedRows.length)await delay(1000);
+      unrelatedRows=ownedProfileProcesses(unrelatedProfile,unrelatedProfile);
+      const unrelatedListeners=loopbackListeners(9231);
+      if(unrelatedRows.length||unrelatedListeners.length) {
+        console.error('UNRELATED_EDGE_CLEANUP_FAILED '+JSON.stringify({processes:unrelatedRows.map(p=>({pid:p.ProcessId,name:p.Name})),listeners:unrelatedListeners}));
+        process.exitCode=1;
+      } else {
+        console.log('UNRELATED_EDGE_CLEANUP_VERIFIED: no separate Edge process or listener remains');
+      }
+    } catch(error) {
+      console.error('UNRELATED_EDGE_CLEANUP_UNVERIFIED '+safeText(error.message,[base,home,userData,memory,profile,controlDir,unrelatedProfile]));
+      process.exitCode=1;
+    }
     await fs.rm(base,{recursive:true,force:true}).catch(()=>{});
   }
 }
