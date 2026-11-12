@@ -30,9 +30,11 @@ const fixture = [
   actionAnchor,
   "const RECOMMEND = 'https://www.douyin.com/?recommend=1';",
   "const aborted = () => {};",
+  'const browserPageLabel = () => "synthetic-browser-page";',
   'class Probe {',
-  '  constructor(start="about:blank") { this.current=start; this.visited=[]; this.page={url:()=>this.current}; }',
+  '  constructor(start="about:blank") { this.current=start; this.visited=[]; this.gotoOptions=null; this.settleOptions=null; this.page={url:()=>this.current,goto:async(url,options)=>{this.visited.push(url);this.gotoOptions=options;this.current=url;},evaluate:async(fn,name)=>{this.pageName=name;}}; }',
   '  async navigate(url, signal) { this.visited.push(url); this.current=url; }',
+  '  async settle(signal, options) { this.settleOptions=options; }',
   '  async connect(signal, { launch = true, create = true, authorizePrepare } = {}) {',
   '    if (this.page.url()==="about:blank") {',
   '       if (false) await this.navigate("never",signal);',
@@ -62,8 +64,8 @@ const Probe = context.globalThis.Probe;
 const one = new Probe();
 await one.execute('douyin_open_video',{url:direct});
 assert.deepEqual(Array.from(one.visited),[direct],'explicit direct video must skip unrelated recommendation');
-assert.deepEqual(one.gotoOptions,{waitUntil:'commit',timeout:15_000});
-assert.deepEqual(one.settleOptions,{kind:'video',videoId:id});
+assert.deepEqual(JSON.parse(JSON.stringify(one.gotoOptions)),{waitUntil:'commit',timeout:15_000});
+assert.deepEqual(JSON.parse(JSON.stringify(one.settleOptions)),{kind:'video',videoId:id});
 assert.match(patched,/Direct video navigation commit timed out/);
 const two = new Probe();
 await two.execute('douyin_open',{});
