@@ -1,0 +1,140 @@
+import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import vm from 'node:vm';
+import {
+  applyPatch, normalizeDirectVideoUrl, isSameDirectVideoPage,
+  EXPECTED_POST_JOBGUARD_SHA256
+} from '../tools/patch-core-direct-video.mjs';
+
+const id = '7577614489533680959';
+const direct = 'https://www.douyin.com/video/' + id;
+assert.equal(normalizeDirectVideoUrl(direct), direct);
+assert.equal(normalizeDirectVideoUrl(direct + '?share_token=SECRET#tag'), direct);
+for (const unsafe of [
+  'http://www.douyin.com/video/' + id,
+  'https://www.douyin.com.evil.example/video/' + id,
+  'https://attacker@www.douyin.com/video/' + id,
+  'https://www.douyin.com/video/not-a-number',
+  'https://www.douyin.com/video/' + id + '/other',
+  'https://evil.example/video/' + id,
+  'file:///video/' + id,
+  'https://www.douyin.com/video/' + id + ':9227'
+]) assert.equal(normalizeDirectVideoUrl(unsafe), null, unsafe);
+assert.equal(isSameDirectVideoPage(direct+'?foo=bar',direct),true);
+assert.equal(isSameDirectVideoPage('https://www.douyin.com/video/'+id+'9',direct),false);
+assert.equal(isSameDirectVideoPage('https://evil.example/video/'+id,direct),false);
+assert.equal(isSameDirectVideoPage('https://www.douyin.com/login',direct),false);
+
+const actionAnchor = "const VIDEO_ACTIONS=new Set(['douyin_open','douyin_search','douyin_open_video','douyin_next','douyin_previous','douyin_observe','douyin_screenshot','douyin_video_zoom','douyin_play','douyin_listen']);";
+const fixture = [
+  actionAnchor,
+  "const RECOMMEND = 'https://www.douyin.com/?recommend=1';",
+  "const aborted = signal => signal?.throwIfAborted();",
+  'const browserPageLabel = () => "synthetic-browser-page";',
+  'class Probe {',
+  '  constructor(start="about:blank",signal=null) { this.current=start; this.visited=[]; this.signal=signal; this.gotoOptions=null; this.settleOptions=null; this.page={url:()=>this.current,goto:async(url,options)=>{this.visited.push(url);this.gotoOptions=options;this.current=url;},evaluate:async(fn,name)=>{this.pageName=name;}}; }',
+  '  async navigate(url, signal) { this.visited.push(url); this.current=url; }',
+  '  async settle(signal, options) { this.settleOptions=options; }',
+  '  async connect(signal, { launch = true, create = true, authorizePrepare } = {}) {',
+  '    if (this.page.url()==="about:blank") {',
+  '       if (false) await this.navigate("never",signal);',
+  '      else await this.navigate(RECOMMEND,signal);',
+  '    }',
+  '  }',
+  '  async execute(name,args={}) {',
+  '    const signal=this.signal;',
+  '        await this.connect(signal);',
+  '        aborted(signal);',
+  "        if (name==='douyin_open_video') {",
+  '          if (args.url) await this.navigate(`https://www.douyin.com/video/${/\\/video\\/(\\d+)/.exec(args.url)[1]}`,signal);',
+  '        }',
+  '  }',
+  '}',
+  'globalThis.Probe = Probe;'
+].join('\n');
+const hash = createHash('sha256').update(fixture).digest('hex');
+assert.notEqual(hash,EXPECTED_POST_JOBGUARD_SHA256,'synthetic fixture must not be mistaken for real core');
+assert.throws(()=>applyPatch(fixture),/SHA256 mismatch/);
+const {patched} = applyPatch(fixture,hash);
+assert.match(patched,/initialDirectVideoReceipt.completed = true/);
+assert.match(patched,/initialDirectVideoReceipt\?\.completed !== true/);
+const context = vm.createContext({URL,globalThis:{},delay:async()=>{}});
+vm.runInContext(patched,context,{timeout:1000});
+const Probe = context.globalThis.Probe;
+const one = new Probe();
+let contextAttempts=0;
+one.page.evaluate=async(fn,name)=>{contextAttempts++;if(contextAttempts===1)throw new Error('Execution context was destroyed, most likely because of a navigation');one.pageName=name;};
+await one.execute('douyin_open_video',{url:direct});
+assert.deepEqual(Array.from(one.visited),[direct],'explicit direct video must skip unrelated recommendation');
+assert.deepEqual(JSON.parse(JSON.stringify(one.gotoOptions)),{waitUntil:'commit',timeout:15_000});
+assert.deepEqual(JSON.parse(JSON.stringify(one.settleOptions)),{kind:'video',videoId:id});
+assert.equal(contextAttempts,2,'a transient post-commit execution-context reset must be retried once');
+assert.equal(one.pageName,'synthetic-browser-page');
+assert.match(patched,/Direct video navigation commit timed out/);
+assert.match(patched,/DIRECT_VIDEO_CONTEXT_TIMEOUT/);
+const two = new Probe();
+await two.execute('douyin_open',{});
+assert.deepEqual(Array.from(two.visited),['https://www.douyin.com/?recommend=1'],'non-target action preserves original feed');
+const three = new Probe(direct+'?tracked=1');
+await three.execute('douyin_open_video',{url:direct});
+assert.deepEqual(Array.from(three.visited),[direct],'existing page needs re-navigation unless this connect navigated successfully');
+const four = new Probe();
+await four.execute('douyin_open_video',{url:'https://evil.example/video/'+id});
+assert.deepEqual(Array.from(four.visited),['https://www.douyin.com/?recommend=1',direct],'foreign URL not eligible for new fastpath');
+const five = new Probe();
+await five.connect(null,{initialDirectVideoUrl:'https://evil.example/video/'+id, initialDirectVideoReceipt:{completed:false}}).then(
+  ()=>assert.fail('unsafe direct-target option was accepted'),
+  e=>assert.match(String(e.message),/not verified/)
+);
+
+for (const tampered of [fixture.replace(actionAnchor,''),fixture+'\n'+actionAnchor,fixture.replace('else await this.navigate(RECOMMEND,signal);','else {}'),fixture.replace('  async navigate(url, signal) {','  async navigateChanged(url, signal) {'),patched]) {
+  assert.throws(()=>applyPatch(tampered,createHash('sha256').update(tampered).digest('hex')),/(anchor mismatch|already present)/);
+}
+const six=new Probe('https://www.douyin.com/?recommend=1');
+await six.execute('douyin_open_video',{url:direct});
+assert.deepEqual(Array.from(six.visited),[direct],'prepared nonblank page must navigate explicitly');
+const seven=new Probe();
+seven.page.goto=async()=>{throw Object.assign(new Error('injected navigation timeout'),{name:'TimeoutError'});};
+await assert.rejects(seven.execute('douyin_open_video',{url:direct}),error=>error.code==='DIRECT_VIDEO_COMMIT_TIMEOUT');
+const eight=new Probe();
+let unrelatedAttempts=0;
+eight.page.evaluate=async()=>{unrelatedAttempts++;throw new Error('injected unrelated evaluation failure');};
+await assert.rejects(eight.execute('douyin_open_video',{url:direct}),/injected unrelated evaluation failure/);
+assert.equal(unrelatedAttempts,1,'unrelated errors must not be swallowed or retried');
+const stopController=new AbortController();
+const nine=new Probe('about:blank',stopController.signal);
+nine.page.evaluate=async()=>{stopController.abort(new Error('user stop'));throw new Error('Execution context was destroyed during navigation');};
+await assert.rejects(nine.execute('douyin_open_video',{url:direct}),/user stop/);
+
+
+const settleRetry=new Probe();
+let settleRetryCount=0;
+settleRetry.settle=async(signal,options)=>{
+  settleRetryCount++;
+  if(settleRetryCount===1)throw new Error('Execution context was destroyed, most likely because of a navigation');
+  settleRetry.settleOptions=options;
+};
+await settleRetry.execute('douyin_open_video',{url:direct});
+assert.equal(settleRetryCount,2,'read-only settle retries one transient context reset');
+assert.equal(settleRetry.current,direct,'context retry does not navigate again or change target');
+const settleStuck=new Probe();
+let settleStuckCount=0;
+settleStuck.settle=async()=>{settleStuckCount++;throw new Error('Cannot find context with specified id');};
+await assert.rejects(settleStuck.execute('douyin_open_video',{url:direct}),error=>error.code==='DIRECT_VIDEO_SETTLE_CONTEXT_RETRY_EXHAUSTED');
+assert.equal(settleStuckCount,2,'bounded retry cannot hide persistent context resets');
+const changedTarget=new Probe();
+let changedTargetCount=0;
+changedTarget.settle=async()=>{changedTargetCount++;changedTarget.current='https://www.douyin.com/video/987654321';throw new Error('Execution context was destroyed');};
+await assert.rejects(changedTarget.execute('douyin_open_video',{url:direct}),error=>error.code==='DIRECT_VIDEO_SETTLE_IDENTITY_CHANGED');
+assert.equal(changedTargetCount,1,'wrong video identity is never retried');
+const unrelatedSettle=new Probe();
+let unrelatedSettleCount=0;
+unrelatedSettle.settle=async()=>{unrelatedSettleCount++;throw new Error('Non-navigation synthetic state corruption');};
+await assert.rejects(unrelatedSettle.execute('douyin_open_video',{url:direct}),/Non-navigation synthetic state corruption/);
+assert.equal(unrelatedSettleCount,1,'unrelated state-read failures fail without retry');
+const stopSettleController=new AbortController();
+const stopSettle=new Probe('about:blank',stopSettleController.signal);
+stopSettle.settle=async()=>{stopSettleController.abort(new Error('user stopped during settle'));throw new Error('Execution context was destroyed');};
+await assert.rejects(stopSettle.execute('douyin_open_video',{url:direct}),/user stopped during settle/);
+
+console.log('PASS canonical target, navigation receipt, no duplicate on fresh page, strict fallback and negative patch regressions');

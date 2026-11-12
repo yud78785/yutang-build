@@ -8,7 +8,20 @@ import path from 'node:path';
 
 export const ORIGINAL_BLOB = '76330ff6bd4e486d98c0b8705e122cab997c58c1';
 export const BEFORE = "const ready = await bounded(checkRenderer, { signal: combined, timeoutMs: 3000, code: 'STARTUP_RENDERER_TIMEOUT', message: '软件页面就绪检查超时。' });";
-export const AFTER = "const ready = await bounded(checkRenderer, { signal: combined, timeoutMs: 7000, code: 'STARTUP_RENDERER_TIMEOUT', message: '软件页面就绪检查超时。' });";
+export const AFTER = [
+  "const rendererReadinessState = () => {",
+  "  try { return { attempt, target: targetKind(contents.getURL(), target), stage: contents.isLoadingMainFrame() ? 'main-frame-loading' : contents.isLoading() ? 'resource-loading' : 'idle' }; }",
+  "  catch { return { attempt, stage: 'unavailable' }; }",
+  "};",
+  "record('renderer.probe-start', rendererReadinessState());",
+  "let ready;",
+  "try {",
+  "  ready = await bounded(checkRenderer, { signal: combined, timeoutMs: 7000, code: 'STARTUP_RENDERER_TIMEOUT', message: '软件页面就绪检查超时。' });",
+  "} catch (error) {",
+  "  if (error?.code === 'STARTUP_RENDERER_TIMEOUT') record('renderer.timeout', { ...rendererReadinessState(), reason: 'check-unresolved' });",
+  "  throw error;",
+  "}"
+].join(String.fromCharCode(10)+'        ');
 export function gitBlobSha(content) {
   const bytes = Buffer.isBuffer(content) ? content : Buffer.from(content, 'utf8');
   return createHash('sha1').update(Buffer.from('blob ' + bytes.length + '\0')).update(bytes).digest('hex');
@@ -27,6 +40,7 @@ async function main() {
     const fixture = 'async function a(){\n  ' + BEFORE + '\n}\n';
     const hash = gitBlobSha(fixture);
     if (applyPatch(fixture, hash).patched !== fixture.replace(BEFORE, AFTER)) throw Error('Startup patch fixture mismatch.');
+    if (!AFTER.includes("renderer.probe-start") || !AFTER.includes("renderer.timeout") || !AFTER.includes("rendererReadinessState")) throw Error('Renderer diagnostics missing from pinned patch.');
     for (const bad of [fixture + BEFORE, fixture.replace(BEFORE, 'not-the-expected-expression'), fixture.replace(BEFORE, AFTER)]) {
       let rejected = false;
       try { applyPatch(bad, gitBlobSha(bad)); } catch { rejected = true; }
@@ -43,7 +57,7 @@ async function main() {
   const temp = filename + '.yutang-' + process.pid + '.tmp';
   try { await writeFile(temp, patched, { flag: 'wx' }); await rename(temp, filename); }
   finally { await rm(temp, { force: true }).catch(() => {}); }
-  console.log('PASS renderer readiness IPC budget 3000 -> 7000 ms; patched SHA256=' + sha256);
+  console.log('PASS renderer readiness IPC budget 3000 -> 7000 ms, with safe main-process timeout-stage evidence; patched SHA256=' + sha256);
   console.log('LIMIT: this change preserves the renderer-ready truth check and does not prove cold-start reliability.');
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href)

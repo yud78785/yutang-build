@@ -8,6 +8,17 @@ on:
   pull_request:
     paths:
       - .github/workflows/yutang.yml
+      - .github/workflows/windows-isolated-candidate-ownership.yml
+      - .github/workflows/windows-public-douyin-video-probe.yml
+      - tools/jobguard/**
+      - tools/patch-core-direct-video.mjs
+      - tests/test-core-direct-video-patch.mjs
+      - tools/live-vision-acceptance.mjs
+      - tools/test-live-vision-acceptance.mjs
+      - tools/test-production-vision-request.mjs
+      - tools/windows_isolated_candidate_edge_smoke.mjs
+      - tools/windows_public_douyin_video_probe.mjs
+      - tools/resolve-candidate-artifact.ps1
   workflow_dispatch:
 
 permissions:
@@ -19,16 +30,43 @@ jobs:
     timeout-minutes: 90
     env:
       FIXED_COMMIT: 912873e2556d16a088d81dcbc6f7c0060614dd58
+      YUTANG_BUILD_CONTROL_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
     steps:
+      - name: Refuse self-hosted or wrong-repository Windows execution
+        shell: pwsh
+        env:
+          YUTANG_RUNNER_KIND: ${{ runner.environment }}
+          YUTANG_REPOSITORY: ${{ github.repository }}
+          YUTANG_EVENT: ${{ github.event_name }}
+          YUTANG_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          YUTANG_BASE_REPOSITORY: ${{ github.event.pull_request.base.repo.full_name }}
+          YUTANG_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          $ErrorActionPreference='Stop'
+          if ($env:GITHUB_ACTIONS -ne 'true') { throw 'Not inside GitHub Actions; refusing Windows execution.' }
+          if ($env:YUTANG_RUNNER_KIND -cne 'github-hosted') { throw 'Self-hosted or unknown runner forbidden; do not execute on a user PC.' }
+          if ($env:RUNNER_OS -cne 'Windows' -or $env:RUNNER_ARCH -cne 'X64') { throw 'Unexpected runner OS or architecture.' }
+          if ($env:YUTANG_EVENT -cne 'pull_request' -or $env:GITHUB_EVENT_NAME -cne 'pull_request') { throw 'Only reviewed pull-request test events are allowed.' }
+          if ($env:YUTANG_REPOSITORY -cne 'yud78785/yutang-build' -or $env:GITHUB_REPOSITORY -cne 'yud78785/yutang-build') { throw 'Unexpected repository; refusing execution.' }
+          if ($env:YUTANG_HEAD_REPOSITORY -cne 'yud78785/yutang-build' -or $env:YUTANG_BASE_REPOSITORY -cne 'yud78785/yutang-build') { throw 'Forked or unrelated PR source forbidden.' }
+          if ($env:YUTANG_HEAD_SHA -notmatch '^[0-9a-f]{40}$') { throw 'Missing immutable PR head SHA.' }
+          Write-Host 'YUTANG_GITHUB_HOSTED_RUNNER_VERIFIED: trusted pull request on disposable Windows x64 runner'
       - name: Checkout build controls (no persisted Git credentials)
         uses: actions/checkout@v4
         with:
           persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
 
       - name: Set up Node.js 24
         uses: actions/setup-node@v4
         with:
           node-version: '24'
+
+      - name: Set up Go for Windows Job Object guard
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.2'
+          cache: false
 
       - name: Materialize audited build controls (self-contained workflow)
         shell: pwsh
@@ -45,7 +83,7 @@ jobs:
           export const ORIGINAL_BLOB = 'a1c8522365f4e02d9ef83a6f6700ebe93acba2f6';
           export const CALL = 'chromiumImpl.launchPersistentContext(profile, {';
           export const BEFORE = "channel: 'msedge', headless: false, viewport: null, ignoreDefaultArgs: ['--mute-audio'],";
-          export const AFTER = "channel: 'msedge', headless: false, viewport: null, chromiumSandbox: true, ignoreDefaultArgs: ['--mute-audio'],";
+          export const AFTER = "channel: 'msedge', headless: false, viewport: null, chromiumSandbox: true, timeout: 20_000, ignoreDefaultArgs: ['--mute-audio'],";
           export const ARGS_BEFORE = "args: [`--remote-debugging-port=${port}`, '--remote-debugging-address=127.0.0.1', '--autoplay-policy=no-user-gesture-required'],";
           export const ARGS_AFTER = "args: [`--remote-debugging-port=${port}`, '--remote-debugging-address=127.0.0.1', '--autoplay-policy=no-user-gesture-required', '--enable-features=NetworkServiceSandbox'],";
           
@@ -61,7 +99,7 @@ jobs:
             if (!s.includes(CALL) || s.split(CALL).length !== 2) throw Error('Expected exactly one dedicated Edge launch.');
             if (s.split(BEFORE).length !== 2) throw Error('Expected exact known v1.4.6 Edge options once.');
             if (s.split(ARGS_BEFORE).length !== 2) throw Error('Expected exact known v1.4.6 Edge args once.');
-            if (s.includes('chromiumSandbox: true') || s.includes('--enable-features=NetworkServiceSandbox')) throw Error('Already modified: unexpected source for pinned commit.');
+            if (s.includes('chromiumSandbox: true') || s.includes('timeout: 20_000') || s.includes('--enable-features=NetworkServiceSandbox')) throw Error('Already modified: unexpected source for pinned commit.');
             const start = s.indexOf(CALL);
             const location = s.indexOf(BEFORE);
             const argsLocation = s.indexOf(ARGS_BEFORE);
@@ -70,6 +108,7 @@ jobs:
             const patched = s.replace(BEFORE, AFTER).replace(ARGS_BEFORE, ARGS_AFTER);
             const launch = patched.slice(start, start + 900);
             if (!launch.includes('chromiumSandbox: true')) throw Error('Postpatch renderer sandbox check failed.');
+            if (!launch.includes('timeout: 20_000')) throw Error('Postpatch bounded browser launch timeout missing.');
             if (!launch.includes('--enable-features=NetworkServiceSandbox')) throw Error('Postpatch Network Service sandbox flag missing.');
             if (launch.includes('--no-sandbox') || launch.includes('--disable-setuid-sandbox')) throw Error('Unsafe flag present near Edge launch.');
             if (patched.replace(ARGS_AFTER, ARGS_BEFORE).replace(AFTER, BEFORE) !== s) throw Error('Patch changed content beyond the two reviewed launch options.');
@@ -88,7 +127,7 @@ jobs:
               await rename(tmp, target);
             } finally { await rm(tmp, { force: true }).catch(() => {}); }
             console.log(`PASS original v1.4.6 Git blob: ${originalId}`);
-            console.log(`PASS inserted chromiumSandbox:true exactly once; patched SHA256: ${patchedSha256}`);
+            console.log(`PASS inserted chromiumSandbox:true and bounded browser launch timeout exactly once; patched SHA256: ${patchedSha256}`);
             console.log('NOTE source patch only: does not prove the packaged Windows browser sandbox is effective.');
           }
           const invoked = process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href;
@@ -101,7 +140,7 @@ jobs:
           if (files.length < 2) { console.error('Usage: node verify-propagation.mjs source copied-file [packaged-file]'); process.exit(1); }
           const originals = files.map(f => { if (!fs.existsSync(f)) throw Error(`Missing file ${f}`); return fs.readFileSync(f); });
           const digest = b => crypto.createHash('sha256').update(b).digest('hex');
-          if (!originals.every(b => b.includes(Buffer.from('chromiumSandbox: true')) && b.includes(Buffer.from('--enable-features=NetworkServiceSandbox')))) throw Error('One or more copies lack the renderer or Network Service sandbox option.');
+          if (!originals.every(b => b.includes(Buffer.from('chromiumSandbox: true')) && b.includes(Buffer.from('timeout: 20_000')) && b.includes(Buffer.from('--enable-features=NetworkServiceSandbox')))) throw Error('One or more copies lack the renderer or Network Service sandbox option.');
           if (!originals.slice(1).every(b => b.equals(originals[0]))) throw Error('Source / staged / packaged copies differ.');
           console.log(`PASS ${files.length} byte-for-byte identical patched source copies; sha256=${digest(originals[0])}`);
           console.log('NOTE This is a packaged-source check, not proof of sandbox runtime behavior.');
@@ -156,6 +195,7 @@ jobs:
           const { patched, patchedSha256 } = applyPatch(fixture, hash);
           assert.equal(patched, fixture.replace(BEFORE, AFTER).replace(ARGS_BEFORE, ARGS_AFTER));
           assert.ok(patched.includes('chromiumSandbox: true'));
+          assert.ok(patched.includes('timeout: 20_000'));
           assert.ok(patched.includes('--enable-features=NetworkServiceSandbox'));
           assert.match(patchedSha256,/^[a-f0-9]{64}$/);
           assert.throws(()=>applyPatch(fixture, '0000000000000000000000000000000000000000'),/blob mismatch/);
@@ -181,7 +221,7 @@ jobs:
           const script = fileURLToPath(new URL('../tools/verify-propagation.mjs', import.meta.url));
           try {
             const a = path.join(base,'original.mjs'), b=path.join(base,'staged.mjs'), c=path.join(base,'packed.mjs');
-            const value = "const browser = { chromiumSandbox: true, args: ['--enable-features=NetworkServiceSandbox'] };";
+            const value = "const browser = { chromiumSandbox: true, timeout: 20_000, args: ['--enable-features=NetworkServiceSandbox'] };";
             for (const p of [a,b,c]) writeFileSync(p,value);
             const pass = execFileSync(process.execPath,[script,a,b,c],{encoding:'utf8'});
             assert.match(pass,/PASS 3 byte-for-byte identical/);
@@ -202,6 +242,24 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Propagation fail-closed controls failed' }
           node tools/patch-startup-ready.mjs --self-test
           if ($LASTEXITCODE -ne 0) { throw 'Renderer startup patch safety checks failed' }
+          node --check tools/patch-isolated-candidate-state.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Isolated profile/memory patch syntax failed' }
+          node --check tools/patch-browser-launcher-navigation.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'BrowserLauncher navigation patch syntax failed' }
+          node tests/test-browser-launcher-navigation-patch.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'BrowserLauncher navigation recovery patch tests failed' }
+          node --check tools/jobguard/patch-jobguard.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Job Object patch script syntax failed' }
+          node tests/test-jobguard-patch.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Job Object patch tests failed' }
+          node --check tools/patch-core-direct-video.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Direct public video canonical patch syntax failed' }
+          node tests/test-core-direct-video-patch.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Direct public video fail-closed route regressions failed' }
+          node --check tools/jobguard/patch-desktop-guard.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Desktop worker guard source syntax failed' }
+          node tests/test-desktop-guard-patch.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Desktop worker guard patch tests failed' }
 
       - name: Checkout exact upstream release commit and verify source identity
         shell: pwsh
@@ -221,8 +279,22 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Pinned renderer startup patch failed' }
           node --check upstream/desktop/src/startup-navigation.mjs
           if ($LASTEXITCODE -ne 0) { throw 'Patched renderer source syntax failed' }
+          node tools/patch-isolated-candidate-state.mjs (Resolve-Path upstream/runtime-paths.mjs).Path (Resolve-Path upstream/desktop/src/prepare-api-runtime.mjs).Path (Resolve-Path upstream/desktop/src/main.mjs).Path
+          if ($LASTEXITCODE -ne 0) { throw 'Candidate profile, memory and settings isolation patch failed' }
+          node tools/patch-browser-launcher-navigation.mjs (Resolve-Path upstream/browser-launcher.mjs).Path
+          if ($LASTEXITCODE -ne 0) { throw 'BrowserLauncher bounded same-origin navigation recovery patch failed' }
+          node tools/jobguard/patch-jobguard.mjs (Resolve-Path upstream/browser-host.mjs).Path (Resolve-Path upstream/core.mjs).Path
+          if ($LASTEXITCODE -ne 0) { throw 'Windows Job Object browser-host containment patch failed' }
+          node tools/patch-core-direct-video.mjs (Resolve-Path upstream/core.mjs).Path
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned direct public video fastpath patch failed' }
+          node tools/jobguard/patch-desktop-guard.mjs (Resolve-Path upstream/desktop/src/api-process.mjs).Path
+          if ($LASTEXITCODE -ne 0) { throw 'Windows Job Object desktop API worker containment patch failed' }
+          foreach ($entry in @('upstream/runtime-paths.mjs', 'upstream/desktop/src/prepare-api-runtime.mjs', 'upstream/desktop/src/main.mjs', 'upstream/desktop/src/api-process.mjs', 'upstream/browser-launcher.mjs', 'upstream/browser-host.mjs', 'upstream/core.mjs')) {
+            node --check $entry
+            if ($LASTEXITCODE -ne 0) { throw "Patched candidate source failed syntax check: $entry" }
+          }
           $changed = @(git -C upstream diff --name-only)
-          if ($changed.Count -ne 2 -or $changed -notcontains 'browser-host.mjs' -or $changed -notcontains 'desktop/src/startup-navigation.mjs') { throw 'Unexpected source differences' }
+          if ($changed.Count -ne 8 -or $changed -notcontains 'desktop/src/api-process.mjs' -or $changed -notcontains 'browser-host.mjs' -or $changed -notcontains 'core.mjs' -or $changed -notcontains 'runtime-paths.mjs' -or $changed -notcontains 'desktop/src/prepare-api-runtime.mjs' -or $changed -notcontains 'desktop/src/main.mjs' -or $changed -notcontains 'desktop/src/startup-navigation.mjs' -or $changed -notcontains 'browser-launcher.mjs') { throw 'Unexpected source differences' }
 
       - name: Install pinned pnpm and repository dependencies
         shell: pwsh
@@ -292,6 +364,21 @@ jobs:
           node scripts/acquire-upstream.mjs --verify
           if ($LASTEXITCODE -ne 0) { throw 'Upstream cache verification failed' }
 
+      - name: Build and test Windows Job Object guard
+        shell: pwsh
+        working-directory: tools/jobguard
+        run: |
+          go version
+          go test -count=1 ./...
+          if ($LASTEXITCODE -ne 0) { throw 'Windows Job Object guard Go tests failed' }
+          go vet ./...
+          if ($LASTEXITCODE -ne 0) { throw 'Windows Job Object guard go vet failed' }
+          go build -trimpath -ldflags='-s -w' -o jobguard.exe .
+          if ($LASTEXITCODE -ne 0) { throw 'Windows Job Object guard build failed' }
+          if (-not (Test-Path -LiteralPath 'jobguard.exe' -PathType Leaf)) { throw 'Built Job Object helper is missing' }
+          $guardHash=(Get-FileHash -LiteralPath 'jobguard.exe' -Algorithm SHA256).Hash.ToLowerInvariant()
+          Write-Host "WINDOWS_JOB_GUARD_SHA256 $guardHash"
+
       - name: Prepare official runtime and React UI
         shell: pwsh
         working-directory: upstream/desktop
@@ -307,20 +394,45 @@ jobs:
           } finally { Pop-Location }
           node scripts/stage-api-runtime.mjs
           if ($LASTEXITCODE -ne 0) { throw 'API runtime stage failed' }
+          Copy-Item -LiteralPath '../../tools/jobguard/jobguard.exe' -Destination '.cache/api-runtime/jobguard.exe' -Force
+          if (-not (Test-Path -LiteralPath '.cache/api-runtime/jobguard.exe' -PathType Leaf)) { throw 'Windows Job Object helper was not copied into the API runtime' }
           node ../../tools/verify-propagation.mjs ../browser-host.mjs .cache/api-runtime/browser-host.mjs
-          if ($LASTEXITCODE -ne 0) { throw 'Sandbox fix was not staged into runtime' }
+          if ($LASTEXITCODE -ne 0) { throw 'Sandbox or timeout fix was not staged into runtime' }
+          if ((Get-FileHash -Algorithm SHA256 -LiteralPath '../core.mjs').Hash -ne (Get-FileHash -Algorithm SHA256 -LiteralPath '.cache/api-runtime/core.mjs').Hash) { throw 'Job Object requirement was not staged into runtime' }
+          if (-not (Select-String -LiteralPath '.cache/api-runtime/core.mjs' -SimpleMatch -Pattern 'function normalizeDirectVideoUrl' -Quiet)) { throw 'Verified direct public video fastpath was not staged into runtime' }
+          if ((Get-FileHash -Algorithm SHA256 -LiteralPath '../runtime-paths.mjs').Hash -ne (Get-FileHash -Algorithm SHA256 -LiteralPath '.cache/api-runtime/runtime-paths.mjs').Hash) { throw 'Private YuTang runtime path defaults did not propagate to the staged runtime' }
+          if ((Get-FileHash -Algorithm SHA256 -LiteralPath '../browser-launcher.mjs').Hash -ne (Get-FileHash -Algorithm SHA256 -LiteralPath '.cache/api-runtime/browser-launcher.mjs').Hash) { throw 'Bounded BrowserLauncher navigation fix did not propagate to the staged runtime' }
           node scripts/build-api-desktop.mjs
           if ($LASTEXITCODE -ne 0) { throw 'Desktop application build failed' }
           $source=(Get-FileHash -Algorithm SHA256 -LiteralPath 'src/startup-navigation.mjs').Hash
           $copied=(Get-FileHash -Algorithm SHA256 -LiteralPath 'app/startup-navigation.mjs').Hash
           if ($source -ne $copied) { throw 'Renderer startup patch not copied into desktop app' }
           Write-Host 'PASS renderer startup patch is byte-identical in desktop application entry.'
+          foreach ($entry in @('main.mjs','prepare-api-runtime.mjs','api-process.mjs')) {
+            $original=(Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path 'src' $entry)).Hash
+            $staged=(Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path 'app' $entry)).Hash
+            if ($original -ne $staged) { throw "Candidate state isolation source was not copied into Electron app: $entry" }
+          }
+          Write-Host 'PASS new candidate has isolated Electron settings, shared state and Edge profile defaults; desktop API worker Job Object guard staged.'
 
       - name: Run independent Edge sandbox process probe on Windows
         shell: pwsh
         run: |
           node tools/windows-edge-probe.mjs upstream/desktop/.cache/api-runtime
           if ($LASTEXITCODE -ne 0) { throw 'Windows Edge sandbox probe did not pass' }
+
+      - name: Verify production DeepSeek vision request path offline (NO API KEY / NO NETWORK)
+        shell: pwsh
+        run: |
+          node --check tools/live-vision-acceptance.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Opt-in live vision acceptance script syntax failed' }
+          node --test tools/test-live-vision-acceptance.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Live vision evidence and semantic score regression tests failed' }
+          node --check tools/test-production-vision-request.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Production vision request test syntax failed' }
+          node --test tools/test-production-vision-request.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Production ApiAgent multimodal request contract failed' }
+          Write-Host 'PASS production ApiAgent image request contract; all requests used local fake fetch only.'
 
       - name: Produce candidate EXE and check packaged payload
         shell: pwsh
@@ -330,6 +442,16 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Unpacked Windows build failed' }
           node ../../tools/verify-propagation.mjs ../browser-host.mjs .cache/api-runtime/browser-host.mjs release-api/win-unpacked/resources/api-runtime/browser-host.mjs
           if ($LASTEXITCODE -ne 0) { throw 'Packaged source did not contain verified patch' }
+          if ((Get-FileHash -Algorithm SHA256 -LiteralPath '../browser-launcher.mjs').Hash -ne (Get-FileHash -Algorithm SHA256 -LiteralPath 'release-api/win-unpacked/resources/api-runtime/browser-launcher.mjs').Hash) { throw 'Packaged BrowserLauncher navigation fix is missing or changed' }
+          Write-Host 'PASS bounded same-origin BrowserLauncher navigation recovery is byte-identical in packaged runtime.'
+          if ((Get-FileHash -Algorithm SHA256 -LiteralPath '.cache/api-runtime/jobguard.exe').Hash -ne (Get-FileHash -Algorithm SHA256 -LiteralPath 'release-api/win-unpacked/resources/api-runtime/jobguard.exe').Hash) { throw 'Packaged Windows Job Object helper is missing or changed' }
+          if ((Get-FileHash -Algorithm SHA256 -LiteralPath '../core.mjs').Hash -ne (Get-FileHash -Algorithm SHA256 -LiteralPath 'release-api/win-unpacked/resources/api-runtime/core.mjs').Hash) { throw 'Packaged Core does not require the Windows Job Object guard' }
+          if (-not (Select-String -LiteralPath 'release-api/win-unpacked/resources/api-runtime/core.mjs' -SimpleMatch -Pattern 'function normalizeDirectVideoUrl' -Quiet)) { throw 'Packaged Core lacks the reviewed direct video navigation fastpath' }
+          if ((Get-FileHash -Algorithm SHA256 -LiteralPath '../browser-host.mjs').Hash -ne (Get-FileHash -Algorithm SHA256 -LiteralPath 'release-api/win-unpacked/resources/api-runtime/browser-host.mjs').Hash) { throw 'Packaged browser-host does not contain the Windows Job Object guard' }
+          Write-Host 'PASS packaged Core/browser-host and Job Object helper are byte-identical to verified staged sources.'
+          if ((Get-FileHash -Algorithm SHA256 -LiteralPath 'src/api-process.mjs').Hash -ne (Get-FileHash -Algorithm SHA256 -LiteralPath 'app/api-process.mjs').Hash) { throw 'Desktop API worker guard did not propagate into Electron app source' }
+          Write-Host 'PASS guarded desktop API process is byte-identical to staged Electron app source.'
+          if ((Get-FileHash -Algorithm SHA256 -LiteralPath '../runtime-paths.mjs').Hash -ne (Get-FileHash -Algorithm SHA256 -LiteralPath 'release-api/win-unpacked/resources/api-runtime/runtime-paths.mjs').Hash) { throw 'Packaged runtime did not retain isolated browser profile, memory and control defaults' }
           pnpm package:portable
           if ($LASTEXITCODE -ne 0) { throw 'Portable Windows packaging failed' }
           # Verify with the same locked Playwright runtime already staged and probed above.
@@ -337,18 +459,23 @@ jobs:
           $env:NODE_PATH = (Resolve-Path .cache/api-runtime/node_modules).Path
           node -e "console.log('Smoke verifier Playwright:', require.resolve('playwright-core'))"
           if ($LASTEXITCODE -ne 0) { throw 'Staged verification dependency unavailable' }
+          node ../../tools/patch-smoke-isolation.mjs (Resolve-Path scripts/verify-packaged-api.mjs).Path
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned isolated-state smoke expectation patch failed' }
+          node --check scripts/verify-packaged-api.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Patched packaged smoke verifier syntax failed' }
           node scripts/verify-packaged-api.mjs
-          if ($LASTEXITCODE -ne 0) { throw 'Official packaged API verification failed' }
+          if ($LASTEXITCODE -ne 0) { throw 'Isolated packaged API verification failed' }
           $exe = @(Get-ChildItem release-api -Filter '*.exe' -File | Where-Object { $_.Length -gt 50000000 })
           if (@($exe).Count -ne 1) { throw 'Expected exactly one EXE artifact' }
           $hash = (Get-FileHash -LiteralPath $exe[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
           @(
             'STATUS: WINDOWS CI CANDIDATE ONLY - NOT AN END-TO-END SECURITY RELEASE'
             "PINNED COMMIT: $env:FIXED_COMMIT"
+            "BUILD CONTROL SHA: $env:YUTANG_BUILD_CONTROL_SHA"
             "FILE: $($exe[0].Name)"
             "SHA256: $hash"
-            'PASSED: pinned source patch, upstream tar.gz/tree verification, staged/packaged source, packaged API smoke, renderer AppContainer sandbox, NetworkServiceSandbox feature'
-            'NOT PROVEN: real Douyin playback, model reasoning, continuous autonomy, memory synchronization, signed release trust'
+            'PASSED: pinned source patch, bounded 20s Edge launch, isolated candidate profile/memory/settings defaults, bounded same-origin BrowserLauncher navigation recovery, upstream tar.gz/tree, packaged API smoke, renderer AppContainer, NetworkServiceSandbox feature'
+            'NOT PROVEN: real Douyin playback, model reasoning, continuous autonomy, Windows Network Service native token restrictions, signed release trust'
           ) | Set-Content -LiteralPath release-api/YUTANG-RESULT.txt -Encoding utf8
           Write-Host "CANDIDATE SHA256 $hash"
 
