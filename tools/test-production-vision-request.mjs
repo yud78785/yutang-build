@@ -95,9 +95,9 @@ test('生产 ApiAgent.decideWatch 真实请求分支发送三帧分镜、只接�
   const text=userContent.filter(part=>part?.type==='text').map(part=>part.text).join('\n');
   assert.ok(text.includes(VIDEO_ID));
   assert.match(text,/第1格/);
-  assert.equal(agent.lastVisualPacking.manifest.status,'storyboard');
-  assert.equal(agent.lastVisualPacking.manifest.inputImages,3);
-  assert.equal(agent.lastVisualPacking.manifest.outputImages,1);
+  assert.equal(agent.lastVisualPacking.status,'storyboard');
+  assert.equal(agent.lastVisualPacking.inputImages,3);
+  assert.equal(agent.lastVisualPacking.outputImages,1);
   assert.deepEqual(result.decision,decision);
   assert.deepEqual(result.usage,{promptTokens:41,completionTokens:13,totalTokens:54});
   assert.equal(usageRecords.length,1);
