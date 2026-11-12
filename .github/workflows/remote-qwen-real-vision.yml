@@ -1,4 +1,4 @@
-name: YuTang remote genuine vision smoke - pinned public frames
+name: YuTang genuine 8B three-frame vision comparison - pinned public frames
 
 on:
   push:
@@ -19,10 +19,10 @@ jobs:
   genuine-vision:
     if: github.repository == 'yud78785/yutang-build' && github.ref == 'refs/heads/experiment/remote-qwen-vision-20261112'
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 18
     env:
       EXPECTED_WINDOWS_SHA: 00f5ac8d560f8459f333cadeb9e9cb227cfaeca6
-      MODEL_REV: 52d6c8ffea26cc873ac5ad116f8631268d7eb503
+      MODEL_REV: f982a07559d4a2f6c8744d840bf6fccab30eea96
     steps:
       - name: Confirm isolated GitHub-hosted runner, public repo and minimal resources
         env:
@@ -111,22 +111,22 @@ jobs:
           find tools/llama -type f -name 'llama-mtmd-cli' -print -quit | grep -q .
           echo PINNED_LLAMA_CPP_BINARY_VERIFIED
 
-      - name: Download and SHA-256 verify official Qwen3-VL 2B weights (no API credentials)
+      - name: Download and SHA-256 verify official Qwen3-VL 8B weights (no API credentials)
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p model
-          curl -fL --retry 2 --retry-delay 2 --connect-timeout 20 --max-time 360 \
-            -o model/Qwen3VL-2B-Instruct-Q4_K_M.gguf \
-            "https://huggingface.co/Qwen/Qwen3-VL-2B-Instruct-GGUF/resolve/$MODEL_REV/Qwen3VL-2B-Instruct-Q4_K_M.gguf"
-          echo '089d75c52f4b7ffc56ba998ffc50aae89fcafc755f9e7208aacca281dca6c2ae  model/Qwen3VL-2B-Instruct-Q4_K_M.gguf' | sha256sum -c -
+          curl -fL --retry 2 --retry-delay 2 --connect-timeout 20 --max-time 480 \
+            -o model/Qwen3VL-8B-Instruct-Q4_K_M.gguf \
+            "https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct-GGUF/resolve/$MODEL_REV/Qwen3VL-8B-Instruct-Q4_K_M.gguf"
+          echo '67d1659bfe71b89d50b45a4ad1a9e5b997e5bb16ce5da66a6a6167abd569e9e2  model/Qwen3VL-8B-Instruct-Q4_K_M.gguf' | sha256sum -c -
           curl -fL --retry 2 --retry-delay 2 --connect-timeout 20 --max-time 240 \
-            -o model/mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf \
-            "https://huggingface.co/Qwen/Qwen3-VL-2B-Instruct-GGUF/resolve/$MODEL_REV/mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf"
-          echo 'f9a68fabba69c3b81e153367b2c7521030b0fa8bb0de400c9599c8e6725f9c82  model/mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf' | sha256sum -c -
+            -o model/mmproj-Qwen3VL-8B-Instruct-Q8_0.gguf \
+            "https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct-GGUF/resolve/$MODEL_REV/mmproj-Qwen3VL-8B-Instruct-Q8_0.gguf"
+          echo 'c6ba85508d82f42590e6eb77d5340369ab6fecf107a7561d809523d8aa5f3bfd  model/mmproj-Qwen3VL-8B-Instruct-Q8_0.gguf' | sha256sum -c -
           echo OFFICIAL_QWEN3_VL_WEIGHTS_VERIFIED
 
-      - name: Recheck three real frames with Qwen minimum visual tokens and complete output
+      - name: Compare stronger Qwen3-VL 8B on same three authentic Windows video frames
         shell: bash
         run: |
           set -euo pipefail
@@ -134,12 +134,12 @@ jobs:
           test -n "$exe"
           chmod +x "$exe"
           echo 'THREE_REAL_JPEGS_ONE_MODEL_REQUEST; USER_PC_UNTOUCHED; MANUAL_SEMANTIC_REVIEW_REQUIRED'
-          timeout --signal=TERM --kill-after=10s 310s "$exe" \
-            -m model/Qwen3VL-2B-Instruct-Q4_K_M.gguf \
-            --mmproj model/mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf \
+          timeout --signal=TERM --kill-after=10s 420s "$exe" \
+            -m model/Qwen3VL-8B-Instruct-Q4_K_M.gguf \
+            --mmproj model/mmproj-Qwen3VL-8B-Instruct-Q8_0.gguf \
             --image evidence/frame-1.jpg,evidence/frame-2.jpg,evidence/frame-3.jpg \
-            -p '下面三张图片来自同一公开视频，依次为播放时间1.586秒、2.667秒、3.772秒。逐帧查看：先列每帧实际可见的漏勺或锅具、食材、位置变化，再单独检查每一帧底部是否有中文字幕，有则准确照抄，无则写无。仅凭这些帧无法确定的事情要明确标注，不要重复、不要猜完整视频。最后建议继续观察还是停止，并给出证据。' \
-            --no-mmproj-offload --image-min-tokens 1024 -t 4 -c 8192 --temp 0 -n 400 \
+            -p '以下三张图按1.586秒、2.667秒、3.772秒排列。请用三条短句回答：①每张图的食物及漏勺相对位置有什么不同；②分别说明每张图是否有底部中文字幕，若有请逐字抄录；③是否能凭三帧证明完整视频发生了什么，不能就说不能。不要重复，不要猜视频标题，全文不超过120个汉字。' \
+            --no-mmproj-offload --image-min-tokens 1024 -t 4 -c 8192 --temp 0 -n 240 \
             2>&1 | tee model-result.log
           test -s model-result.log
           echo 'GENUINE_THREE_FRAME_MODEL_PROCESS_EXITED_ZERO; SEMANTIC_ACCEPTANCE_PENDING_INDEPENDENT_REVIEW'
@@ -148,7 +148,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
-          name: yutang-real-qwen-threeframes-grounding-20261112
+          name: yutang-real-qwen8b-threeframes-20261112
           path: model-result.log
           if-no-files-found: ignore
           retention-days: 7
