@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {createCoverageAudit,appendCoverageSegment,endCoverageAudit,lineHash} from './full_video_coverage_audit.mjs';
+import {createCoverageAudit,appendCoverageSegment,endCoverageAudit,lineHash} from '../tools/full_video_coverage_audit.mjs';
 const id='7577614489533680959',sha='a'.repeat(64);
 const mk=()=>createCoverageAudit({videoId:id,durationSeconds:1082.518,initialTime:0.2,
   exeSha256:sha,windowsSourceSha:'b'.repeat(40),initialLocalSeek:true});
