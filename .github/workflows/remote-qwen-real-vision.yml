@@ -126,29 +126,29 @@ jobs:
           echo 'f9a68fabba69c3b81e153367b2c7521030b0fa8bb0de400c9599c8e6725f9c82  model/mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf' | sha256sum -c -
           echo OFFICIAL_QWEN3_VL_WEIGHTS_VERIFIED
 
-      - name: Perform one genuine CPU image inference on previously pinned Douyin frame
+      - name: Perform one genuine CPU inference using three ordered authentic video frames
         shell: bash
         run: |
           set -euo pipefail
           exe="$(find tools/llama -type f -name 'llama-mtmd-cli' -print -quit)"
           test -n "$exe"
           chmod +x "$exe"
-          echo 'ONE_REAL_JPEG_ONE_MODEL_REQUEST; USER_PC_UNTOUCHED; MANUAL_SEMANTIC_REVIEW_REQUIRED'
+          echo 'THREE_REAL_JPEGS_ONE_MODEL_REQUEST; USER_PC_UNTOUCHED; MANUAL_SEMANTIC_REVIEW_REQUIRED'
           timeout --signal=TERM --kill-after=10s 240s "$exe" \
             -m model/Qwen3VL-2B-Instruct-Q4_K_M.gguf \
             --mmproj model/mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf \
-            --image evidence/frame-2.jpg \
-            -p '请只根据这张画面描述实际可见的物体和动作，并抄录能辨认的中文字幕。不能看清时请明确说看不清。禁止根据视频标题猜测。' \
-            --no-mmproj-offload -t 4 -c 4096 --temp 0 -n 180 \
+            --image evidence/frame-1.jpg,evidence/frame-2.jpg,evidence/frame-3.jpg \
+            -p '下面三张图片来自同一公开视频，依次为播放时间1.586秒、2.667秒、3.772秒。只根据三帧按时间顺序概括物体、动作和变化，抄录可辨认字幕，并明确指出仅凭三帧无法判断的内容。不要根据视频标题或对话猜测完整视频。最后说明下一步你建议继续观察还是停止，并给出证据理由。' \
+            --no-mmproj-offload -t 4 -c 4096 --temp 0 -n 240 \
             2>&1 | tee model-result.log
           test -s model-result.log
-          echo 'GENUINE_MODEL_PROCESS_EXITED_ZERO; SEMANTIC_ACCEPTANCE_PENDING_INDEPENDENT_REVIEW'
+          echo 'GENUINE_THREE_FRAME_MODEL_PROCESS_EXITED_ZERO; SEMANTIC_ACCEPTANCE_PENDING_INDEPENDENT_REVIEW'
 
       - name: Preserve bounded inference log as read-only evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
-          name: yutang-real-qwen-vision-20261112
+          name: yutang-real-qwen-threeframes-20261112
           path: model-result.log
           if-no-files-found: ignore
           retention-days: 7
