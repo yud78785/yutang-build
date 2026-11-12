@@ -1,4 +1,4 @@
-name: YuTang genuine 8B three-frame vision comparison - pinned public frames
+name: YuTang genuine independent-frame vision check - original Windows video
 
 on:
   push:
@@ -19,10 +19,10 @@ jobs:
   genuine-vision:
     if: github.repository == 'yud78785/yutang-build' && github.ref == 'refs/heads/experiment/remote-qwen-vision-20261112'
     runs-on: ubuntu-24.04
-    timeout-minutes: 18
+    timeout-minutes: 9
     env:
       EXPECTED_WINDOWS_SHA: 00f5ac8d560f8459f333cadeb9e9cb227cfaeca6
-      MODEL_REV: f982a07559d4a2f6c8744d840bf6fccab30eea96
+      MODEL_REV: 52d6c8ffea26cc873ac5ad116f8631268d7eb503
     steps:
       - name: Confirm isolated GitHub-hosted runner, public repo and minimal resources
         env:
@@ -36,7 +36,7 @@ jobs:
           test "$REPO_VISIBILITY" = public
           test "$RUNNER_OS" = Linux
           test "$RUNNER_ARCH" = X64
-          echo 'CLOUD_CPU_ONLY; NO_MODEL_API_KEY; NO_USER_WINDOWS; NO_ACCOUNT_LOGIN; SINGLE_IMAGE'
+          echo 'CLOUD_CPU_ONLY; NO_MODEL_API_KEY; NO_USER_WINDOWS; NO_ACCOUNT_LOGIN; TWO_INDEPENDENT_FRAMES'
           free -h
 
       - name: Independently confirm original Windows run metadata
@@ -111,44 +111,76 @@ jobs:
           find tools/llama -type f -name 'llama-mtmd-cli' -print -quit | grep -q .
           echo PINNED_LLAMA_CPP_BINARY_VERIFIED
 
-      - name: Download and SHA-256 verify official Qwen3-VL 8B weights (no API credentials)
+      - name: Verify official Qwen3-VL 2B weights from earlier successful one-frame experiment
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p model
-          curl -fL --retry 2 --retry-delay 2 --connect-timeout 20 --max-time 480 \
-            -o model/Qwen3VL-8B-Instruct-Q4_K_M.gguf \
-            "https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct-GGUF/resolve/$MODEL_REV/Qwen3VL-8B-Instruct-Q4_K_M.gguf"
-          echo '67d1659bfe71b89d50b45a4ad1a9e5b997e5bb16ce5da66a6a6167abd569e9e2  model/Qwen3VL-8B-Instruct-Q4_K_M.gguf' | sha256sum -c -
           curl -fL --retry 2 --retry-delay 2 --connect-timeout 20 --max-time 240 \
-            -o model/mmproj-Qwen3VL-8B-Instruct-Q8_0.gguf \
-            "https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct-GGUF/resolve/$MODEL_REV/mmproj-Qwen3VL-8B-Instruct-Q8_0.gguf"
-          echo 'c6ba85508d82f42590e6eb77d5340369ab6fecf107a7561d809523d8aa5f3bfd  model/mmproj-Qwen3VL-8B-Instruct-Q8_0.gguf' | sha256sum -c -
+            -o model/Qwen3VL-2B-Instruct-Q4_K_M.gguf \
+            "https://huggingface.co/Qwen/Qwen3-VL-2B-Instruct-GGUF/resolve/$MODEL_REV/Qwen3VL-2B-Instruct-Q4_K_M.gguf"
+          echo '089d75c52f4b7ffc56ba998ffc50aae89fcafc755f9e7208aacca281dca6c2ae  model/Qwen3VL-2B-Instruct-Q4_K_M.gguf' | sha256sum -c -
+          curl -fL --retry 2 --retry-delay 2 --connect-timeout 20 --max-time 240 \
+            -o model/mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf \
+            "https://huggingface.co/Qwen/Qwen3-VL-2B-Instruct-GGUF/resolve/$MODEL_REV/mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf"
+          echo 'f9a68fabba69c3b81e153367b2c7521030b0fa8bb0de400c9599c8e6725f9c82  model/mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf' | sha256sum -c -
           echo OFFICIAL_QWEN3_VL_WEIGHTS_VERIFIED
 
-      - name: Compare stronger Qwen3-VL 8B on same three authentic Windows video frames
+      - name: Infer original frames 1 and 3 independently (frame 2 already passed before)
         shell: bash
         run: |
           set -euo pipefail
           exe="$(find tools/llama -type f -name 'llama-mtmd-cli' -print -quit)"
           test -n "$exe"
           chmod +x "$exe"
-          echo 'THREE_REAL_JPEGS_ONE_MODEL_REQUEST; USER_PC_UNTOUCHED; MANUAL_SEMANTIC_REVIEW_REQUIRED'
-          timeout --signal=TERM --kill-after=10s 420s "$exe" \
-            -m model/Qwen3VL-8B-Instruct-Q4_K_M.gguf \
-            --mmproj model/mmproj-Qwen3VL-8B-Instruct-Q8_0.gguf \
-            --image evidence/frame-1.jpg,evidence/frame-2.jpg,evidence/frame-3.jpg \
-            -p '以下三张图按1.586秒、2.667秒、3.772秒排列。请用三条短句回答：①每张图的食物及漏勺相对位置有什么不同；②分别说明每张图是否有底部中文字幕，若有请逐字抄录；③是否能凭三帧证明完整视频发生了什么，不能就说不能。不要重复，不要猜视频标题，全文不超过120个汉字。' \
-            --no-mmproj-offload --image-min-tokens 1024 -t 4 -c 8192 --temp 0 -n 240 \
-            2>&1 | tee model-result.log
-          test -s model-result.log
-          echo 'GENUINE_THREE_FRAME_MODEL_PROCESS_EXITED_ZERO; SEMANTIC_ACCEPTANCE_PENDING_INDEPENDENT_REVIEW'
-
+          echo 'FIRST_AND_THIRD_REAL_JPEGS; TWO_SEPARATE_VISION_INFERENCES; FRAME2_REUSED_FROM_RUN_43308457146'
+          for i in 1 3; do
+            echo "START_GENUINE_FRAME_${i}_INFERENCE"
+            timeout --signal=TERM --kill-after=10s 110s "$exe" \
+              -m model/Qwen3VL-2B-Instruct-Q4_K_M.gguf \
+              --mmproj model/mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf \
+              --image "evidence/frame-${i}.jpg" \
+              -p '请只根据这一张图片独立判断：画面里可直接看到什么物品及它们的位置？底部是否出现中文字幕？如有请完整抄录；如无请回答无。不能确定的内容要说不能确定。不要猜视频前后动作，不要根据标题推断。简洁回答。' \
+              --no-mmproj-offload -t 4 -c 4096 --temp 0 -n 180 \
+              2>&1 | tee "frame-${i}-model.log"
+            test -s "frame-${i}-model.log"
+            echo "GENUINE_FRAME_${i}_PROCESS_COMPLETED; SEMANTIC_REVIEW_STILL_REQUIRED"
+          done
+          python3 - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+          frame_hashes = {
+              1:'c6b3493339f0e93c133ea429353715945417d00feef3fc30f193a0abde6ec1c3',
+              2:'2dbf955f09556718613eae3abf342d524a62d436c1eaa323e9c51b1a0166d595',
+              3:'17fbadb356f2f28879f22f93868cd96567e9068ec07692b30ee4bc135269b5b9'
+          }
+          logs={}
+          for number in (1,3):
+              raw=Path(f'frame-{number}-model.log').read_bytes()
+              assert raw and len(raw)<250_000
+              logs[str(number)]={'modelProcessCompleted':True,'rawLogSha256':hashlib.sha256(raw).hexdigest(),'imageSha256':frame_hashes[number]}
+          report={
+            'kind':'REAL_OPEN_WEIGHT_INDEPENDENT_JPEG_OBSERVATIONS_PENDING_REVIEW',
+            'windowsCandidateSha':'00f5ac8d560f8459f333cadeb9e9cb227cfaeca6',
+            'windowsExeSha256':'51ac3c9e842aae7a44524d59da30d81269a3ad93785ad2071e0c2d461d9d9575',
+            'originalVideoRun':43233257378,'originalArtifactId':13951609541,
+            'videoId':'7577614489533680959','model':'Qwen3-VL-2B-Instruct-Q4_K_M',
+            'previousIndependentlyReviewedMiddleFrame':{'frame':2,'runId':43308457146,'imageSha256':frame_hashes[2]},
+            'newIndependentObservations':logs,'allThreeFramesProcessedInOneModelRequest':False,
+            'continuousVideoWatched':False,'semanticSequenceReviewPassed':False,
+            'autonomousActionExecuted':False,'modelCallBillingUsd':0
+          }
+          Path('independent-frames-manifest.json').write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n')
+          print('INDEPENDENT_FRAME_MANIFEST_SAVED; NO_SEQUENCE_SEMANTIC_PASS_CLAIM')
+          PY
       - name: Preserve bounded inference log as read-only evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
-          name: yutang-real-qwen8b-threeframes-20261112
-          path: model-result.log
+          name: yutang-real-qwen2b-independent-frames-20261112
+          path: |
+            frame-1-model.log
+            frame-3-model.log
+            independent-frames-manifest.json
           if-no-files-found: ignore
           retention-days: 7
