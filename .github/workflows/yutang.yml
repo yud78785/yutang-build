@@ -13,6 +13,9 @@ on:
       - tools/jobguard/**
       - tools/patch-core-direct-video.mjs
       - tests/test-core-direct-video-patch.mjs
+      - tools/live-vision-acceptance.mjs
+      - tools/test-live-vision-acceptance.mjs
+      - tools/test-production-vision-request.mjs
       - tools/windows_isolated_candidate_edge_smoke.mjs
       - tools/windows_public_douyin_video_probe.mjs
       - tools/resolve-candidate-artifact.ps1
@@ -398,6 +401,19 @@ jobs:
         run: |
           node tools/windows-edge-probe.mjs upstream/desktop/.cache/api-runtime
           if ($LASTEXITCODE -ne 0) { throw 'Windows Edge sandbox probe did not pass' }
+
+      - name: Verify production DeepSeek vision request path offline (NO API KEY / NO NETWORK)
+        shell: pwsh
+        run: |
+          node --check tools/live-vision-acceptance.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Opt-in live vision acceptance script syntax failed' }
+          node --test tools/test-live-vision-acceptance.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Live vision evidence and semantic score regression tests failed' }
+          node --check tools/test-production-vision-request.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Production vision request test syntax failed' }
+          node --test tools/test-production-vision-request.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Production ApiAgent multimodal request contract failed' }
+          Write-Host 'PASS production ApiAgent image request contract; all requests used local fake fetch only.'
 
       - name: Produce candidate EXE and check packaged payload
         shell: pwsh
