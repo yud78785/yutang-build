@@ -37,7 +37,7 @@ const CONNECT_AFTER = `  async connect(signal, { launch = true, create = true, a
       throw new Error('Direct video initialization target was not verified.');`;
 const FEED_BEFORE = '      else await this.navigate(RECOMMEND,signal);';
 const FEED_AFTER = `      else if (initialDirectVideoUrl) {
-         await this.navigate(initialDirectVideoUrl,signal);
+         await this.navigateDirectVideo(initialDirectVideoUrl,signal);
          initialDirectVideoReceipt.completed = true;
        } else await this.navigate(RECOMMEND,signal);`;
 const CALL_BEFORE = '        await this.connect(signal);\n        aborted(signal);';
@@ -48,8 +48,32 @@ const CALL_AFTER = `        const initialDirectVideoUrl = name === 'douyin_open_
 const OPEN_BEFORE = '          if (args.url) await this.navigate(`https://www.douyin.com/video/${/\\/video\\/(\\d+)/.exec(args.url)[1]}`,signal);';
 const OPEN_AFTER = `          if (args.url) {
             const directTarget = \`https://www.douyin.com/video/\${/\\/video\\/(\\d+)/.exec(args.url)[1]}\`;
-            if (initialDirectVideoReceipt?.completed !== true) await this.navigate(directTarget,signal);
+            if (initialDirectVideoReceipt?.completed !== true) await this.navigateDirectVideo(directTarget,signal);
           }`;
+const NAVIGATE_BEFORE = '  async navigate(url, signal) {';
+const NAVIGATE_AFTER = [
+  '  async navigateDirectVideo(url, signal) {',
+  '    const verified = normalizeDirectVideoUrl(url);',
+  "    if (verified !== url) throw new Error('Direct video navigation target was not canonical.');",
+  "    const videoId = verified.slice(verified.lastIndexOf('/video/') + 7);",
+  "    if (!/^[0-9]+$/.test(videoId)) throw new Error('Direct video navigation target has no video ID.');",
+  '    aborted(signal);',
+  '    try {',
+  "      await this.page.goto(verified, { waitUntil: 'commit', timeout: 15_000 });",
+  '    } catch (error) {',
+  "      const timedOut = error?.name === 'TimeoutError' || /timeout|timed out/i.test(String(error?.message || ''));",
+  "      throw Object.assign(new Error(timedOut ? 'Direct video navigation commit timed out.' : 'Direct video navigation failed before commit.'), {",
+  "        code: timedOut ? 'DIRECT_VIDEO_COMMIT_TIMEOUT' : 'DIRECT_VIDEO_COMMIT_FAILED',",
+  '        cause: error,',
+  '      });',
+  '    }',
+  '    aborted(signal);',
+  '    await this.page.evaluate(name => { window.name = name; }, browserPageLabel(this.source));',
+  "    await this.settle(signal, { kind: 'video', videoId });",
+  '  }',
+  '',
+  '  async navigate(url, signal) {',
+].join('\n');
 const HELPERS = normalizeDirectVideoUrl.toString();
 
 function swapOnce(s, before, after, label) {
@@ -68,6 +92,7 @@ export function applyPatch(original, expectedSha256 = EXPECTED_POST_JOBGUARD_SHA
   source = swapOnce(source, FEED_BEFORE, FEED_AFTER, 'initial recommendation');
   source = swapOnce(source, CALL_BEFORE, CALL_AFTER, 'execute-to-connect');
   source = swapOnce(source, OPEN_BEFORE, OPEN_AFTER, 'target navigation');
+  source = swapOnce(source, NAVIGATE_BEFORE, NAVIGATE_AFTER, 'direct video commit navigation');
   const output = Buffer.from(source, 'utf8');
   return { patched: source, sha256: createHash('sha256').update(output).digest('hex') };
 }

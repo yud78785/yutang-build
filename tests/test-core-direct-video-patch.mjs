@@ -62,6 +62,9 @@ const Probe = context.globalThis.Probe;
 const one = new Probe();
 await one.execute('douyin_open_video',{url:direct});
 assert.deepEqual(Array.from(one.visited),[direct],'explicit direct video must skip unrelated recommendation');
+assert.deepEqual(one.gotoOptions,{waitUntil:'commit',timeout:15_000});
+assert.deepEqual(one.settleOptions,{kind:'video',videoId:id});
+assert.match(patched,/Direct video navigation commit timed out/);
 const two = new Probe();
 await two.execute('douyin_open',{});
 assert.deepEqual(Array.from(two.visited),['https://www.douyin.com/?recommend=1'],'non-target action preserves original feed');
@@ -77,13 +80,13 @@ await five.connect(null,{initialDirectVideoUrl:'https://evil.example/video/'+id,
   e=>assert.match(String(e.message),/not verified/)
 );
 
-for (const tampered of [fixture.replace(actionAnchor,''),fixture+'\n'+actionAnchor,fixture.replace('else await this.navigate(RECOMMEND,signal);','else {}'),patched]) {
+for (const tampered of [fixture.replace(actionAnchor,''),fixture+'\n'+actionAnchor,fixture.replace('else await this.navigate(RECOMMEND,signal);','else {}'),fixture.replace('  async navigate(url, signal) {','  async navigateChanged(url, signal) {'),patched]) {
   assert.throws(()=>applyPatch(tampered,createHash('sha256').update(tampered).digest('hex')),/(anchor mismatch|already present)/);
 }
 const six=new Probe('https://www.douyin.com/?recommend=1');
 await six.execute('douyin_open_video',{url:direct});
 assert.deepEqual(Array.from(six.visited),[direct],'prepared nonblank page must navigate explicitly');
 const seven=new Probe();
-seven.navigate=async()=>{throw new Error('injected navigation failure');};
-await assert.rejects(seven.execute('douyin_open_video',{url:direct}),/injected navigation failure/);
+seven.page.goto=async()=>{throw Object.assign(new Error('injected navigation timeout'),{name:'TimeoutError'});};
+await assert.rejects(seven.execute('douyin_open_video',{url:direct}),error=>error.code==='DIRECT_VIDEO_COMMIT_TIMEOUT');
 console.log('PASS canonical target, navigation receipt, no duplicate on fresh page, strict fallback and negative patch regressions');

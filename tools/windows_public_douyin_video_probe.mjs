@@ -212,6 +212,8 @@ export function classifyPublicVideoError(error) {
   const message=String(error?.message??'').slice(0,4000);
   const code=typeof error?.code==='string'?error.code:'';
   const name=typeof error?.name==='string'?error.name:'';
+  if(code==='DIRECT_VIDEO_COMMIT_TIMEOUT')return 'DIRECT_VIDEO_COMMIT_TIMEOUT';
+  if(code==='DIRECT_VIDEO_COMMIT_FAILED')return 'DIRECT_VIDEO_COMMIT_FAILED';
   if(/Execution context was destroyed|Cannot find context with specified id|context was destroyed during navigation/i.test(message))return 'NAVIGATION_CONTEXT_RESET';
   if(/Target page, context or browser has been closed|Target closed|Browser has been closed|Page closed|Connection closed/i.test(message))return 'PAGE_OR_BROWSER_CLOSED';
   if(/ERR_NETWORK_ACCESS_DENIED|ERR_BLOCKED_BY_CLIENT|ERR_INTERNET_DISCONNECTED|net::ERR_|ENOTFOUND|EAI_AGAIN/i.test(message+' '+code))return 'NETWORK_FAILURE';
