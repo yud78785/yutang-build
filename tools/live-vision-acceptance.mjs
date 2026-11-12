@@ -172,7 +172,7 @@ async function main() {
   const elapsedMs = Date.now() - startedAt;
   const semantic = scoreVisionDecision(result.decision);
   const report = {
-    status: semantic.passed ? 'PASS_LIVE_DEEPSEEK_VISION_SEMANTIC_SAMPLE' : 'FAIL_LIVE_DEEPSEEK_VISION_SEMANTIC_SAMPLE',
+    status: semantic.passed ? 'REVIEW_REQUIRED_LIVE_VISION_LEXICAL_PRECHECK' : 'FAIL_LIVE_DEEPSEEK_VISION_LEXICAL_PRECHECK',
     provider: 'DeepSeek API',
     model: config.model,
     requestCount: 1,
@@ -184,6 +184,9 @@ async function main() {
     usage: result.usage,
     decision: result.decision,
     semantic,
+    semanticReviewRequired: true,
+    semanticVerifiedByIndependentReviewer: false,
+    semanticScoringLimit: 'Keyword scoring alone cannot verify image understanding; verify the actual response against the original JPEGs.',
     actionExecuted: false,
     browserToolsExecuted: false,
     audioSent: false,
@@ -192,7 +195,8 @@ async function main() {
     scope: 'three verified JPEG samples only; no claim about unseen intervals or the full video',
   };
   console.log('YUTANG_LIVE_VISION_RESULT ' + JSON.stringify(report));
-  if (!semantic.passed) process.exitCode = 1;
+  // A lexical match is not a verified comprehension result. Always require independent review.
+  process.exitCode = 1;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
