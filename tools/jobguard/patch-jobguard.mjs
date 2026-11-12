@@ -66,6 +66,44 @@ export function patchBrowserHost(source){
   if(source.split(declaration).length!==2)throw new Error('Pinned browser-host state declaration anchor mismatch');
   source=source.replace(declaration,"const stateFile = path.join(controlDir, 'browser.json'); let context, installation, focusFailed = false, jobGuard;");
 
+  const fsAnchor="import { mkdirSync, writeFileSync, renameSync, existsSync } from 'node:fs';";
+  const pathAnchor="import path from 'node:path';";
+  if(source.split(fsAnchor).length!==2||source.split(pathAnchor).length!==2)throw new Error('Pinned browser state writer imports mismatch');
+  source=source.replace(fsAnchor,"import { mkdirSync, writeFileSync, renameSync, existsSync, unlinkSync } from 'node:fs';");
+  source=source.replace(pathAnchor,pathAnchor+"\nimport { randomUUID } from 'node:crypto';");
+  const stateWriterBefore=[
+    "  const writeState = (ready, extra = {}) => {",
+    "    const temporary = `${stateFile}.${processImpl.pid}.tmp`;",
+    "    writeFileSync(temporary, JSON.stringify({ pid: processImpl.pid, profile, port, ready, startedAt: Date.now(), ...extra }));",
+    "    renameSync(temporary, stateFile);",
+    "  };"
+  ].join('\n');
+  const stateWriterAfter=[
+    "  // Synchronous writes are serialized by this host's event loop. Never remove",
+    "  // browser.json before replacement, and never reuse a previous host's temp file.",
+    "  const writeState = (ready, extra = {}) => {",
+    "    const temporary = `${stateFile}.${processImpl.pid}.${randomUUID()}.tmp`;",
+    "    try {",
+    "      writeFileSync(temporary, JSON.stringify({ pid: processImpl.pid, profile, port, ready, startedAt: Date.now(), ...extra }), { flag: 'wx' });",
+    "      // Windows may briefly hold browser.json open during a restart or scan.",
+    "      // Retry only transient rename errors, for at most 950ms; all other errors",
+    "      // and exhausted retries fail closed without modifying the destination.",
+    "      for (let attempt = 0; attempt < 20; attempt++) {",
+    "        try { renameSync(temporary, stateFile); return; }",
+    "        catch (error) {",
+    "          if (processImpl.platform !== 'win32' || !['EPERM', 'EACCES', 'EBUSY'].includes(error?.code) || attempt === 19) throw error;",
+    "          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);",
+    "        }",
+    "      }",
+    "    } finally {",
+    "      try { unlinkSync(temporary); } catch {}",
+    "    }",
+    "  };"
+  ].join('\n');
+  if(source.split(stateWriterBefore).length!==2)throw new Error('Pinned original browser state writer anchor mismatch');
+  source=source.replace(stateWriterBefore,stateWriterAfter);
+  if(!source.includes("flag: 'wx'"))throw new Error('Browser state writer hardening absent');
+
   const startup="    writeState(false);\n    try { installation = await probeInstallation(); } catch {}\n";
   const startupPatched="    writeState(false);\n    jobGuard = await attachWindowsJobGuard({ processImpl, logger });\n    try { installation = await probeInstallation(); } catch {}\n";
   if(source.split(startup).length!==2)throw new Error('Pinned browser-host pre-Edge guard anchor mismatch');
