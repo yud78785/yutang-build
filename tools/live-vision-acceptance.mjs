@@ -37,11 +37,19 @@ export function verifyCaptureEvidence(evidence, frameBuffers) {
       !Array.isArray(evidence.decodedFrameCounts) || evidence.decodedFrameCounts.length !== 3) {
     throw new Error('真实视频采样必须恰好包含三帧及完整证明。');
   }
+  // Windows video-canvas snapshots can occur between two decoder counter updates:
+  // a single interval may be flat even when three distinct JPEGs and the total decode
+  // count prove advancement. Reject rollbacks, no overall progress, or duplicate frames.
+  const decoded = evidence.decodedFrameCounts;
   if (evidence.captureMethods.some(method => method !== 'video-canvas-jpeg-v1') ||
       evidence.frameTimes.some((time, index) => !Number.isFinite(time) || time < 0 || (index > 0 && time <= evidence.frameTimes[index - 1])) ||
-      evidence.decodedFrameCounts.some(item => !Number.isSafeInteger(item?.before) || !Number.isSafeInteger(item?.after) || item.after <= item.before) ||
+      decoded.some((item, index) => !Number.isSafeInteger(item?.before) || !Number.isSafeInteger(item?.after) ||
+        item.before < 0 || item.after < item.before ||
+        (index > 0 && (item.before < decoded[index - 1].before || item.after < decoded[index - 1].after))) ||
+      decoded[2].after <= decoded[0].before ||
+      new Set(evidence.frameHashes).size !== 3 ||
       !Number.isFinite(evidence.playbackProgressSeconds) || evidence.playbackProgressSeconds < 1) {
-    throw new Error('采样画面缺少真实播放推进或解码帧证据。');
+    throw new Error('采样画面缺少真实播放推进、不同视频帧或有效解码计数证据。');
   }
   if (evidence.audioCapture?.outcome !== 'PASS_PUBLIC_VIDEO_AUDIO_CAPTURE' ||
       evidence.audioCapture.videoIdMatch !== true || evidence.audioCapture.audioPersisted !== false ||

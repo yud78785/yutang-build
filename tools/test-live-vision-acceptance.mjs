@@ -30,7 +30,7 @@ function fixture() {
     frameTimes: [1.1, 2.2, 3.3],
     frameHashes: buffers.map(bytes => createHash('sha256').update(bytes).digest('hex')),
     captureMethods: ['video-canvas-jpeg-v1', 'video-canvas-jpeg-v1', 'video-canvas-jpeg-v1'],
-    decodedFrameCounts: [{before:1,after:2},{before:2,after:3},{before:3,after:4}],
+    decodedFrameCounts: [{before:79,after:80},{before:109,after:110},{before:143,after:143}],
     playbackProgressSeconds: 2.2,
     actualWallSeconds: 2.3,
     durationSeconds: 1082.5,
@@ -82,6 +82,29 @@ test('错误作品、登录验证、无播放推进、旧离线模型结果或�
     assert.throws(() => verifyCaptureEvidence(altered, buffers));
   }
   assert.throws(() => verifyCaptureEvidence(evidence, [buffers[0], Buffer.from('not-jpeg'), buffers[2]]), /JPEG/);
+});
+
+test('真实 Windows 视频末帧解码计数可持平，但整体必须推进且三帧不同', () => {
+  const { evidence, buffers } = fixture();
+  assert.equal(verifyCaptureEvidence(evidence, buffers).length, 3,
+    'Run #95 sample has last decode interval 143 -> 143 while total decode count advances');
+
+  const invalidCounts = [
+    [{before:7,after:7},{before:7,after:7},{before:7,after:7}],
+    [{before:7,after:8},{before:9,after:10},{before:10,after:9}],
+    [{before:7,after:8},{before:4,after:5},{before:12,after:12}],
+    [{before:-1,after:1},{before:2,after:3},{before:4,after:4}],
+  ];
+  for (const counts of invalidCounts) {
+    const altered = structuredClone(evidence);
+    altered.decodedFrameCounts = counts;
+    assert.throws(() => verifyCaptureEvidence(altered, buffers), /解码计数|播放推进/);
+  }
+
+  const duplicate = structuredClone(evidence);
+  duplicate.frameHashes[1] = duplicate.frameHashes[0];
+  assert.throws(() => verifyCaptureEvidence(duplicate, [buffers[0], buffers[0], buffers[2]]),
+    /不同视频帧/);
 });
 
 test('视觉语义评分要求识别猪蹄，并至少命中器具、烹饪过程、可读字幕中的两项', () => {
