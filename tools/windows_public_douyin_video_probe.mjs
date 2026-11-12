@@ -95,6 +95,8 @@ export function selfTest() {
   for(const [message,expected] of categoryFixtures)
     assert.equal(classifyPublicVideoError(new Error(message)),expected);
   assert.equal(classifyPublicVideoError(Object.assign(new Error('Direct video page context did not stabilize after commit.'),{code:'DIRECT_VIDEO_CONTEXT_TIMEOUT'})),'NAVIGATION_CONTEXT_RESET');
+  assert.equal(classifyPublicVideoError(Object.assign(new Error('Direct video state read context reset more than once.'),{code:'DIRECT_VIDEO_SETTLE_CONTEXT_RETRY_EXHAUSTED'})),'NAVIGATION_CONTEXT_RESET');
+  assert.equal(classifyPublicVideoError(Object.assign(new Error('Direct video page identity changed.'),{code:'DIRECT_VIDEO_SETTLE_IDENTITY_CHANGED'})),'ACCESS_OR_ORIGIN_GUARD');
   const pageProof=classifyPublicVideoPage({isClosed:()=>false,
     url:()=> 'https://www.douyin.com/video/'+PUBLIC_VIDEO_ID+'?token=never-persist-this'});
   assert.equal(pageProof.targetVideo,true);
@@ -215,7 +217,8 @@ export function classifyPublicVideoError(error) {
   const name=typeof error?.name==='string'?error.name:'';
   if(code==='DIRECT_VIDEO_COMMIT_TIMEOUT')return 'DIRECT_VIDEO_COMMIT_TIMEOUT';
   if(code==='DIRECT_VIDEO_COMMIT_FAILED')return 'DIRECT_VIDEO_COMMIT_FAILED';
-  if(code==='DIRECT_VIDEO_CONTEXT_TIMEOUT')return 'NAVIGATION_CONTEXT_RESET';
+  if(code==='DIRECT_VIDEO_CONTEXT_TIMEOUT'||code==='DIRECT_VIDEO_SETTLE_CONTEXT_RETRY_EXHAUSTED')return 'NAVIGATION_CONTEXT_RESET';
+  if(code==='DIRECT_VIDEO_SETTLE_IDENTITY_CHANGED')return 'ACCESS_OR_ORIGIN_GUARD';
   if(/Execution context was destroyed|Cannot find context with specified id|context was destroyed during navigation/i.test(message))return 'NAVIGATION_CONTEXT_RESET';
   if(/Target page, context or browser has been closed|Target closed|Browser has been closed|Page closed|Connection closed/i.test(message))return 'PAGE_OR_BROWSER_CLOSED';
   if(/ERR_NETWORK_ACCESS_DENIED|ERR_BLOCKED_BY_CLIENT|ERR_INTERNET_DISCONNECTED|net::ERR_|ENOTFOUND|EAI_AGAIN/i.test(message+' '+code))return 'NETWORK_FAILURE';

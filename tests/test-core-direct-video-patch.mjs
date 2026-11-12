@@ -106,4 +106,35 @@ const nine=new Probe('about:blank',stopController.signal);
 nine.page.evaluate=async()=>{stopController.abort(new Error('user stop'));throw new Error('Execution context was destroyed during navigation');};
 await assert.rejects(nine.execute('douyin_open_video',{url:direct}),/user stop/);
 
+
+const settleRetry=new Probe();
+let settleRetryCount=0;
+settleRetry.settle=async(signal,options)=>{
+  settleRetryCount++;
+  if(settleRetryCount===1)throw new Error('Execution context was destroyed, most likely because of a navigation');
+  settleRetry.settleOptions=options;
+};
+await settleRetry.execute('douyin_open_video',{url:direct});
+assert.equal(settleRetryCount,2,'read-only settle retries one transient context reset');
+assert.equal(settleRetry.current,direct,'context retry does not navigate again or change target');
+const settleStuck=new Probe();
+let settleStuckCount=0;
+settleStuck.settle=async()=>{settleStuckCount++;throw new Error('Cannot find context with specified id');};
+await assert.rejects(settleStuck.execute('douyin_open_video',{url:direct}),error=>error.code==='DIRECT_VIDEO_SETTLE_CONTEXT_RETRY_EXHAUSTED');
+assert.equal(settleStuckCount,2,'bounded retry cannot hide persistent context resets');
+const changedTarget=new Probe();
+let changedTargetCount=0;
+changedTarget.settle=async()=>{changedTargetCount++;changedTarget.current='https://www.douyin.com/video/987654321';throw new Error('Execution context was destroyed');};
+await assert.rejects(changedTarget.execute('douyin_open_video',{url:direct}),error=>error.code==='DIRECT_VIDEO_SETTLE_IDENTITY_CHANGED');
+assert.equal(changedTargetCount,1,'wrong video identity is never retried');
+const unrelatedSettle=new Probe();
+let unrelatedSettleCount=0;
+unrelatedSettle.settle=async()=>{unrelatedSettleCount++;throw new Error('Non-navigation synthetic state corruption');};
+await assert.rejects(unrelatedSettle.execute('douyin_open_video',{url:direct}),/Non-navigation synthetic state corruption/);
+assert.equal(unrelatedSettleCount,1,'unrelated state-read failures fail without retry');
+const stopSettleController=new AbortController();
+const stopSettle=new Probe('about:blank',stopSettleController.signal);
+stopSettle.settle=async()=>{stopSettleController.abort(new Error('user stopped during settle'));throw new Error('Execution context was destroyed');};
+await assert.rejects(stopSettle.execute('douyin_open_video',{url:direct}),/user stopped during settle/);
+
 console.log('PASS canonical target, navigation receipt, no duplicate on fresh page, strict fallback and negative patch regressions');
