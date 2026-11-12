@@ -48,7 +48,7 @@ assert.match(patchCore(core),/YUTANG_REQUIRE_JOB_GUARD: '1'/);
 assert.throws(()=>patchBrowserHost(host.replace("const execute = promisify(execFile);","const execute = promisify(other);")),/helper insertion anchor mismatch/);
 assert.throws(()=>patchCore(core.replace("detached: true","detached: false")),/spawn anchor mismatch/);
 
-assert.match(patchedHost,/randomUUID\(\)\.tmp/);
+assert.match(patchedHost,/randomUUID\(\)\}\.tmp/);
 assert.match(patchedHost,/\{ flag: 'wx' \}/);
 assert.match(patchedHost,/attempt < 20/);
 assert.match(patchedHost,/Atomics\.wait/);
