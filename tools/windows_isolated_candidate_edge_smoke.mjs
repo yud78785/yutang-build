@@ -73,6 +73,11 @@ export function selfTest() {
   assert.equal(summary.edgeWithLoopbackArg,1);
   assert.equal(summarizeHostProcesses(list,100,8,profile,'C:\\sandbox\\control').hostParentIsBackend,false);
   assert.doesNotMatch(safeText('Bearer test-secret sk-1234567890'),/test-secret|sk-1234567890/);
+  assert.equal(isExpectedFirewallBlock(500, JSON.stringify({error:'page.goto: net::ERR_NETWORK_ACCESS_DENIED at https://www.douyin.com/?recommend=1'})), true);
+  assert.equal(isExpectedFirewallBlock(500, JSON.stringify({error:'page.goto: Timeout 25000ms exceeded.\\nCall log:\\n  - navigating to "https://www.douyin.com/?recommend=1", waiting until "domcontentloaded"'})), true);
+  assert.equal(isExpectedFirewallBlock(500, 'page.goto: Timeout 25000ms exceeded at https://example.com waiting until domcontentloaded'), false);
+  assert.equal(isExpectedFirewallBlock(500, 'page.goto: Timeout 15000ms exceeded at https://www.douyin.com/video/123 waiting until domcontentloaded'), false);
+  assert.equal(isExpectedFirewallBlock(200, 'page.goto: Timeout 25000ms exceeded at https://www.douyin.com/?recommend=1'), false);
   assert.equal(hasHostAncestor(300,100,list),false);
   assert.throws(()=>verifyProcessSnapshot({...good,listenerPids:[300]}),/listener PID/);
   assert.throws(()=>verifyProcessSnapshot({...good,portAddresses:['0.0.0.0']}),/loopback/);
@@ -185,9 +190,18 @@ const readProcessToken = pid => {
   return ps(script);
 };
 const asRows = value => Array.isArray(value) ? value : value ? [value] : [];
-const isExpectedFirewallBlock = (status, body) => status === 500 &&
-  /ERR_NETWORK_ACCESS_DENIED/i.test(String(body || '')) &&
-  /douyin\.com/i.test(String(body || ''));
+// Only accept a narrowly identified external-navigation failure after the workflow
+// has verified its signed-Edge outbound firewall rule. Some Windows/Edge builds report
+// ERR_NETWORK_ACCESS_DENIED; others surface the same blocked request as the bounded
+// 25s domcontentloaded navigation timeout. Do not accept arbitrary HTTP 500 responses.
+export function isExpectedFirewallBlock(status, body) {
+  const text = String(body || '');
+  if (status !== 500 || !/douyin\.com/i.test(text)) return false;
+  if (/ERR_NETWORK_ACCESS_DENIED/i.test(text)) return true;
+  return /page\.goto:\s*Timeout 25000ms exceeded/i.test(text) &&
+    /https:\/\/www\.douyin\.com\//i.test(text) &&
+    /domcontentloaded/i.test(text);
+}
 
 async function requestBrowserOpen(origin, token, redactPaths) {
   try {
