@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import {
   BENCHMARK_VIDEO_ID,
   REQUIRED_OUTCOME,
@@ -97,6 +99,21 @@ test('视觉语义评分要求识别猪蹄，并至少命中器具、烹饪过�
   assert.equal(scoreVisionDecision({
     action:'skip', reason:'猪蹄在锅里。', reflection:'看到漏勺。', topics:[]
   }).passed, false);
+});
+
+test('真实模型脚本没有明确授权或没有密钥时，在加载上游与发出请求前失败关闭', () => {
+  const script = fileURLToPath(new URL('./live-vision-acceptance.mjs', import.meta.url));
+  const noConsent = { ...process.env, DEEPSEEK_API_KEY: 'fixture-secret-must-not-leak' };
+  delete noConsent.YUTANG_ALLOW_LIVE_VISION_ACCEPTANCE;
+  const first = spawnSync(process.execPath, [script], { env:noConsent, encoding:'utf8', timeout:5000 });
+  assert.equal(first.status, 1);
+  assert.match(first.stderr, /未明确启用真实模型验收/);
+  assert.doesNotMatch(first.stderr, /fixture-secret-must-not-leak/);
+  const noKey = { ...process.env, YUTANG_ALLOW_LIVE_VISION_ACCEPTANCE:'1' };
+  delete noKey.DEEPSEEK_API_KEY;
+  const second = spawnSync(process.execPath, [script], { env:noKey, encoding:'utf8', timeout:5000 });
+  assert.equal(second.status, 1);
+  assert.match(second.stderr, /缺少 DEEPSEEK_API_KEY/);
 });
 
 test('不接受没有安全停止动作的模型结果', () => {
