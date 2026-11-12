@@ -126,7 +126,7 @@ jobs:
           echo 'f9a68fabba69c3b81e153367b2c7521030b0fa8bb0de400c9599c8e6725f9c82  model/mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf' | sha256sum -c -
           echo OFFICIAL_QWEN3_VL_WEIGHTS_VERIFIED
 
-      - name: Perform one genuine CPU inference using three ordered authentic video frames
+      - name: Recheck three real frames with Qwen minimum visual tokens and complete output
         shell: bash
         run: |
           set -euo pipefail
@@ -134,12 +134,12 @@ jobs:
           test -n "$exe"
           chmod +x "$exe"
           echo 'THREE_REAL_JPEGS_ONE_MODEL_REQUEST; USER_PC_UNTOUCHED; MANUAL_SEMANTIC_REVIEW_REQUIRED'
-          timeout --signal=TERM --kill-after=10s 240s "$exe" \
+          timeout --signal=TERM --kill-after=10s 310s "$exe" \
             -m model/Qwen3VL-2B-Instruct-Q4_K_M.gguf \
             --mmproj model/mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf \
             --image evidence/frame-1.jpg,evidence/frame-2.jpg,evidence/frame-3.jpg \
-            -p '下面三张图片来自同一公开视频，依次为播放时间1.586秒、2.667秒、3.772秒。只根据三帧按时间顺序概括物体、动作和变化，抄录可辨认字幕，并明确指出仅凭三帧无法判断的内容。不要根据视频标题或对话猜测完整视频。最后说明下一步你建议继续观察还是停止，并给出证据理由。' \
-            --no-mmproj-offload -t 4 -c 4096 --temp 0 -n 240 \
+            -p '下面三张图片来自同一公开视频，依次为播放时间1.586秒、2.667秒、3.772秒。逐帧查看：先列每帧实际可见的漏勺或锅具、食材、位置变化，再单独检查每一帧底部是否有中文字幕，有则准确照抄，无则写无。仅凭这些帧无法确定的事情要明确标注，不要重复、不要猜完整视频。最后建议继续观察还是停止，并给出证据。' \
+            --no-mmproj-offload --image-min-tokens 1024 -t 4 -c 8192 --temp 0 -n 400 \
             2>&1 | tee model-result.log
           test -s model-result.log
           echo 'GENUINE_THREE_FRAME_MODEL_PROCESS_EXITED_ZERO; SEMANTIC_ACCEPTANCE_PENDING_INDEPENDENT_REVIEW'
@@ -148,7 +148,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
-          name: yutang-real-qwen-threeframes-20261112
+          name: yutang-real-qwen-threeframes-grounding-20261112
           path: model-result.log
           if-no-files-found: ignore
           retention-days: 7

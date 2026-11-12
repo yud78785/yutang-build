@@ -23,3 +23,11 @@ Exact trial HEAD `accbe53fa951c89d3d782669d395fc9350210e96`; actual GitHub Actio
 ## Second, distinct acceptance (pending at time of change)
 
 New workflow revision asks the **same** pinned CPU model to process the original three frames together in time order via documented comma-separated `--image` files, rather than repeating the already-passed single JPEG test. Objective: describe observed changes, distinguish three frames from full video, transcribe subtitles, and recommend whether to keep observing (unexecuted recommendation). No browser actions, no DeepSeek API key, no automatic message, no new Windows build; original PR #7 candidate unchanged. **Do not claim this second run passed until exact-new-HEAD CI and raw model output are inspected.**
+
+## Second genuine three-frame inference: technically completed, semantic acceptance FAILED
+
+At exact experiment HEAD `0b31ab6247ef3cc0bfecc8ef2adee170fd45f727`, actual GitHub-hosted run `43309076710` and job `131500027042` completed successfully. Raw job output shows 3 multimodal image batch encodings of original `frame-1.jpg,frame-2.jpg,frame-3.jpg`, correct model hashes and original artifact hashes. Saved result artifact ID `13985236735`. However, its answer incorrectly said there was no subtitle in frame 2 when the original frame 2 clearly displays “这份猪蹄就会瞬间变成猪蹄爆米花”; frame 3 also has the same visible subtitle but the model did not transcribe it. The end of its description was truncated. **Thus only multi-image technical execution PASSED; actual sequence understanding FAILED.** Do not claim it watched the whole video. The model runtime printed a warning suggesting `--image-min-tokens 1024` if accuracy problems occur.
+
+## Third revision: one bounded resolution/length corrective test (pending at write time)
+
+The new revision preserves the exact same original three JPEGs, official Qwen weights and CPU binary and makes only targetted changes: `--image-min-tokens 1024`, context `8192`, max output `400`, a clearer request to inspect subtitle in *each* frame, and process timeout `310s`. These changes directly address the observed incorrect/missing subtitles, image grounding warning and truncation. Do not mark semantic PASS from job exit status; inspect raw model answer against frames 1–3. No Windows EXE run, installed model on user's PC, paid DeepSeek call, browsing action or PR merge.
