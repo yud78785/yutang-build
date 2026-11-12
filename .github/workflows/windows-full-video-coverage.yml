@@ -9,7 +9,9 @@ on:
       - tools/windows_full_video_playback_probe.mjs
       - tools/run_full_video_coverage.mjs
       - tools/full_video_coverage_audit.mjs
+      - tools/verify_full_video_natural_end.mjs
       - tests/test-full-video-coverage-audit.mjs
+      - tests/test-verify-full-video-natural-end.mjs
 
 permissions:
   contents: read
@@ -51,8 +53,12 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Full-video probe syntax failed.' }
           node --check tools/run_full_video_coverage.mjs
           if ($LASTEXITCODE -ne 0) { throw 'Full-video coverage helper syntax failed.' }
+          node --check tools/verify_full_video_natural_end.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Original element ended-event validator syntax failed.' }
           node --test tests/test-full-video-coverage-audit.mjs
           if ($LASTEXITCODE -ne 0) { throw 'Coverage-ledger unit tests failed.' }
+          node --test tests/test-verify-full-video-natural-end.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Original element ended-event tests failed.' }
           node tools/windows_full_video_playback_probe.mjs --self-test
           if ($LASTEXITCODE -ne 0) { throw 'Candidate ownership self-tests failed.' }
       - name: Confirm original exact-source successful build and candidate artifact metadata

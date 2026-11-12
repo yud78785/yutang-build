@@ -5,6 +5,7 @@ import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {setTimeout as delay} from 'node:timers/promises';
 import {createCoverageAudit,appendCoverageSegment,endCoverageAudit,lineHash} from './full_video_coverage_audit.mjs';
+import {verifyFullVideoNaturalEndEvent} from './verify_full_video_natural_end.mjs';
 
 const ID='7577614489533680959';
 const HEAD='00f5ac8d560f8459f333cadeb9e9cb227cfaeca6';
@@ -121,28 +122,63 @@ export async function coverFullPublicVideo({controller,verifyFrameProof,evidence
   if(n%5===0)console.log('FULL_VIDEO_SEGMENT '+JSON.stringify({
    index:n,endTime:entry.after,duration:audit.durationSeconds,
    audioSegments:audit.audioSegments,totalFrames:(n+1)*3}));
+  // Register the original element's ended listener BEFORE an application-driven
+  // autoplay/next-video transition can change controller.state() at the boundary.
+  if(audit.durationSeconds-entry.after<=2.0)break;
  }
- let tail=null,prior=audit.priorEnd;
- const tailDeadline=Date.now()+8_000;
- while(Date.now()<tailDeadline){
-  await strict();
-  const meta=await locator.evaluate(v=>({
-   currentTime:v.currentTime,duration:v.duration,ended:v.ended,
-   loop:v.loop,seeking:v.seeking,paused:v.paused,
-   decodedFrames:v.getVideoPlaybackQuality?.().totalVideoFrames??0
-  }));
-  if(meta.currentTime<prior-.25)throw Error('FULL_VIDEO_REWOUND_OR_LOOPED');
-  prior=meta.currentTime;
-  if(meta.loop||meta.seeking)throw Error('FULL_VIDEO_TAIL_PLAYER_CHANGED');
-  if(meta.ended===true){tail=meta;break;}
-  await delay(200);
+ // Do not poll controller.state() once the original video is <2s from ending:
+ // the Douyin application may replace the current page/video before that poll.
+ // Instead, await the native ended event on the EXACT original video element.
+ let terminal;
+ try {
+  terminal=await locator.evaluate(async video=>{
+   const beginTime=video.currentTime;
+   const decodedBefore=Math.floor(video.getVideoPlaybackQuality?.().totalVideoFrames??0);
+   const start=performance.now();
+   return await new Promise(resolve=>{
+    let finished=false,timeout,interval;
+    const finish=kind=>{
+     if(finished)return;finished=true;
+     clearTimeout(timeout);clearInterval(interval);
+     video.removeEventListener('ended',onEnded,true);
+     resolve({kind,eventSeen:kind==='ORIGINAL_HTML_VIDEO_ENDED_EVENT',
+      originalElementConnected:video.isConnected,ended:video.ended,
+      loop:video.loop,seeking:video.seeking,
+      startTime:beginTime,endTime:video.currentTime,
+      actualDuration:video.duration,decodedBefore,
+      decodedAfter:Math.floor(video.getVideoPlaybackQuality?.().totalVideoFrames??0),
+      wallMs:performance.now()-start});
+    };
+    const onEnded=()=>finish('ORIGINAL_HTML_VIDEO_ENDED_EVENT');
+    // Fail closed for an already ended video: the event was not observed.
+    if(video.ended)return finish('TERMINAL_STATE_ALREADY_ENDED');
+    video.addEventListener('ended',onEnded,true);
+    interval=setInterval(()=>{
+     if(!video.isConnected)return finish('ORIGINAL_VIDEO_ELEMENT_DETACHED');
+     if(video.currentTime<beginTime-.4)return finish('ORIGINAL_VIDEO_REWOUND_OR_REPLACED');
+    },65);
+    timeout=setTimeout(()=>finish('ORIGINAL_VIDEO_END_EVENT_TIMEOUT'),8000);
+   });
+  });
+ } catch(err) {
+  await log({stage:'TAIL_EVALUATION_ERROR',
+   category:'VIDEO_ELEMENT_EVALUATION_FAILED_NO_END_EVENT_PROOF'});
+  throw Object.assign(Error('FULL_VIDEO_TAIL_EVALUATION_FAILED'),
+   {code:'FULL_VIDEO_TAIL_EVALUATION_FAILED'});
  }
- if(!tail)throw Error('FULL_VIDEO_NATURAL_END_NOT_VERIFIED');
+ // Save original terminal evidence even on rejection so a failed real Windows
+ // artifact can distinguish auto-next, detachment, missing event and a true END.
+ await log({stage:'TAIL_SNAPSHOT',snapshot:terminal});
+ const verifiedEnd=verifyFullVideoNaturalEndEvent(terminal,{
+  duration:audit.durationSeconds,previousTime:audit.priorEnd});
+ const tail={ended:verifiedEnd.ended,loop:verifiedEnd.loop,
+  seeking:verifiedEnd.seeking,currentTime:verifiedEnd.endTime,
+  decodedFrames:verifiedEnd.decodedAfter};
  const result=endCoverageAudit(audit,{ended:tail.ended,loop:tail.loop,
   seeking:tail.seeking,videoId:ID,time:tail.currentTime,
   decodedFrames:tail.decodedFrames,finalWallMs:Date.now()-startWall});
- await log({stage:'END',result});
- const output={...result,ledgerChainSha256:lastChain,
+ await log({stage:'END',result,terminalEvidence:verifiedEnd});
+ const output={...result,endEventEvidence:verifiedEnd,ledgerChainSha256:lastChain,
   lastRecordedAt:new Date().toISOString(),
   allIndividualFramesUnderstood:false,fullAudioTranscribed:false};
  await fs.writeFile(path.join(evidenceDir,'full-playback-result.json'),
