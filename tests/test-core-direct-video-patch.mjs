@@ -29,10 +29,10 @@ const actionAnchor = "const VIDEO_ACTIONS=new Set(['douyin_open','douyin_search'
 const fixture = [
   actionAnchor,
   "const RECOMMEND = 'https://www.douyin.com/?recommend=1';",
-  "const aborted = () => {};",
+  "const aborted = signal => signal?.throwIfAborted();",
   'const browserPageLabel = () => "synthetic-browser-page";',
   'class Probe {',
-  '  constructor(start="about:blank") { this.current=start; this.visited=[]; this.gotoOptions=null; this.settleOptions=null; this.page={url:()=>this.current,goto:async(url,options)=>{this.visited.push(url);this.gotoOptions=options;this.current=url;},evaluate:async(fn,name)=>{this.pageName=name;}}; }',
+  '  constructor(start="about:blank",signal=null) { this.current=start; this.visited=[]; this.signal=signal; this.gotoOptions=null; this.settleOptions=null; this.page={url:()=>this.current,goto:async(url,options)=>{this.visited.push(url);this.gotoOptions=options;this.current=url;},evaluate:async(fn,name)=>{this.pageName=name;}}; }',
   '  async navigate(url, signal) { this.visited.push(url); this.current=url; }',
   '  async settle(signal, options) { this.settleOptions=options; }',
   '  async connect(signal, { launch = true, create = true, authorizePrepare } = {}) {',
@@ -42,7 +42,7 @@ const fixture = [
   '    }',
   '  }',
   '  async execute(name,args={}) {',
-  '    const signal=null;',
+  '    const signal=this.signal;',
   '        await this.connect(signal);',
   '        aborted(signal);',
   "        if (name==='douyin_open_video') {",
@@ -58,15 +58,20 @@ assert.throws(()=>applyPatch(fixture),/SHA256 mismatch/);
 const {patched} = applyPatch(fixture,hash);
 assert.match(patched,/initialDirectVideoReceipt.completed = true/);
 assert.match(patched,/initialDirectVideoReceipt\?\.completed !== true/);
-const context = vm.createContext({URL,globalThis:{}});
+const context = vm.createContext({URL,globalThis:{},delay:async()=>{}});
 vm.runInContext(patched,context,{timeout:1000});
 const Probe = context.globalThis.Probe;
 const one = new Probe();
+let contextAttempts=0;
+one.page.evaluate=async(fn,name)=>{contextAttempts++;if(contextAttempts===1)throw new Error('Execution context was destroyed, most likely because of a navigation');one.pageName=name;};
 await one.execute('douyin_open_video',{url:direct});
 assert.deepEqual(Array.from(one.visited),[direct],'explicit direct video must skip unrelated recommendation');
 assert.deepEqual(JSON.parse(JSON.stringify(one.gotoOptions)),{waitUntil:'commit',timeout:15_000});
 assert.deepEqual(JSON.parse(JSON.stringify(one.settleOptions)),{kind:'video',videoId:id});
+assert.equal(contextAttempts,2,'a transient post-commit execution-context reset must be retried once');
+assert.equal(one.pageName,'synthetic-browser-page');
 assert.match(patched,/Direct video navigation commit timed out/);
+assert.match(patched,/DIRECT_VIDEO_CONTEXT_TIMEOUT/);
 const two = new Probe();
 await two.execute('douyin_open',{});
 assert.deepEqual(Array.from(two.visited),['https://www.douyin.com/?recommend=1'],'non-target action preserves original feed');
@@ -91,4 +96,14 @@ assert.deepEqual(Array.from(six.visited),[direct],'prepared nonblank page must n
 const seven=new Probe();
 seven.page.goto=async()=>{throw Object.assign(new Error('injected navigation timeout'),{name:'TimeoutError'});};
 await assert.rejects(seven.execute('douyin_open_video',{url:direct}),error=>error.code==='DIRECT_VIDEO_COMMIT_TIMEOUT');
+const eight=new Probe();
+let unrelatedAttempts=0;
+eight.page.evaluate=async()=>{unrelatedAttempts++;throw new Error('injected unrelated evaluation failure');};
+await assert.rejects(eight.execute('douyin_open_video',{url:direct}),/injected unrelated evaluation failure/);
+assert.equal(unrelatedAttempts,1,'unrelated errors must not be swallowed or retried');
+const stopController=new AbortController();
+const nine=new Probe('about:blank',stopController.signal);
+nine.page.evaluate=async()=>{stopController.abort(new Error('user stop'));throw new Error('Execution context was destroyed during navigation');};
+await assert.rejects(nine.execute('douyin_open_video',{url:direct}),/user stop/);
+
 console.log('PASS canonical target, navigation receipt, no duplicate on fresh page, strict fallback and negative patch regressions');
