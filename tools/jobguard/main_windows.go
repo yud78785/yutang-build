@@ -89,16 +89,25 @@ func runGuard() error {
 	// The updater is an Electron child, and must not be dragged into this job.
 	target := owner
 	if request.targetPID != ownerPID {
-		parentPID, err := immediateParentOfPID(request.targetPID)
-		if err != nil { return fmt.Errorf("verify worker ancestry: %w", err) }
-		if parentPID != ownerPID {
-			return fmt.Errorf("refusing worker target: immediate parent is not desktop owner")
-		}
-		target, _, callErr = procOpenProcess.Call(
-			uintptr(processTerminate|processSetQuota|synchronize), 0,
-			uintptr(request.targetPID),
+		targetHandle, err := openVerifiedTargetProcess(
+			ownerPID,
+			request.targetPID,
+			func(pid uint32) (uintptr, error) {
+				handle, _, openErr := procOpenProcess.Call(
+					uintptr(processTerminate|processSetQuota|synchronize), 0, uintptr(pid),
+				)
+				if handle == 0 {
+					return 0, win32Error("OpenProcess(target worker)", openErr)
+				}
+				return handle, nil
+			},
+			immediateParentOfPID,
+			func(handle uintptr) { procCloseHandle.Call(handle) },
 		)
-		if target == 0 { return win32Error("OpenProcess(target worker)", callErr) }
+		if err != nil {
+			return err
+		}
+		target = targetHandle
 		defer procCloseHandle.Call(target)
 	}
 
