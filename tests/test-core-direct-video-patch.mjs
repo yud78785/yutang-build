@@ -32,7 +32,7 @@ const fixture = [
   "const aborted = () => {};",
   'class Probe {',
   '  constructor(start="about:blank") { this.current=start; this.visited=[]; this.page={url:()=>this.current}; }',
-  '  async navigate(url,signal) { this.visited.push(url); this.current=url; }',
+  '  async navigate(url, signal) { this.visited.push(url); this.current=url; }',
   '  async connect(signal, { launch = true, create = true, authorizePrepare } = {}) {',
   '    if (this.page.url()==="about:blank") {',
   '       if (false) await this.navigate("never",signal);',
