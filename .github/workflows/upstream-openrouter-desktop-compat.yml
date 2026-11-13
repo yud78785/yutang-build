@@ -90,13 +90,11 @@ jobs:
           commit=fb2c4b9e698e30edb738bca4cf0618587db7d203
           archive=/tmp/deepseek-harness-${commit}.tar.gz
           destination=upstream/desktop/.cache/upstream/${commit}
-          mkdir -p \"$destination\"
-          curl --fail --location --retry 2 --silent --show-error \\
-            \"https://codeload.github.com/deepseek-ai/deepseek-harness/tar.gz/${commit}\" \\
-            --output \"$archive\"
-          echo '60038295d9ea8849dc50a9d77dfcbed6c14397f0d54fadb035f768841415a3bd  '\"$archive\" | sha256sum --check --status
-          tar -xzf \"$archive\" --strip-components=1 -C \"$destination\"
-          test -s \"$destination/packages/client/ui-primitives/src/index.ts\"
+          mkdir -p "$destination"
+          curl --fail --location --retry 2 --silent --show-error "https://codeload.github.com/deepseek-ai/deepseek-harness/tar.gz/${commit}" --output "$archive"
+          echo "60038295d9ea8849dc50a9d77dfcbed6c14397f0d54fadb035f768841415a3bd  $archive" | sha256sum --check --status
+          tar -xzf "$archive" --strip-components=1 -C "$destination"
+          test -s "$destination/packages/client/ui-primitives/src/index.ts"
 
       - name: Build the actual standalone desktop UI assets
         shell: bash
