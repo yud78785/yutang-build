@@ -52,7 +52,7 @@ test('no workaround runs on Linux; full verified source tree still required', as
 }));
 
 test('wrong bytes are rejected and neither path is modified', async () => fixture(async ({ root, wrong, right }) => {
-  await writeFile(wrong, 'DELIVERED_WRONG\n');
+  await writeFile(wrong, 'DELIVERED_FAKE\n');
   await assert.rejects(() => normalizePinnedWindowsArchiveFilename(root, 'win32'), /WINDOWS_TAR_FILENAME_BLOB_MISMATCH/);
   assert.equal(await exists(wrong), true);
   assert.equal(await exists(right), false);
