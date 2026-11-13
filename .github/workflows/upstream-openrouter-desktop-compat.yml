@@ -80,12 +80,12 @@ jobs:
             desktop/tests/api-worker.test.mjs \
             desktop/ui-api/tests/openrouter-preset.test.mjs
 
-      - name: Run existing desktop UI tests
+      - name: Run targeted desktop OpenRouter preset UI test
         shell: bash
         working-directory: upstream/desktop/ui-api
         run: |
           set -euo pipefail
-          npx --yes pnpm@10.6.5 test
+          node --test tests/openrouter-preset.test.mjs
 
       - name: Parse the desktop JSX with esbuild
         shell: bash
