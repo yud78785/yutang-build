@@ -100,7 +100,7 @@ export async function applyUpdateTrustPatch(upstream, repositoryRoot = REPOSITOR
     "      const runningSha256=createHash('sha256').update(await fs.readFile(process.execPath)).digest('hex');",
     "      if(runningSha256!==updateExpectedSha256)throw new Error('新版运行文件与签名清单不一致。');",
     "      const updateHealth={ready:true,nonce:updateHealthNonce,pid:process.pid,version:app.getVersion(),sha256:runningSha256,backendPid:backend.child.pid};",
-    "      await fs.writeFile(updateHealthFile,JSON.stringify(updateHealth)+'\\\\n',{flag:'wx',mode:0o600});",
+    "      await fs.writeFile(updateHealthFile,JSON.stringify(updateHealth)+'\\n',{flag:'wx',mode:0o600});",
     "    }"
   ].join('\n');
   main = replaceExactlyOnce(main, healthAnchor, healthCode, 'main-update-health-signal');
