@@ -1,0 +1,143 @@
+name: YuTang 1.4.7 actual Edge sandbox and process lifecycle - not release
+
+on:
+  push:
+    branches:
+      - experiment/windows-147-edge-lifecycle-20261113
+    paths:
+      - .github/workflows/windows-147-edge-lifecycle.yml
+      - tools/windows_147_isolated_edge_lifecycle.mjs
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  actual-edge:
+    name: ${{ matrix.os }} - verified 1.4.7 EXE Edge lifecycle
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-2025]
+    concurrency:
+      group: yutang-147-edge-verified-pinned-${{ matrix.os }}
+      cancel-in-progress: true
+
+    steps:
+      - name: Enforce disposable official Windows x64 runner and exact branch
+        shell: pwsh
+        env:
+          YUTANG_RUNNER_KIND: ${{ runner.environment }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:GITHUB_ACTIONS -cne 'true') { throw 'GH_ACTIONS_ONLY' }
+          if ($env:YUTANG_RUNNER_KIND -cne 'github-hosted') { throw 'SELF_HOSTED_RUNNER_FORBIDDEN' }
+          if ($env:GITHUB_REPOSITORY -cne 'yud78785/yutang-build') { throw 'WRONG_REPOSITORY' }
+          if ($env:GITHUB_REF -cne 'refs/heads/experiment/windows-147-edge-lifecycle-20261113') { throw 'WRONG_BRANCH' }
+          if ($env:GITHUB_EVENT_NAME -cne 'push') { throw 'WRONG_EVENT' }
+          if ($env:RUNNER_OS -cne 'Windows' -or $env:RUNNER_ARCH -cne 'X64') { throw 'WRONG_RUNNER' }
+
+      - name: Checkout reviewed experiment branch without persisting credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Pin Node runtime for candidate lifecycle script
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24.17.0
+
+      - name: Verify inherited hardened ownership assertions without launching EXE
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node --check tools/windows_147_isolated_edge_lifecycle.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'PROBE_SYNTAX_FAILURE' }
+          node tools/windows_147_isolated_edge_lifecycle.mjs --self-test
+          if ($LASTEXITCODE -ne 0) { throw 'OWNERSHIP_SELF_TEST_FAILURE' }
+
+      - name: Retrieve exactly pinned previous successful 1.4.7 Windows candidate
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $matrixOS = '${{ matrix.os }}'
+          switch ($matrixOS) {
+            'windows-2022' {
+              $artifactId = 14040101401
+              $artifactName = 'YuTang-OpenRouter-Desktop-1.4.7-SyntheticKeySmokeFix-windows-2022-CANDIDATE-NOT-RELEASE'
+              $artifactZipHash = '48be62feb05d1b6e01b324a983d55aafcab4b2f24db486d651b87202c889ee1a'
+              $exeHash = '0140b5b39bedecbee68345a27b37506146daad6a9b2b6bf5ed2b258d522e59a3'
+            }
+            'windows-2025' {
+              $artifactId = 14040420236
+              $artifactName = 'YuTang-OpenRouter-Desktop-1.4.7-SyntheticKeySmokeFix-windows-2025-CANDIDATE-NOT-RELEASE'
+              $artifactZipHash = '5d1c721cf84742342f66e0457264493ef5eca97ceb6adffd4e137b0c935c3e97'
+              $exeHash = '208d5035bfca27dcd252e14222037cb9c5d7f8067ef55d4693cfeabe2c543019'
+            }
+            default { throw 'UNEXPECTED_MATRIX_OS' }
+          }
+          $meta = gh api ('repos/yud78785/yutang-build/actions/artifacts/' + $artifactId) | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw 'ARTIFACT_METADATA_FAILED' }
+          if ($meta.id -ne $artifactId -or $meta.name -cne $artifactName -or $meta.expired -eq $true) { throw 'ARTIFACT_IDENTITY_MISMATCH' }
+          if ($meta.digest -cne ('sha256:' + $artifactZipHash)) { throw 'ARTIFACT_ARCHIVE_SHA_MISMATCH' }
+          if ($meta.workflow_run.id -ne 43430044301 -or $meta.workflow_run.head_sha -cne '2e8513a48761c83906a9a5e65ea1c4a2012bb7bb') { throw 'ARTIFACT_SOURCE_COMMIT_MISMATCH' }
+          New-Item -ItemType Directory -Force -Path work/candidate | Out-Null
+          gh run download 43430044301 --repo yud78785/yutang-build --name $artifactName --dir work/candidate
+          if ($LASTEXITCODE -ne 0) { throw 'PINNED_EXE_DOWNLOAD_FAILED' }
+          $exe = Join-Path (Resolve-Path work/candidate).Path 'desktop/release-api/Dafeiyu-Douyin-API-1.4.7-win-x64.exe'
+          if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw 'PINNED_EXE_MISSING' }
+          $actualHash = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualHash -cne $exeHash) { throw 'PINNED_EXE_SHA256_MISMATCH' }
+          $receiptFile = Join-Path (Resolve-Path work/candidate).Path 'desktop/release-api/windows-candidate-receipt.json'
+          $receipt = Get-Content -LiteralPath $receiptFile -Raw | ConvertFrom-Json
+          if ($receipt.status -cne 'PASS_WINDOWS_PACKAGED_SMOKE' -or $receipt.sha256 -cne $exeHash -or $receipt.yutangPatchCommit -cne '2e8513a48761c83906a9a5e65ea1c4a2012bb7bb') { throw 'EXE_RECEIPT_MISMATCH' }
+          if ($receipt.renderer.providerKeyIsolation -ne $true -or $receipt.realModelCalled -ne $false -or $receipt.realMessageSent -ne $false) { throw 'EXE_FAILED_PRIOR_SMOKE_GATES' }
+          "YUTANG_EXPECTED_CANDIDATE_SHA256=$exeHash" | Out-File -LiteralPath $env:GITHUB_ENV -Append -Encoding utf8
+          "YUTANG_CANDIDATE_EXE=$exe" | Out-File -LiteralPath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host ('EXACT_CANDIDATE_SHA256_VERIFIED ' + $actualHash)
+
+      - name: Block all Microsoft-signed Edge outbound network before browser starts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $locations = @(
+            (Join-Path $env:ProgramFiles 'Microsoft\Edge\Application\msedge.exe'),
+            (Join-Path ${env:ProgramFiles(x86)} 'Microsoft\Edge\Application\msedge.exe')
+          )
+          $edge = @($locations | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf })
+          if ($edge.Count -ne 1) { throw 'EXPECTED_ONE_INSTALLED_EDGE_EXE' }
+          if ((Get-AuthenticodeSignature -LiteralPath $edge[0]).Status -ne 'Valid') { throw 'EDGE_SIGNATURE_INVALID' }
+          if (Get-NetFirewallRule -DisplayName 'YuTang147EphemeralEdgeEgressBlock' -ErrorAction SilentlyContinue) { throw 'PREEXISTING_FIREWALL_RULE' }
+          New-NetFirewallRule -DisplayName 'YuTang147EphemeralEdgeEgressBlock' -Direction Outbound -Program $edge[0] -Action Block -Profile Any -ErrorAction Stop | Out-Null
+          $gate = Get-NetFirewallRule -DisplayName 'YuTang147EphemeralEdgeEgressBlock'
+          if ($gate.Direction -ne 'Outbound' -or $gate.Action -ne 'Block' -or $gate.Enabled -ne 'True') { throw 'EDGE_FIREWALL_NOT_ENFORCED' }
+          "YUTANG_EDGE_EXE=$($edge[0])" | Out-File -LiteralPath $env:GITHUB_ENV -Append -Encoding utf8
+          'YUTANG_EDGE_FIREWALL_CONFIRMED=yes' | Out-File -LiteralPath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host 'EDGE_EGRESS_BLOCKED_ON_DISPOSABLE_RUNNER'
+
+      - name: Run actual pinned EXE Edge sandbox, dedicated profile, loopback and lifecycle probe
+        shell: pwsh
+        timeout-minutes: 18
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node tools/windows_147_isolated_edge_lifecycle.mjs "$env:YUTANG_CANDIDATE_EXE" --stress-restarts=2
+          if ($LASTEXITCODE -ne 0) { throw 'NEW_147_EXE_EDGE_LIFECYCLE_FAILED' }
+
+      - name: Remove temporary Edge block rule after test
+        if: always()
+        shell: pwsh
+        run: |
+          Get-NetFirewallRule -DisplayName 'YuTang147EphemeralEdgeEgressBlock' -ErrorAction SilentlyContinue | Remove-NetFirewallRule -ErrorAction SilentlyContinue
+          Write-Host 'EPHEMERAL_FIREWALL_RULE_CLEANUP_REQUESTED'
+
+      - name: Strict no-release boundary
+        if: always()
+        shell: pwsh
+        run: |
+          Write-Output 'ONE-PINNED-EXE EDGE SANDBOX AND LIFECYCLE TEST PER OS.'
+          Write-Output 'NO MODEL REQUEST, NO ACCOUNT, NO PUBLIC VIDEO, NO USER PC.'
+          Write-Output 'NO EXE REBUILD, NO MAIN CHANGE, NO MERGE, NO RELEASE.'
