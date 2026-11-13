@@ -61,6 +61,7 @@ export function createProviderTransport(provider, fetchImpl = fetch) {
       // OpenRouter uses the OpenAI-compatible request body, so remove only that
       // vendor-specific field and apply hard routing/privacy constraints.
       delete payload.thinking;
+      payload.reasoning = { effort: 'none' };
       payload.provider = {
         sort: 'price',
         max_price: { prompt: OPENROUTER_VISION_PROFILE.maxPrice.prompt,
