@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import { constants as fsConstants } from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
@@ -99,7 +100,7 @@ async function commitShortcut(stagedShortcut, shortcut, nonce) {
   const directory = path.dirname(shortcut);
   const temporary = path.join(directory, '.' + path.basename(shortcut) + '.' + nonce + '.tmp.lnk');
   const backup = path.join(directory, '.' + path.basename(shortcut) + '.' + nonce + '.bak.lnk');
-  await fs.copyFile(stagedShortcut, temporary, fs.constants.COPYFILE_EXCL);
+  await fs.copyFile(stagedShortcut, temporary, fsConstants.COPYFILE_EXCL);
   let hadPrevious = false;
   try {
     await fs.rename(shortcut, backup);
@@ -117,9 +118,14 @@ async function commitShortcut(stagedShortcut, shortcut, nonce) {
     await fs.rm(temporary, { force: true });
     throw error;
   }
-  return async function rollback() {
-    await fs.rm(shortcut, { force: true });
-    if (hadPrevious) await fs.rename(backup, shortcut);
+  return {
+    rollback: async function () {
+      await fs.rm(shortcut, { force: true });
+      if (hadPrevious) await fs.rename(backup, shortcut);
+    },
+    finalize: async function () {
+      await fs.rm(backup, { force: true });
+    }
   };
 }
 
@@ -191,12 +197,14 @@ export async function runUpdateLauncher({
     });
     await waitForStableChild(child, stabilityMs, pollMs, delayImpl);
     rollbackShortcut = await commitShortcut(stagedShortcut, shortcut, nonce);
+    await rollbackShortcut.finalize();
+    rollbackShortcut = null;
     child.unref();
     await fs.rm(healthFile, { force: true });
     await fs.rm(stagedShortcut, { force: true });
     return { status: 'healthy-update-started', pid: child.pid, version, sha256, health };
   } catch (error) {
-    if (rollbackShortcut) await rollbackShortcut().catch(() => {});
+    if (rollbackShortcut) await rollbackShortcut.rollback().catch(() => {});
     await stopChild(child, delayImpl);
     await fs.rm(healthFile, { force: true }).catch(() => {});
     await fs.rm(stagedShortcut, { force: true }).catch(() => {});
