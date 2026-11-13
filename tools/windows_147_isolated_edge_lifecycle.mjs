@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Original 1.4.6 probe: yud78785/yutang-build@00f5ac8d560f8459f333cadeb9e9cb227cfaeca6; original Git blob 80ded4bd4d6a891c196149ea272f1843d571ba1e.
-// Only the immutable candidate filename is changed for isolated 1.4.7 regression.
+// Derived from the 1.4.6 lifecycle probe; pinned to the 1.4.7 candidate and its real Windows profile/AppContainer requirements.
+// YuTang state is isolated without replacing USERPROFILE, APPDATA, or LOCALAPPDATA.
 // Candidate-only Windows CI probe. Does not login, run a model, send a message, or modify real profiles.
 // A Windows Firewall rule must already block outbound Edge traffic; this probe fails closed without it.
 import assert from 'node:assert/strict';
@@ -16,6 +16,26 @@ export const EXPECTED_EXE = process.env.YUTANG_EXPECTED_CANDIDATE_SHA256 || '';
 const FILE = 'Dafeiyu-Douyin-API-1.4.7-win-x64.exe';
 const PORT = 9227;
 const allowedEnv = /^(?:path|systemroot|windir|comspec|pathext|programfiles|programfiles\(x86\)|programdata|username|userdomain|public|allusersprofile|programw6432|os|processor_architecture|number_of_processors|homedrive|homepath|userprofile|appdata|localappdata|temp|tmp|systemdrive|home)$/i;
+
+export function createCandidateEnvironment(sourceEnv, userData, locationFile) {
+  if (!sourceEnv || typeof sourceEnv !== 'object' || Array.isArray(sourceEnv)) throw new Error('Native Windows environment is required.');
+  for (const key of ['USERPROFILE', 'APPDATA', 'LOCALAPPDATA']) {
+    if (typeof sourceEnv[key] !== 'string' || !path.isAbsolute(sourceEnv[key])) throw new Error('Native Windows ' + key + ' is unavailable; refusing Edge launch.');
+  }
+  if (typeof userData !== 'string' || !path.isAbsolute(userData) || typeof locationFile !== 'string' || !path.isAbsolute(locationFile)) {
+    throw new Error('Candidate-only data paths must be absolute.');
+  }
+  const env = Object.fromEntries(Object.entries(sourceEnv).filter(([key]) => allowedEnv.test(key)));
+  for (const key of ['USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'HOME']) {
+    if (sourceEnv[key] !== undefined && env[key] !== sourceEnv[key]) throw new Error('Native Windows profile environment was not preserved: ' + key);
+  }
+  Object.assign(env, {
+    DOUYIN_DESKTOP_USER_DATA: userData,
+    DOUYIN_DESKTOP_SMOKE: '1',
+    DOUYIN_RUNTIME_LOCATION_FILE: locationFile
+  });
+  return env;
+}
 
 export function hasHostAncestor(pid, hostPid, procs) {
   if (!Number.isSafeInteger(pid) || !Number.isSafeInteger(hostPid) || pid < 1 || hostPid < 1) return false;
@@ -62,6 +82,13 @@ export function selfTest() {
     {ProcessId: 300, ParentProcessId: 4, Name:'msedge.exe',CommandLine:'msedge.exe --remote-debugging-port=9227'}
   ];
   const good={processes:list,hostPid:100,profile,listenerPids:[200],portAddresses:['127.0.0.1']};
+  const nativeEnv={PATH:'C:\\Windows\\System32',USERPROFILE:'C:\\Users\\runneradmin',APPDATA:'C:\\Users\\runneradmin\\AppData\\Roaming',LOCALAPPDATA:'C:\\Users\\runneradmin\\AppData\\Local',HOME:'C:\\Users\\runneradmin'};
+  const isolatedEnv=createCandidateEnvironment(nativeEnv,'D:\\a\\_temp\\candidate\\user-data','C:\\Users\\runneradmin\\.yutang-observer-isolated\\runtime-location.json');
+  for(const key of ['USERPROFILE','APPDATA','LOCALAPPDATA','HOME']) assert.equal(isolatedEnv[key],nativeEnv[key],key+' must remain the native Windows profile path');
+  assert.equal(isolatedEnv.DOUYIN_DESKTOP_USER_DATA,'D:\\a\\_temp\\candidate\\user-data');
+  assert.equal(isolatedEnv.DOUYIN_RUNTIME_LOCATION_FILE,'C:\\Users\\runneradmin\\.yutang-observer-isolated\\runtime-location.json');
+  assert.throws(()=>createCandidateEnvironment({...nativeEnv,USERPROFILE:undefined},'D:\\a\\user-data','C:\\Users\\runneradmin\\.yutang-observer-isolated\\runtime-location.json'),/USERPROFILE/);
+  assert.throws(()=>createCandidateEnvironment(nativeEnv,'relative','C:\\Users\\runneradmin\\.yutang-observer-isolated\\runtime-location.json'),/absolute/);
   assert.equal(verifyProcessSnapshot(good).listenerMatchesEdge,true);
   assert.equal(hasHostAncestor(201,100,list),true);
   const summary=summarizeHostProcesses(list,100,9,profile,'C:\\sandbox\\control');
@@ -86,7 +113,7 @@ export function selfTest() {
   assert.throws(()=>verifyProcessSnapshot({...good,processes:list.map(p=>p.ProcessId===200?{...p,ParentProcessId:300}:p)}),/descendant/);
   assert.throws(()=>verifyProcessSnapshot({...good,processes:list.map(p=>p.ProcessId===201?{...p,CommandLine:p.CommandLine+' --no-sandbox'}:p)}),/Unsafe/);
   assert.throws(()=>verifyProcessSnapshot({...good,profile:'C:\\another'}),/No MS Edge/);
-  console.log('PASS 8 synthetic Windows process ownership/port binding regression assertions');
+  console.log('PASS Windows process ownership/port binding and native USERPROFILE/APPDATA/LOCALAPPDATA preservation regression assertions');
 }
 
 async function sha256(file) {
@@ -693,17 +720,16 @@ async function run(exeFile, { forceMode = null, stressRestarts = 2, desktopOnly 
   assert.equal(path.basename(exeFile),FILE);
   assert.equal(await sha256(exeFile),EXPECTED_EXE,'Candidate EXE does not match immutable build');
   const base=await fs.mkdtemp(path.join(process.env.RUNNER_TEMP || tmpdir(),'yutang-edge-ci-'));
-  const originalHome=process.env.USERPROFILE || process.env.HOME;
+  const originalHome=process.env.USERPROFILE;
   if(typeof originalHome!=='string'||!path.isAbsolute(originalHome))throw new Error('Native Windows USERPROFILE is unavailable; refusing to launch candidate.');
-  const home=path.join(base,'isolated-home');
-  await fs.mkdir(home,{recursive:true});
+  const home=path.resolve(originalHome);
   const common=path.join(home,'.yutang-observer-isolated');
-  if(await fs.access(common).then(()=>true,()=>false))throw new Error('Pre-existing candidate state found in disposable home; refusing to overwrite it.');
+  if(await fs.access(common).then(()=>true,()=>false)) { await fs.rm(base,{recursive:true,force:true}); throw new Error('Pre-existing candidate state found in native runner profile; refusing to overwrite it.'); }
   const userData=path.join(base,'user-data'),memory=path.join(common,'memory');
   const locationFile=path.join(common,'runtime-location.json');
   await fs.mkdir(userData,{recursive:true});
-  const env=Object.fromEntries(Object.entries(process.env).filter(([key])=>allowedEnv.test(key)));
-  Object.assign(env,{USERPROFILE:home,HOME:home,DSH_HOME:path.join(home,'.dsh'),DOUYIN_DESKTOP_USER_DATA:userData,DOUYIN_DESKTOP_SMOKE:'1'});
+  const env=createCandidateEnvironment(process.env,userData,locationFile);
+  // Preserve the real Windows account profile and its AppData roots. Only YuTang state and Electron userData are isolated.
   // In ephemeral offline Windows CI only, capture bounded Playwright startup traces
   // into the candidate's isolated browser-host.log; diagnostics are redacted before output.
   env.DEBUG = 'pw:browser*';
@@ -726,8 +752,8 @@ async function run(exeFile, { forceMode = null, stressRestarts = 2, desktopOnly 
   const controlDir=path.join(common,'control');
   const control=path.join(controlDir,'browser.json');
   const profile=path.join(common,'cli-profile');
-  const envKeys=['HOMEDRIVE','HOMEPATH','USERNAME','USERDOMAIN','SystemDrive','ProgramFiles','ProgramFiles(x86)','ProgramData','SystemRoot','TEMP','TMP'];
-  const report={type:'WINDOWS_EDGE_LAUNCH_IN_EPHEMERAL_CI_ONLY',candidateSha256:EXPECTED_EXE,realAccount:false,modelKey:false,externalEdgeNetworkBlocked:true,environmentProfile:'isolated-safe-expanded',safeEnvPresence:Object.fromEntries(envKeys.map(key=>[key,Boolean(env[key])]))};
+  const envKeys=['USERPROFILE','APPDATA','LOCALAPPDATA','HOME','HOMEDRIVE','HOMEPATH','USERNAME','USERDOMAIN','SystemDrive','ProgramFiles','ProgramFiles(x86)','ProgramData','SystemRoot','TEMP','TMP'];
+  const report={type:'WINDOWS_EDGE_LAUNCH_IN_EPHEMERAL_CI_ONLY',candidateSha256:EXPECTED_EXE,realAccount:false,modelKey:false,externalEdgeNetworkBlocked:true,environmentProfile:'native-user-profile-with-isolated-yutang-state',safeEnvPresence:Object.fromEntries(envKeys.map(key=>[key,Boolean(env[key])]))};
   let backendPid=null;
   try {
     const readyDeadline=Date.now()+85000;
