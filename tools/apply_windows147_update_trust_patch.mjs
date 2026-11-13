@@ -106,10 +106,23 @@ export async function applyUpdateTrustPatch(upstream, repositoryRoot = REPOSITOR
   main = replaceExactlyOnce(main, healthAnchor, healthCode, 'main-update-health-signal');
   await write(mainPath, main);
 
+  const trustTests = await read(path.join(repositoryRoot, 'tests/windows147-update-trust.test.mjs'));
+  const upstreamTrustTests = trustTests
+    .replace("../tools/windows147-update-patched/update-service.mjs", "../src/update-service.mjs")
+    .replace("../tools/windows147-update-patched/update-launcher.mjs", "../src/update-launcher.mjs");
+  if (upstreamTrustTests === trustTests || !upstreamTrustTests.includes("from '../src/update-service.mjs'") ||
+      !upstreamTrustTests.includes("from '../src/update-launcher.mjs'")) {
+    throw new Error('UPDATE_TRUST_TEST_IMPORT_REWRITE_FAILED');
+  }
+  await fs.mkdir(path.join(upstream, 'desktop/tests'), { recursive: true });
+  await write(path.join(upstream, 'desktop/tests/update-trust.test.mjs'), upstreamTrustTests);
+  await fs.rm(path.join(upstream, 'desktop/tests/update-service.test.mjs'), { force: true });
+
   const modified = {};
   for (const relative of ['desktop/src/update-service.mjs', 'desktop/src/update-launcher.mjs', 'desktop/src/main.mjs']) {
     modified[relative] = createHash('sha256').update(await fs.readFile(path.join(upstream, relative))).digest('hex');
   }
+  const updateTrustTestsSha256 = createHash('sha256').update(await fs.readFile(path.join(upstream, 'desktop/tests/update-trust.test.mjs'))).digest('hex');
   const receipt = {
     schema: 'yutang.windows-update-trust-patch.v1',
     status: 'PASS_FAIL_CLOSED_UPDATE_TRUST_AND_HEALTH_HANDSHAKE_PATCH',
@@ -117,6 +130,7 @@ export async function applyUpdateTrustPatch(upstream, repositoryRoot = REPOSITOR
     upstreamCommit: UPSTREAM_COMMIT,
     originalSourceGitBlobSha1: EXPECTED_BLOBS,
     modifiedSourceSha256: modified,
+    updateTrustTestsSha256,
     updateRepository: 'yud78785/yutang-build',
     signedManifestRequired: true,
     manifestPublicKeyConfigured: false,
