@@ -8,6 +8,31 @@ const HASH = /^[a-f0-9]{64}$/;
 const VERSIONED_EXE = /^Dafeiyu-Douyin-API-\d+\.\d+\.\d+-win-x64\.exe$/;
 const PHASES = ['prepared', 'switching', 'switched', 'committed'];
 
+export function resolveDesktopShortcutPath(app) {
+  if (!app || typeof app.getPath !== 'function') {
+    throw new Error('DESKTOP_SHORTCUT_APP_PATH_UNAVAILABLE');
+  }
+  let desktop = '';
+  try {
+    desktop = app.getPath('desktop');
+  } catch {
+    // Some clean Windows profiles do not expose a Desktop known-folder path.
+  }
+  if (typeof desktop !== 'string' || !path.isAbsolute(desktop)) {
+    let home = '';
+    try {
+      home = app.getPath('home');
+    } catch {
+      // The caller will fail closed if neither Electron path is available.
+    }
+    if (typeof home !== 'string' || !path.isAbsolute(home)) {
+      throw new Error('DESKTOP_SHORTCUT_PATH_UNAVAILABLE');
+    }
+    desktop = path.join(home, 'Desktop');
+  }
+  return path.join(desktop, '大肥鱼抖音助手.lnk');
+}
+
 async function hashFile(file) {
   try {
     const stat = await fs.lstat(file);
