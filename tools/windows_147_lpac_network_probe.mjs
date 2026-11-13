@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // Candidate-only Windows LPAC semantics and real Edge HTTPS probe.
+// Exact artifact identity mapping rechecked on 2026-11-14; no candidate source changed.
 // Runs only on disposable GitHub-hosted Windows runners. It does not login,
 // call a model, visit Douyin, alter firewall policy, or touch a user PC.
 import assert from 'node:assert/strict';
