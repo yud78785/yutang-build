@@ -97,6 +97,7 @@ export async function applyUpdateTrustPatch(upstream, repositoryRoot = REPOSITOR
   const mainPath = path.join(upstream, 'desktop/src/main.mjs');
   let main = await read(mainPath);
   main = replaceExactlyOnce(main, "import { UpdateService } from './update-service.mjs';", "import { UpdateService } from './update-service.mjs';\nimport { recoverUpdateTransaction } from './update-transaction.mjs';", 'update-transaction-import');
+  main = replaceExactlyOnce(main, "    await fs.mkdir(userData, { recursive: true });", "    await fs.mkdir(userData, { recursive: true });\n    const updateRecovery = await recoverUpdateTransaction(path.join(userData, 'updates'));\n    if (updateRecovery.status === 'blocked') throw new Error('更新恢复被安全保护阻止：' + updateRecovery.reason + '。旧版备份已保留，请联系支持人员。');", 'update-transaction-startup-recovery');
   if (!main.includes("import { randomUUID, createHash } from 'node:crypto';") ||
       !main.includes("import { UpdateService } from './update-service.mjs';")) {
     throw new Error('UPDATE_TRUST_PATCH_MAIN_IMPORTS_CHANGED');
@@ -119,7 +120,7 @@ export async function applyUpdateTrustPatch(upstream, repositoryRoot = REPOSITOR
     "      // 便携版退出后会清理解压目录，更新助手必须先放到持久目录。",
     "      const launcherDir=path.join(userData,'updates','launcher');await fs.mkdir(launcherDir,{recursive:true});",
     "      const launcher=path.join(launcherDir,'update-launcher.mjs'),launcherNode=path.join(launcherDir,'node.exe');",
-    "      await fs.copyFile(node,launcherNode);await fs.copyFile(path.join(appRoot,'app/update-launcher.mjs'),launcher);await fs.copyFile(path.join(appRoot,'app/update-transaction.mjs'),path.join(launcherDir,'update-transaction.mjs'));",
+    "      await fs.copyFile(node,launcherNode);await fs.copyFile(path.join(appRoot,'app/update-launcher.mjs'),launcher);",
     "      const shortcut=path.join(app.getPath('desktop'),'大肥鱼抖音助手.lnk');",
     "      if(!shell.writeShortcutLink(shortcut,'create',{target:file,cwd:path.dirname(file),description:'大肥鱼抖音助手 · 独立 API 版',icon:file,iconIndex:0,appUserModelId:'local.dafeiyu.douyin.api'}))throw new Error('无法创建新版软件快捷方式，尚未重启。');",
     "      const child=spawn(launcherNode,[launcher,String(process.pid),file,sha256],{detached:true,windowsHide:true,stdio:'ignore',shell:false});",
@@ -131,7 +132,7 @@ export async function applyUpdateTrustPatch(upstream, repositoryRoot = REPOSITOR
     "      // 更新助手必须位于持久目录；旧版快捷方式在新版健康确认前保持不变。",
     "      const launcherDir=path.join(userData,'updates','launcher');await fs.mkdir(launcherDir,{recursive:true});",
     "      const launcher=path.join(launcherDir,'update-launcher.mjs'),launcherNode=path.join(launcherDir,'node.exe');",
-    "      await fs.copyFile(node,launcherNode);await fs.copyFile(path.join(appRoot,'app/update-launcher.mjs'),launcher);",
+    "      await fs.copyFile(node,launcherNode);await fs.copyFile(path.join(appRoot,'app/update-launcher.mjs'),launcher);await fs.copyFile(path.join(appRoot,'app/update-transaction.mjs'),path.join(launcherDir,'update-transaction.mjs'));",
     "      const nonce=randomUUID(),updateDirectory=path.dirname(file);",
     "      const healthFile=path.join(updateDirectory,'.health-'+nonce+'.json');",
     "      const stagedShortcut=path.join(updateDirectory,'.shortcut-'+nonce+'.lnk');",
