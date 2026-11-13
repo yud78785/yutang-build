@@ -78,14 +78,15 @@ jobs:
             tests/spark-agent.test.mjs \
             tests/public-comment-agent.test.mjs \
             desktop/tests/api-worker.test.mjs \
+            desktop/tests/api-process.test.mjs \
             desktop/ui-api/tests/openrouter-preset.test.mjs
 
-      - name: Run targeted desktop OpenRouter preset UI test
+      - name: Run the complete desktop UI regression suite
         shell: bash
         working-directory: upstream/desktop/ui-api
         run: |
           set -euo pipefail
-          node --test tests/openrouter-preset.test.mjs
+          npx --yes pnpm@10.6.5 test
 
       - name: Parse the desktop JSX with esbuild
         shell: bash

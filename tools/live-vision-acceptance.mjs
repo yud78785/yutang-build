@@ -13,7 +13,7 @@ export const REQUIRED_OUTCOME = 'PASS_PUBLIC_VIDEO_CORE_CAPTURE_AND_MODEL_INPUT_
 export const OPENROUTER_VISION_PROFILE = Object.freeze({
   baseUrl: 'https://openrouter.ai/api/v1',
   model: 'deepseek/deepseek-v4.1-flash',
-  maxPrice: Object.freeze({ prompt: 0.30, completion: 1.20 }),
+  maxPrice: Object.freeze({ prompt: 0.15, completion: 0.60 }),
 });
 
 export function resolveVisionProvider(env = process.env) {
@@ -63,6 +63,7 @@ export function createProviderTransport(provider, fetchImpl = fetch) {
       delete payload.thinking;
       payload.reasoning = { effort: 'none' };
       payload.provider = {
+        allow_fallbacks: true,
         sort: 'price',
         max_price: { prompt: OPENROUTER_VISION_PROFILE.maxPrice.prompt,
           completion: OPENROUTER_VISION_PROFILE.maxPrice.completion },
@@ -271,7 +272,7 @@ async function main() {
     routeMetadata: transport.getRouteMetadata(),
     requestCountObserved: transport.getRequestCount(),
     providerPolicy: provider.id === 'openrouter' ? {
-      sort: 'price', dataCollection: 'deny', zeroDataRetentionRequired: true,
+      allowFallbacks: true, sort: 'price', dataCollection: 'deny', zeroDataRetentionRequired: true,
       maxPriceUsdPerMillion: { prompt: OPENROUTER_VISION_PROFILE.maxPrice.prompt, completion: OPENROUTER_VISION_PROFILE.maxPrice.completion },
       requireParameters: true,
     } : { directOfficialEndpoint: true },

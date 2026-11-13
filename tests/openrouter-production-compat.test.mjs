@@ -37,6 +37,7 @@ function assertOpenRouterRequest(call) {
   assert.equal(Object.hasOwn(call.body, 'thinking'), false);
   assert.deepEqual(call.body.reasoning, { effort: 'none' });
   assert.deepEqual(call.body.provider, {
+    allow_fallbacks: true,
     sort: 'price',
     max_price: { prompt: OPENROUTER_PRICE_CEILING.prompt, completion: OPENROUTER_PRICE_CEILING.completion },
     data_collection: 'deny',

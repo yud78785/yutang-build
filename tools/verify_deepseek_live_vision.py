@@ -18,7 +18,7 @@ def main() -> None:
         raise SystemExit("ORIGINAL_REVIEW_GATE_EXIT_CODE_CHANGED")
     profiles = {
         "DeepSeek API": ("deepseek", "deepseek-flash", {"prompt": 0.30, "completion": 1.20}),
-        "OpenRouter": ("openrouter", "deepseek/deepseek-v4.1-flash", {"prompt": 0.30, "completion": 1.20}),
+        "OpenRouter": ("openrouter", "deepseek/deepseek-v4.1-flash", {"prompt": 0.15, "completion": 0.60}),
     }
     provider = result.get("provider")
     if provider not in profiles:
@@ -53,7 +53,8 @@ def main() -> None:
         raise SystemExit("ACTUAL_SERVED_MODEL_DOES_NOT_MATCH_PINNED_MODEL")
     if provider_id == "openrouter":
         policy = result.get("providerPolicy") or {}
-        if (policy.get("dataCollection") != "deny" or
+        if (policy.get("allowFallbacks") is not True or
+                policy.get("dataCollection") != "deny" or
                 policy.get("zeroDataRetentionRequired") is not True or
                 policy.get("sort") != "price" or
                 policy.get("maxPriceUsdPerMillion") != expected_ceiling or
@@ -89,7 +90,7 @@ def main() -> None:
         "usage": usage,
         "peak_rate_upper_estimate_usd": round(cost, 8),
         "actual_route": route,
-        "pricing_basis": "Provider-specific hard ceiling enforced in request: DeepSeek $0.30/$1.20 per M; OpenRouter $0.022/$0.40 per M; cache discounts ignored",
+        "pricing_basis": "Provider-specific hard ceiling enforced in request: official DeepSeek $0.30/$1.20 per M; OpenRouter ZDR route $0.15/$0.60 per M; cache discounts ignored",
         "model_decision": result.get("decision"),
         "lexical_precheck": result.get("semantic"),
         "semantic_review_required": True,

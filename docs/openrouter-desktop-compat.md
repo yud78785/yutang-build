@@ -14,13 +14,14 @@ The desktop app already stores a user-supplied API Key through its private Elect
 - PublicCommentAgent.generate — public comment generation.
 
 Official DeepSeek requests retain their existing request body unchanged. When the exact OpenRouter endpoint is selected, the adapter requires the exact model slug deepseek/deepseek-v4.1-flash, removes DeepSeek-only thinking, maps it to OpenRouter reasoning effort none, and enforces:
+- provider.allow_fallbacks = true (only within the same filtered model/provider route)
 - provider.sort = price
-- provider.max_price = prompt $0.30/M and completion $1.20/M
+- provider.max_price = prompt $0.15/M and completion $0.60/M
 - provider.data_collection = deny
 - provider.zdr = true
 - provider.require_parameters = true
 
-The ceiling is an upper limit, not a fixed price. If no image-capable provider satisfies the request parameters, data policy and price ceiling, the request must fail rather than silently relaxing the restrictions. OpenRouter remains a third-party intermediary; ZDR constrains the actual inference provider and is not a promise that the intermediary processes no request or billing metadata.
+The ceiling is an upper limit, not a fixed price. It is higher than the catalog's cheapest $0.022/$0.40 rate because ZDR can exclude DeepSeek's own endpoint. OpenRouter's own routing article records a ZDR request for this model being served by Decart, while a request pinned to DeepSeek returned no ZDR endpoint; Decart's listing for this model is $0.123/$0.492 per million tokens. The $0.15/$0.60 cap accommodates that listed ZDR route while bounding higher-cost providers. If no image-capable provider satisfies the request parameters, data policy and price ceiling, the request must fail rather than silently relaxing the restrictions. Provider fallback remains within the same filters. OpenRouter remains a third-party intermediary; ZDR constrains the actual inference provider and is not a promise that the intermediary processes no request or billing metadata.
 
 ## Desktop usability
 The model settings panel adds two presets:

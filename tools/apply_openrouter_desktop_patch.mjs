@@ -41,7 +41,7 @@ api = replaceOnce(api,
   "export const HARD_LIMITS = Object.freeze({ ...DEFAULT_LIMITS, maxSteps: 10000, maxToolCalls: 10000, taskTimeoutMs: 604_800_000 });",
   "export const HARD_LIMITS = Object.freeze({ ...DEFAULT_LIMITS, maxSteps: 10000, maxToolCalls: 10000, taskTimeoutMs: 604_800_000 });\n\n" +
   "export const OPENROUTER_DEEPSEEK_MODEL = 'deepseek/deepseek-v4.1-flash';\n" +
-  "export const OPENROUTER_PRICE_CEILING = Object.freeze({ prompt: 0.30, completion: 1.20 });\n" +
+  "export const OPENROUTER_PRICE_CEILING = Object.freeze({ prompt: 0.15, completion: 0.60 });\n" +
   "function isOpenRouterEndpoint(baseUrl) {\n" +
   "  try { const url = new URL(baseUrl); return url.origin === 'https://openrouter.ai' && url.pathname.replace(/\\/+$/u, '') === '/api/v1'; }\n" +
   "  catch { return false; }\n" +
@@ -52,6 +52,7 @@ api = replaceOnce(api,
   "  if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error('模型请求正文无效。');\n" +
   "  const { thinking: _thinking, reasoning: _reasoning, provider: _provider, ...payload } = body;\n" +
   "  return { ...payload, reasoning: { effort: 'none' }, provider: {\n" +
+  "    allow_fallbacks: true,\n" +
   "    sort: 'price',\n" +
   "    max_price: { prompt: OPENROUTER_PRICE_CEILING.prompt, completion: OPENROUTER_PRICE_CEILING.completion },\n" +
   "    data_collection: 'deny',\n" +
@@ -132,7 +133,7 @@ ui = replaceOnce(ui,
 await write('desktop/ui-api/src/main.jsx', ui);
 
 let readme = await loadVerified('desktop/README.md');
-readme += "\n\n## OpenRouter 备用模型线路\n\n独立软件的模型设置提供“DeepSeek 官方”和“OpenRouter 备用”快捷预设。选择 OpenRouter 后，API 地址为 https://openrouter.ai/api/v1，模型为 deepseek/deepseek-v4.1-flash；API Key 从 OpenRouter 官方账户生成，仍只通过桌面 IPC 保存，不能发给他人或写入聊天。\n\n软件会将 DeepSeek 的 thinking: disabled 转换为 OpenRouter 的 reasoning: { effort: none }，并要求服务商 data_collection: deny、zdr: true、require_parameters: true，按价格排序，输入最高 $0.30 / 1M tokens、输出最高 $1.20 / 1M tokens。这些是上限，不是固定报价；如果没有同时满足图片输入、参数和数据保留条件的服务商，请求会失败关闭，不会放宽隐私限制或改走其他模型。\n\nOpenRouter 是额外的路由和计费中间层，实际推理服务商可能不是 DeepSeek 自营基础设施。ZDR 是对实际推理服务商的路由要求，不代表 OpenRouter 不处理请求或计费元数据。不要把私人聊天、凭据或敏感资料发送给中转服务；先使用公开、无敏感内容测试。自动充值保持关闭。\n";
+readme += "\n\n## OpenRouter 备用模型线路\n\n独立软件的模型设置提供“DeepSeek 官方”和“OpenRouter 备用”快捷预设。选择 OpenRouter 后，API 地址为 https://openrouter.ai/api/v1，模型为 deepseek/deepseek-v4.1-flash；API Key 从 OpenRouter 官方账户生成，仍只通过桌面 IPC 保存，不能发给他人或写入聊天。\n\n软件会将 DeepSeek 的 thinking: disabled 转换为 OpenRouter 的 reasoning: { effort: none }，并要求服务商 data_collection: deny、zdr: true、require_parameters: true，按价格排序，输入最高 $0.15 / 1M tokens、输出最高 $0.60 / 1M tokens，并允许在同一 ZDR/拒绝数据收集过滤条件内进行供应商故障切换。这些是上限，不是固定报价；如果没有同时满足图片输入、参数和数据保留条件的服务商，请求会失败关闭，不会放宽隐私限制或改走其他模型。\n\nOpenRouter 是额外的路由和计费中间层，实际推理服务商可能不是 DeepSeek 自营基础设施。ZDR 是对实际推理服务商的路由要求，不代表 OpenRouter 不处理请求或计费元数据。不要把私人聊天、凭据或敏感资料发送给中转服务；先使用公开、无敏感内容测试。自动充值保持关闭。\n";
 await write('desktop/README.md', readme);
 
 let workerTest = await loadVerified('desktop/tests/api-worker.test.mjs');
@@ -157,7 +158,7 @@ const receipt = {
   model: 'deepseek/deepseek-v4.1-flash',
   requestPolicy: {
     reasoning: { effort: 'none' },
-    provider: { sort: 'price', max_price: { prompt: 0.30, completion: 1.20 }, data_collection: 'deny', zdr: true, require_parameters: true },
+    provider: { allow_fallbacks: true, sort: 'price', max_price: { prompt: 0.15, completion: 0.60 }, data_collection: 'deny', zdr: true, require_parameters: true },
   },
   modelCallPathsPatched: ['ApiAgent.decideWatch', 'ApiAgent.runTask', 'ChatAgent.reply', 'SparkAgent.greet', 'PublicCommentAgent.generate'],
   desktopRuntimeStagingVerified: true,
