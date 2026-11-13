@@ -50,6 +50,19 @@ test('更新助手在快捷方式替换前被强杀：旧入口保持且事务�
   assert.equal(await fs.access(f.temporary).then(() => true, () => false), false);
 });
 
+test('原快捷方式已复制备份但尚未原子替换时被强杀：保留旧入口并清理临时文件', async t => {
+  const f = await fixture(t);
+  await setUpdateTransactionPhase(f.transaction, 'switching');
+  await fs.copyFile(f.shortcut, f.backup);
+  await fs.copyFile(f.staged, f.temporary);
+  const result = await recoverUpdateTransaction(f.updates, { shortcut: f.shortcut });
+  assert.equal(result.status, 'old-shortcut-preserved');
+  assert.equal(await fs.readFile(f.shortcut, 'utf8'), 'old shortcut');
+  assert.equal(await fs.access(f.backup).then(() => true, () => false), false);
+  assert.equal(await fs.access(f.temporary).then(() => true, () => false), false);
+  assert.equal(await fs.access(f.staged).then(() => true, () => false), false);
+});
+
 test('更新助手在旧快捷方式已备份但新入口尚未落位时被强杀：自动恢复旧入口', async t => {
   const f = await fixture(t);
   await setUpdateTransactionPhase(f.transaction, 'switching');
