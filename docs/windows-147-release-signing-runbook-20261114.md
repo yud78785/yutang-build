@@ -200,3 +200,6 @@ Azure GitHub OIDC 需要由发行主体或其管理员完成：
 ### 随包文档
 
 下一候选的补丁器会修正桌面包内 `README.md`，不再把上游旧 Release 描述成 YuTang 的下载或自动更新通道。新 README 将明确 1.4.7 是未签名验收候选，GitHub Actions Artifact 不是公开发行包，自动更新因发布信任未配置而关闭。该修改尚待下一次 EXE 的 `app.asar` 实际内容检查。
+
+
+README 检查也会进入下一轮打包验证：补丁器更新随包 `README.md` 后，修改 `verify-packaged-api.mjs`，直接从 `app.asar` 读取 README 并断言存在“未签名验收候选”和“自动更新处于安全关闭状态”说明。这样不是只检查源码模板，而是检查最终 EXE 中实际打包的文档。该检查尚待新候选 Windows 构建执行。
