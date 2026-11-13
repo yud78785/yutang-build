@@ -14,6 +14,7 @@ const EXPECTED = {
   'desktop/src/main.mjs': '5296770bcb87e6a60c96cbb2959f615ff4192e5e',
   'desktop/scripts/build-api-desktop.mjs': 'b66c464f93776536e69dece46bdfedd23ce38ed1',
   'desktop/scripts/verify-packaged-api.mjs': 'f6bc5bc28a54abaeddf188c94d4caef71fa943fb',
+  'desktop/scripts/acquire-upstream.mjs': '80fb30a8ae62d84b76fb7a2050a90e525b4161e0',
   'desktop/README.md': '8cddcbad0e0309a10ea646f9673add4b3b710524',
   'desktop/tests/api-worker.test.mjs': '42f351a26235508d595eb5daadabbc81039d5276',
   'desktop/scripts/stage-api-runtime.mjs': 'c80c1670e08a986984b91191d361bf75202a7d73',
@@ -139,6 +140,13 @@ desktopBuild = replaceOnce(desktopBuild,
   'desktop main bundle includes credential guard');
 await write('desktop/scripts/build-api-desktop.mjs', desktopBuild);
 
+let acquire = await loadVerified('desktop/scripts/acquire-upstream.mjs');
+acquire = replaceOnce(acquire,
+  "throw new Error('源码树哈希不匹配，请保留本地修改并使用干净缓存重新获取');",
+  "throw new Error('源码树哈希不匹配: expected files=' + manifest.sourceTree.files + ', sha256=' + manifest.sourceTree.sha256 + '; actual files=' + actual.files + ', sha256=' + actual.sha256 + '。请保留本地修改并使用干净缓存重新获取');",
+  'upstream acquisition reports expected and actual tree hashes');
+await write('desktop/scripts/acquire-upstream.mjs', acquire);
+
 let packagedVerifier = await loadVerified('desktop/scripts/verify-packaged-api.mjs');
 packagedVerifier = replaceOnce(packagedVerifier,
   "await page.getByRole('heading', { name: '先连接你的 DeepSeek' }).waitFor();",
@@ -224,7 +232,7 @@ for (const relative of ['api-agent.mjs', 'chat-agent.mjs', 'spark-agent.mjs', 'p
 const desktopBuildCheck = await read('desktop/scripts/build-api-desktop.mjs');
 if (!desktopBuildCheck.includes("'model-settings-guard.mjs'")) throw new Error('DESKTOP_BUNDLE_OMITS_MODEL_SETTINGS_GUARD');
 const modified = {};
-for (const relative of ['api-agent.mjs', 'chat-agent.mjs', 'spark-agent.mjs', 'public-comment-agent.mjs', 'desktop/src/main.mjs', 'desktop/src/model-settings-guard.mjs', 'desktop/scripts/build-api-desktop.mjs', 'desktop/scripts/verify-packaged-api.mjs', 'desktop/tests/model-settings-guard.test.mjs', 'desktop/ui-api/src/main.jsx', 'desktop/ui-api/tests/browser.test.mjs', 'desktop/README.md', 'desktop/tests/api-worker.test.mjs']) {
+for (const relative of ['api-agent.mjs', 'chat-agent.mjs', 'spark-agent.mjs', 'public-comment-agent.mjs', 'desktop/src/main.mjs', 'desktop/src/model-settings-guard.mjs', 'desktop/scripts/build-api-desktop.mjs', 'desktop/scripts/verify-packaged-api.mjs', 'desktop/scripts/acquire-upstream.mjs', 'desktop/tests/model-settings-guard.test.mjs', 'desktop/ui-api/src/main.jsx', 'desktop/ui-api/tests/browser.test.mjs', 'desktop/README.md', 'desktop/tests/api-worker.test.mjs']) {
   modified[relative] = sha256(await read(relative));
 }
 const receipt = {
