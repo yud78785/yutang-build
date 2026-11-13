@@ -10,6 +10,7 @@ const EXPECTED = {
   'spark-agent.mjs': 'a57f1910277f2292de25e634fb3eb1682e027465',
   'public-comment-agent.mjs': 'b010cd0cc6591af38a4d66604190847b3ab67693',
   'desktop/ui-api/src/main.jsx': '80c43d0fe4a2646410787cd690f179ce974f2388',
+  'desktop/ui-api/tests/browser.test.mjs': '3e39c22c8a50d07578e55f3a03bf0c8e8d466c24',
   'desktop/src/main.mjs': '5296770bcb87e6a60c96cbb2959f615ff4192e5e',
   'desktop/scripts/build-api-desktop.mjs': 'b66c464f93776536e69dece46bdfedd23ce38ed1',
   'desktop/README.md': '8cddcbad0e0309a10ea646f9673add4b3b710524',
@@ -162,6 +163,13 @@ ui = replaceOnce(ui,
   'desktop model settings presets');
 await write('desktop/ui-api/src/main.jsx', ui);
 
+let browserUiTest = await loadVerified('desktop/ui-api/tests/browser.test.mjs');
+browserUiTest = replaceOnce(browserUiTest,
+  "await page.getByRole('heading', { name: '先连接你的 DeepSeek' }).waitFor();",
+  "await page.getByRole('heading', { name: '先连接模型服务' }).waitFor();",
+  'browser UI test follows generic model provider heading');
+await write('desktop/ui-api/tests/browser.test.mjs', browserUiTest);
+
 let readme = await loadVerified('desktop/README.md');
 readme = readme.replace('软件不借用 DSH 或 QQ 的模型凭据。', '软件不借用 DSH 或 QQ 的模型凭据。更换 API 服务地址时，旧 Key 不会自动复用，必须重新输入新服务商的 API Key；后台会独立拒绝跨服务商沿用旧密钥。');
 readme += "\n\n## OpenRouter 备用模型线路\n\n独立软件的模型设置提供“DeepSeek 官方”和“OpenRouter 备用”快捷预设。选择 OpenRouter 后，API 地址为 https://openrouter.ai/api/v1，模型为 deepseek/deepseek-v4.1-flash；API Key 从 OpenRouter 官方账户生成，仍只通过桌面 IPC 保存，不能发给他人或写入聊天。\n\n软件会将 DeepSeek 的 thinking: disabled 转换为 OpenRouter 的 reasoning: { effort: none }，并要求服务商 data_collection: deny、zdr: true、require_parameters: true，按价格排序，输入最高 $0.15 / 1M tokens、输出最高 $0.60 / 1M tokens，并允许在同一 ZDR/拒绝数据收集过滤条件内进行供应商故障切换。这些是上限，不是固定报价；如果没有同时满足图片输入、参数和数据保留条件的服务商，请求会失败关闭，不会放宽隐私限制或改走其他模型。\n\nOpenRouter 是额外的路由和计费中间层，实际推理服务商可能不是 DeepSeek 自营基础设施。ZDR 是对实际推理服务商的路由要求，不代表 OpenRouter 不处理请求或计费元数据。不要把私人聊天、凭据或敏感资料发送给中转服务；先使用公开、无敏感内容测试。自动充值保持关闭。\n";
@@ -178,7 +186,7 @@ for (const relative of ['api-agent.mjs', 'chat-agent.mjs', 'spark-agent.mjs', 'p
 const desktopBuildCheck = await read('desktop/scripts/build-api-desktop.mjs');
 if (!desktopBuildCheck.includes("'model-settings-guard.mjs'")) throw new Error('DESKTOP_BUNDLE_OMITS_MODEL_SETTINGS_GUARD');
 const modified = {};
-for (const relative of ['api-agent.mjs', 'chat-agent.mjs', 'spark-agent.mjs', 'public-comment-agent.mjs', 'desktop/src/main.mjs', 'desktop/src/model-settings-guard.mjs', 'desktop/scripts/build-api-desktop.mjs', 'desktop/tests/model-settings-guard.test.mjs', 'desktop/ui-api/src/main.jsx', 'desktop/README.md', 'desktop/tests/api-worker.test.mjs']) {
+for (const relative of ['api-agent.mjs', 'chat-agent.mjs', 'spark-agent.mjs', 'public-comment-agent.mjs', 'desktop/src/main.mjs', 'desktop/src/model-settings-guard.mjs', 'desktop/scripts/build-api-desktop.mjs', 'desktop/tests/model-settings-guard.test.mjs', 'desktop/ui-api/src/main.jsx', 'desktop/ui-api/tests/browser.test.mjs', 'desktop/README.md', 'desktop/tests/api-worker.test.mjs']) {
   modified[relative] = sha256(await read(relative));
 }
 const receipt = {
