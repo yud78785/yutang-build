@@ -353,7 +353,8 @@ jobs:
               $updateTrust.normalExitDuringObservationAccepted -ne $true -or
               $updateTrust.rollbackFailurePreservesBackupPath -ne $true -or
               $updateTrust.readmeUpdatedForUnsignedCandidate -ne $true -or
-              $updateTrust.updateChannelFailClosedExplained -ne $true) { throw 'WINDOWS_UPDATE_TRUST_PATCH_RECEIPT_INVALID' }
+              $updateTrust.updateChannelFailClosedExplained -ne $true -or
+              $updateTrust.packagedReadmeVerified -ne $true) { throw 'WINDOWS_UPDATE_TRUST_PATCH_RECEIPT_INVALID' }
           $edgeNormal = Get-Content 'release-api/windows-edge-lifecycle-normal.json' -Raw | ConvertFrom-Json
           $edgeHost = Get-Content 'release-api/windows-edge-lifecycle-force-host.json' -Raw | ConvertFrom-Json
           $edgeGuard = Get-Content 'release-api/windows-edge-lifecycle-force-guard.json' -Raw | ConvertFrom-Json
