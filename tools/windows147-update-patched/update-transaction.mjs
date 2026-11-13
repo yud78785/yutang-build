@@ -39,7 +39,7 @@ function validateTransaction(value, transactionFile, expectedShortcut) {
       path.resolve(value.transactionFile || '') !== path.resolve(transactionFile) ||
       path.resolve(value.updatesDirectory || '') !== updatesDirectory ||
       path.resolve(value.shortcut || '') !== shortcut ||
-      path.resolve(value.stagedShortcut || '') !== path.join(updatesDirectory, '.shortcut-' + value.nonce + '.lnk') ||
+      path.resolve(value.stagedShortcut || '') !== path.join(updatesDirectory, '.shortcut-' + value.nonce + '.lnk') ||\n      path.resolve(value.temporaryShortcut || '') !== path.join(path.dirname(shortcut), '.' + path.basename(shortcut) + '.' + value.nonce + '.tmp.lnk') ||
       path.resolve(value.backupShortcut || '') !== path.join(path.dirname(shortcut), '.' + path.basename(shortcut) + '.' + value.nonce + '.bak.lnk') ||
       !path.isAbsolute(value.targetExe || '') ||
       path.dirname(path.resolve(value.targetExe)) !== updatesDirectory ||
@@ -86,7 +86,7 @@ export async function beginUpdateTransaction({
   const directory = path.resolve(updatesDirectory);
   const expectedShortcut = path.resolve(shortcut);
   const expectedStaged = path.join(directory, '.shortcut-' + nonce + '.lnk');
-  const expectedBackup = path.join(path.dirname(expectedShortcut), '.' + path.basename(expectedShortcut) + '.' + nonce + '.bak.lnk');
+  const expectedBackup = path.join(path.dirname(expectedShortcut), '.' + path.basename(expectedShortcut) + '.' + nonce + '.bak.lnk');\n  const expectedTemporary = path.join(path.dirname(expectedShortcut), '.' + path.basename(expectedShortcut) + '.' + nonce + '.tmp.lnk');
   const expectedTarget = path.resolve(targetExe);
   if (path.resolve(stagedShortcut) !== expectedStaged ||
       path.resolve(backupShortcut) !== expectedBackup ||
@@ -158,7 +158,7 @@ export async function recoverUpdateTransaction(updatesDirectory, { shortcut } = 
   }
   if (!transaction) return { status: 'no-transaction' };
 
-  const [currentHash, backupHash, stagedHash, targetHash] = await Promise.all([
+  const [currentHash, backupHash, stagedHash, targetHash, temporaryHash] = await Promise.all([
     hashFile(transaction.shortcut),
     hashFile(transaction.backupShortcut),
     hashFile(transaction.stagedShortcut),
