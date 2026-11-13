@@ -277,7 +277,7 @@ test('更新启动器等待新版 UI/API 健康回执后才切换桌面快捷方
       });
       return child;
     },
-    delayImpl: async () => {},
+    delayImpl: milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds)),
     healthTimeoutMs: 1000,
     stabilityMs: 0,
     pollMs: 1
