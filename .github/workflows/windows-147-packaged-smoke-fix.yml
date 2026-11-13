@@ -130,6 +130,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'UPDATE_TRUST_SERVICE_SYNTAX_FAILED' }
           node --check tools/windows147-update-patched/update-launcher.mjs
           if ($LASTEXITCODE -ne 0) { throw 'UPDATE_TRUST_LAUNCHER_SYNTAX_FAILED' }
+          node --check tools/windows147-update-patched/update-transaction.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'UPDATE_TRANSACTION_HELPER_SYNTAX_FAILED' }
           node tools/apply_windows147_update_trust_patch.mjs upstream
           if ($LASTEXITCODE -ne 0) { throw 'UPDATE_TRUST_PATCH_APPLICATION_FAILED' }
           foreach ($file in @('desktop/src/update-service.mjs','desktop/src/update-launcher.mjs','desktop/src/main.mjs','desktop/src/update-transaction.mjs','desktop/scripts/verify-packaged-api.mjs')) {
@@ -143,6 +145,13 @@ jobs:
           $ErrorActionPreference = 'Stop'
           node --test tests/windows147-update-trust.test.mjs
           if ($LASTEXITCODE -ne 0) { throw 'YU TANG UPDATE TRUST AND HEALTH ROLLBACK TESTS FAILED' }
+
+      - name: Run YuTang update transaction crash recovery tests
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node --test tests/windows147-update-transaction.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'YU TANG UPDATE TRANSACTION RECOVERY TESTS FAILED' }
 
       - name: Build and test Windows Job Object helper
         shell: pwsh
