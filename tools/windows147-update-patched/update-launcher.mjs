@@ -200,8 +200,8 @@ export async function runUpdateLauncher({
     await rollbackShortcut.finalize();
     rollbackShortcut = null;
     child.unref();
-    await fs.rm(healthFile, { force: true });
-    await fs.rm(stagedShortcut, { force: true });
+    await fs.rm(healthFile, { force: true }).catch(() => {});
+    await fs.rm(stagedShortcut, { force: true }).catch(() => {});
     return { status: 'healthy-update-started', pid: child.pid, version, sha256, health };
   } catch (error) {
     if (rollbackShortcut) await rollbackShortcut.rollback().catch(() => {});
