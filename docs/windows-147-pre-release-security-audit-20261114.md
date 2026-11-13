@@ -468,3 +468,15 @@ Azure Artifact Signing 的 GitHub Actions 集成支持 Windows 2022 / 2025，并
 - 要求 Windows 工作流验证回执中的 README 更新标志。
 
 README 的修改仍需随下一版便携 EXE 构建后，检查 `app.asar` 内实际打包文本；当前还没有新 EXE 证据。
+
+
+### 13.6 最终 EXE 内 README 的验证门已加入
+
+进一步核对构建顺序后，发现 OpenRouter 和动态安全补丁会先修改上游 `desktop/README.md` 与 `desktop/scripts/verify-packaged-api.mjs`。因此本分支补丁器不再错误地拿这两个文件与原始上游 blob 比较，而是读取前序补丁回执中的 SHA-256：
+
+- README：校验 `openrouter-desktop-patch-receipt.json` 的 `modifiedSourceSha256['desktop/README.md']`。
+- packaged verifier：校验 `windows-security-147-dynamic-patch-receipt.json` 的 `dynamicPatchedSourceSha256['desktop/scripts/verify-packaged-api.mjs']`。
+
+随后补丁器精确替换旧 Release 下载说明，并修改 packaged verifier：从最终 `app.asar` 读取 `README.md`，断言其包含“YuTang 的未签名验收候选”和“自动更新处于安全关闭状态”。Windows 工作流会在补丁后对该 verifier 执行 Node 语法检查，并要求补丁回执声明 packaged README 检查已启用。
+
+这修复了“README 源码已改，但最终 EXE 仍可能打包旧说明”的验收盲区。**实际 app.asar 检查仍待下一轮 Windows 构建执行，不能提前计为通过。**
