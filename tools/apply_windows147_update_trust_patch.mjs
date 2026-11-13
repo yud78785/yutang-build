@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 import { fileURLToPath } from 'node:url';
 
 const REPOSITORY_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -94,7 +95,7 @@ export async function applyUpdateTrustPatch(upstream, repositoryRoot = REPOSITOR
     "    const updateHealthNonce=process.env.YUTANG_UPDATE_HEALTH_NONCE;",
     "    const updateExpectedSha256=process.env.YUTANG_UPDATE_EXPECTED_SHA256;",
     "    if(updateHealthFile||updateHealthNonce||updateExpectedSha256){",
-    "      if(!path.isAbsolute(updateHealthFile||'')||! /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(updateHealthNonce||'')||! /^[a-f0-9]{64}$/.test(updateExpectedSha256||''))throw new Error('新版更新健康确认参数无效。');",
+    "      if(!path.isAbsolute(updateHealthFile||'')||path.dirname(updateHealthFile)!==path.join(userData,'updates')||path.basename(updateHealthFile)!=='.health-'+updateHealthNonce+'.json'||! /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(updateHealthNonce||'')||! /^[a-f0-9]{64}$/.test(updateExpectedSha256||''))throw new Error('新版更新健康确认参数无效。');",
     "      const runningSha256=createHash('sha256').update(await fs.readFile(process.execPath)).digest('hex');",
     "      if(runningSha256!==updateExpectedSha256)throw new Error('新版运行文件与签名清单不一致。');",
     "      const updateHealth={ready:true,nonce:updateHealthNonce,pid:process.pid,version:app.getVersion(),sha256:runningSha256,backendPid:backend.child.pid};",
