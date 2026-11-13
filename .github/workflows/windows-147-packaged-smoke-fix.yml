@@ -1,0 +1,216 @@
+name: YuTang 1.4.7 packaged smoke synthetic key recovery - no release
+
+on:
+  push:
+    branches:
+      - experiment/windows-147-packaged-smoke-fix-20261113
+    paths:
+      - .github/workflows/windows-147-packaged-smoke-fix.yml
+      - tests/windows-upstream-filename-fix.test.mjs
+      - tools/apply_openrouter_desktop_patch.mjs
+      - tests/openrouter-production-compat.test.mjs
+      - tests/openrouter-ui-preset.test.mjs
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-smoke:
+    name: ${{ matrix.os }} exact-source portable EXE
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-2025]
+    concurrency:
+      group: yutang-147-packaged-modal-correction-${{ matrix.os }}
+      cancel-in-progress: true
+
+    steps:
+      - name: Checkout fix branch without persisted credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Verify exact isolated experiment scope
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REPOSITORY -cne 'yud78785/yutang-build') { throw 'WRONG_REPOSITORY' }
+          if ($env:GITHUB_REF -cne 'refs/heads/experiment/windows-147-packaged-smoke-fix-20261113') { throw 'WRONG_FIX_BRANCH' }
+          if ($env:RUNNER_OS -cne 'Windows') { throw 'WINDOWS_RUNNER_REQUIRED' }
+
+      - name: Set up pinned Node.js build runtime
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24.17.0
+
+      - name: Fetch exact upstream desktop 1.4.7 source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git init upstream
+          if ($LASTEXITCODE -ne 0) { throw 'git init failed' }
+          git -C upstream config core.autocrlf false
+          git -C upstream remote add origin https://github.com/LockyBee/dsh-douyin-agent.git
+          if ($LASTEXITCODE -ne 0) { throw 'git remote add failed' }
+          git -C upstream fetch --depth=1 origin 9c49833078f4b4d18b9211ef86d024e7f2e15739
+          if ($LASTEXITCODE -ne 0) { throw 'pinned upstream fetch failed' }
+          git -C upstream checkout --detach FETCH_HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'pinned upstream checkout failed' }
+          $actual = (git -C upstream rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $actual -ne '9c49833078f4b4d18b9211ef86d024e7f2e15739') { throw "UPSTREAM_COMMIT_MISMATCH: $actual" }
+          "UPSTREAM_COMMIT=$actual" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Apply exact-source DeepSeek/OpenRouter patch
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node tools/apply_openrouter_desktop_patch.mjs upstream
+          if ($LASTEXITCODE -ne 0) { throw 'exact-source patch failed' }
+          node --check upstream/api-agent.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'api-agent syntax check failed' }
+          node --check upstream/chat-agent.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'chat-agent syntax check failed' }
+          node --check upstream/spark-agent.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'spark-agent syntax check failed' }
+          node --check upstream/public-comment-agent.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'public-comment syntax check failed' }
+          node --check upstream/desktop/src/model-settings-guard.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'credential guard syntax check failed' }
+          node --check upstream/desktop/src/main.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'desktop main syntax check failed' }
+          node --check upstream/desktop/scripts/verify-packaged-api.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'packaged verifier syntax check failed' }
+          Copy-Item tests/openrouter-production-compat.test.mjs upstream/tests/openrouter-production-compat.test.mjs
+          Copy-Item tests/openrouter-ui-preset.test.mjs upstream/desktop/ui-api/tests/openrouter-preset.test.mjs
+          node --test tests/windows-upstream-filename-fix.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'WINDOWS_PINNED_FILENAME_REPAIR_REGRESSION' }
+
+      - name: Install exact-lockfile project, desktop and UI dependencies
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Push-Location upstream
+          npx --yes pnpm@10.6.5 install --no-frozen-lockfile --ignore-scripts
+          if ($LASTEXITCODE -ne 0) { throw 'upstream root dependency installation failed' }
+          Push-Location desktop
+          npx --yes pnpm@10.6.5 --ignore-workspace install --ignore-scripts --frozen-lockfile
+          if ($LASTEXITCODE -ne 0) { throw 'desktop dependency installation failed' }
+          node node_modules/electron/install.js
+          if ($LASTEXITCODE -ne 0) { throw 'Electron runtime installation failed' }
+          Pop-Location
+          Push-Location desktop/ui-api
+          npx --yes pnpm@10.6.5 --ignore-workspace install --ignore-scripts --frozen-lockfile
+          if ($LASTEXITCODE -ne 0) { throw 'desktop UI dependency installation failed' }
+          Pop-Location
+          Pop-Location
+
+      - name: Run production and Windows desktop source regression tests
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Push-Location upstream
+          node --test tests/openrouter-production-compat.test.mjs tests/api-agent.test.mjs tests/chat.test.mjs tests/spark-agent.test.mjs tests/public-comment-agent.test.mjs desktop/tests/*.test.mjs desktop/ui-api/tests/openrouter-preset.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Windows source regression suite failed' }
+          Pop-Location
+
+      - name: Acquire pinned official UI source and prepare the bundled Node runtime
+        shell: pwsh
+        working-directory: upstream/desktop
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node scripts/acquire-upstream.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'pinned official UI source acquisition failed' }
+          node scripts/stage-api-runtime.mjs --prepare-node-only
+          if ($LASTEXITCODE -ne 0) { throw 'pinned bundled Node preparation failed' }
+
+      - name: Build UI, isolated API runtime and desktop app
+        shell: pwsh
+        working-directory: upstream/desktop
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Push-Location ui-api
+          node build.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'desktop UI build failed' }
+          Pop-Location
+          node scripts/stage-api-runtime.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'isolated API runtime staging failed' }
+          node scripts/build-api-desktop.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'desktop app source bundling failed' }
+          npx --yes pnpm@10.6.5 run package:dir
+          if ($LASTEXITCODE -ne 0) { throw 'win-unpacked build failed' }
+          npx --yes pnpm@10.6.5 exec electron-builder --win portable --x64 --config electron-builder.json --publish never
+          if ($LASTEXITCODE -ne 0) { throw 'portable EXE build failed' }
+
+      - name: Verify the exact packaged portable EXE in an isolated user profile
+        shell: pwsh
+        working-directory: upstream/desktop
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node scripts/verify-packaged-api.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'packaged EXE isolated startup and renderer smoke failed' }
+
+      - name: Verify candidate SHA-256 and write a redacted candidate receipt
+        shell: pwsh
+        working-directory: upstream/desktop
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Get-Item 'release-api/Dafeiyu-Douyin-API-1.4.7-win-x64.exe'
+          $sha = (Get-FileHash $exe.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          $verification = Get-Content 'release-api/verification-1.4.7.json' -Raw | ConvertFrom-Json
+          if ($verification.sha256 -ne $sha) { throw 'CANDIDATE_EXE_SHA256_MISMATCH' }
+          if ($verification.renderer.providerKeyIsolation -ne $true) { throw 'PACKAGED_PROVIDER_KEY_ISOLATION_NOT_PROVEN' }
+          if ($verification.realModelCalled -ne $false -or $verification.realMessageSent -ne $false) { throw 'SMOKE_EXCEEDED_NO-LIVE-ACTION_BOUNDARY' }
+          $signature = (Get-AuthenticodeSignature $exe.FullName).Status.ToString()
+          $receipt = [ordered]@{
+            schema = 'yutang.windows-openrouter-candidate.v1'
+            status = 'PASS_WINDOWS_PACKAGED_SMOKE'
+            yutangPatchCommit = $env:GITHUB_SHA
+            upstreamRepository = 'LockyBee/dsh-douyin-agent'
+            upstreamCommit = $env:UPSTREAM_COMMIT
+            productVersion = $verification.version
+            runnerImage = $env:ImageOS
+            runnerImageVersion = $env:ImageVersion
+            executable = $exe.Name
+            bytes = $exe.Length
+            sha256 = $sha
+            signatureStatus = $signature
+            archiveSourcesMatch = $verification.archiveSourcesMatch
+            iconsMatch = $verification.iconsMatch
+            domainFilesMatch = $verification.domainFilesMatch
+            runtimeId = $verification.runtimeId
+            startup = $verification.startup
+            renderer = $verification.renderer
+            readOnlyEndpoints = $verification.readOnlyEndpoints
+            exit = $verification.exit
+            realModelCalled = $verification.realModelCalled
+            realMessageSent = $verification.realMessageSent
+            release = $false
+          }
+          $receipt | ConvertTo-Json -Depth 20 | Set-Content 'release-api/windows-candidate-receipt.json' -Encoding utf8
+          Write-Output ($receipt | ConvertTo-Json -Depth 20)
+
+      - name: Upload exact Windows candidate and verification receipts (not a release)
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: YuTang-OpenRouter-Desktop-1.4.7-SyntheticKeySmokeFix-${{ matrix.os }}-CANDIDATE-NOT-RELEASE
+          path: |
+            upstream/desktop/release-api/Dafeiyu-Douyin-API-1.4.7-win-x64.exe
+            upstream/desktop/release-api/Dafeiyu-Douyin-API-1.4.7-win-x64.exe.sha256
+            upstream/desktop/release-api/verification-1.4.7.json
+            upstream/desktop/release-api/windows-candidate-receipt.json
+            upstream/openrouter-desktop-patch-receipt.json
+          if-no-files-found: warn
+          retention-days: 7
+          compression-level: 0
+
+      - name: Strict non-release and no-live-model boundary
+        if: always()
+        shell: pwsh
+        run: |
+          Write-Output 'FULL SOURCE-TREE SHA-256 FIX + PATCHED WINDOWS EXE SMOKE ONLY.'
+          Write-Output 'NO REAL API KEY, NO LIVE MODEL CALL, NO REAL DOUYIN LOGIN OR ACTION.'
+          Write-Output 'NO USER PC, NO MAIN BRANCH, NO MERGE, NO GITHUB RELEASE.'
