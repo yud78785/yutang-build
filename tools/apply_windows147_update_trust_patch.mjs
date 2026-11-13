@@ -170,7 +170,9 @@ export async function applyUpdateTrustPatch(upstream, repositoryRoot = REPOSITOR
     throw new Error('UPDATE_TRUST_TEST_IMPORT_REWRITE_FAILED');
   }
   await fs.mkdir(path.join(upstream, 'desktop/tests'), { recursive: true });
-  await write(path.join(upstream, 'desktop/tests/update-trust.test.mjs'), upstreamTrustTests);\n  await fs.copyFile(path.join(repositoryRoot, 'tests/windows147-update-transaction.test.mjs'), path.join(upstream, 'desktop/tests/update-transaction.test.mjs'));
+  await write(path.join(upstream, 'desktop/tests/update-trust.test.mjs'), upstreamTrustTests);\n  const transactionTests = (await read(path.join(repositoryRoot, 'tests/windows147-update-transaction.test.mjs')))
+    .replace("../tools/windows147-update-patched/update-transaction.mjs", "../src/update-transaction.mjs");
+  await write(path.join(upstream, 'desktop/tests/update-transaction.test.mjs'), transactionTests);
   await fs.rm(path.join(upstream, 'desktop/tests/update-service.test.mjs'), { force: true });
 
   const modified = {};
