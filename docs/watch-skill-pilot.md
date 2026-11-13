@@ -9,7 +9,7 @@ Windows security/candidate lives in PR #7, video playback tests in PR #8, the au
 - Original source: W3C Web Accessibility Initiative Evaluation Video, conformance evaluation.
 - Video: https://media.w3.org/wai/evaluation-intros/conformance-evaluation.mp4
 - Independently published caption oracle: https://media.w3.org/wai/evaluation-intros/conformance-evaluation-cc.vtt
-- License: CC BY 4.0 (https://www.w3.org/WAI/test-evaluate/ and https://www.w3.org/WAI/test-evaluate/acknowledgements/).
+- License: W3C WAI permission to use with attribution; preserve the original complete video including the closing WAI link when using or sharing it. https://www.w3.org/WAI/about/using-wai-material/ . CC BY 4.0 has not been established for this video.
 - Attribution: Copyright W3C Web Accessibility Initiative, https://www.w3.org/WAI/test-evaluate/
 - The experiment downloads the entire authorized, originally narrated video to a disposable public GitHub standard Linux runner. It does not upload media, raw audio or frames as build artifacts. This is not a Douyin sample.
 
