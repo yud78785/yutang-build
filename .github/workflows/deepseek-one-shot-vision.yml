@@ -1,4 +1,4 @@
-name: YuTang one-shot production DeepSeek V4.1 Flash vision - strict cost and action limits
+name: YuTang one-shot production vision - DeepSeek primary / OpenRouter backup
 
 on:
   push:
@@ -8,10 +8,11 @@ on:
       - .github/workflows/deepseek-one-shot-vision.yml
       - tools/live-vision-acceptance.mjs
       - tools/verify_deepseek_live_vision.py
+      - tests/test-live-vision-provider.mjs
       - docs/deepseek-one-shot-vision.md
 
 concurrency:
-  group: yutang-deepseek-one-shot-vision-${{ github.ref }}
+  group: yutang-one-shot-provider-vision-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -66,39 +67,61 @@ jobs:
           test "$(git -C upstream hash-object api-agent.mjs)" = "8f5187dc9e48f1ca1a91b8c545236233d68268e6"
           node --check upstream/api-agent.mjs
           node --check tools/live-vision-acceptance.mjs
-          echo "Original production ApiAgent source and blob SHA pinned"
+          node --test tests/test-live-vision-provider.mjs
+          echo "Original production ApiAgent source and provider fallback tests passed"
 
-      - name: Detect configured repository secret without revealing it
-        id: deepseek_key
+      - name: Select one configured provider without exposing any credential
+        id: vision_provider
         shell: bash
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          REQUESTED_PROVIDER: ${{ vars.YUTANG_VISION_PROVIDER }}
         run: |
           set -euo pipefail
-          if [ -n "${DEEPSEEK_API_KEY:-}" ]; then
-            echo "available=true" >> "$GITHUB_OUTPUT"
-            echo "A repository-scoped DeepSeek API secret exists; one bounded request may run."
-          else
+          requested="${REQUESTED_PROVIDER:-auto}"
+          case "$requested" in
+            auto)
+              if [ -n "${DEEPSEEK_API_KEY:-}" ]; then provider=deepseek
+              elif [ -n "${OPENROUTER_API_KEY:-}" ]; then provider=openrouter
+              else provider=none
+              fi
+              ;;
+            deepseek)
+              if [ -n "${DEEPSEEK_API_KEY:-}" ]; then provider=deepseek; else provider=none; fi
+              ;;
+            openrouter)
+              if [ -n "${OPENROUTER_API_KEY:-}" ]; then provider=openrouter; else provider=none; fi
+              ;;
+            *) echo "Unsupported provider selector; no request sent."; exit 1 ;;
+          esac
+          if [ "$provider" = none ]; then
             echo "available=false" >> "$GITHUB_OUTPUT"
-            echo "No DEEPSEEK_API_KEY secret configured. No network model request will be made."
+            echo "No selected provider credential is configured. Zero model requests will be sent."
             python3 - <<'PY'
           import json
           from pathlib import Path
           Path("work/deepseek-live-vision-receipt.json").write_text(json.dumps({
-            "status":"SKIPPED_NO_DEEPSEEK_API_KEY_SECRET",
+            "status":"SKIPPED_NO_SUPPORTED_PROVIDER_KEY_SECRET",
             "request_count":0,
             "network_request_sent":False,
             "user_account_or_personal_pc_used":False,
             "api_key_value_or_presence_logged":False
           },indent=2)+"\n")
           PY
+          else
+            echo "available=true" >> "$GITHUB_OUTPUT"
+            echo "provider=$provider" >> "$GITHUB_OUTPUT"
+            echo "One bounded request is enabled for the selected provider. Credential values remain hidden."
           fi
 
-      - name: Make exactly one production DeepSeek visual request (only if secret exists)
-        if: steps.deepseek_key.outputs.available == 'true'
+      - name: Make exactly one production visual request (only if selected secret exists)
+        if: steps.vision_provider.outputs.available == 'true'
         shell: bash
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          YUTANG_VISION_PROVIDER: ${{ steps.vision_provider.outputs.provider }}
           YUTANG_ALLOW_LIVE_VISION_ACCEPTANCE: "1"
         run: |
           set -euo pipefail
@@ -108,13 +131,13 @@ jobs:
           set -e
           echo "PRODUCTION_AGENT_EXIT_CODE $rc (the source script intentionally exits 1 to force independent semantic review)"
           python3 tools/verify_deepseek_live_vision.py work/deepseek-live-vision.log "$rc" > work/deepseek-live-vision-receipt.json
-          echo "ONE_REAL_DEEPSEEK_RESPONSE_RECEIVED; INDEPENDENT_REVIEW_REQUIRED"
+          echo "ONE_REAL_PRODUCTION_VISION_RESPONSE_RECEIVED; INDEPENDENT_REVIEW_REQUIRED"
 
       - name: Upload bounded decision receipt only (no key, JPEG, cookies or account data)
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
-          name: YuTang-One-Shot-DeepSeek-Production-Vision-NOT-AUTONOMY
+          name: YuTang-One-Shot-Production-Vision-NOT-AUTONOMY
           path: |
             work/deepseek-live-vision.log
             work/deepseek-live-vision-receipt.json

@@ -10,6 +10,85 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 export const BENCHMARK_VIDEO_ID = '7577614489533680959';
 export const REQUIRED_OUTCOME = 'PASS_PUBLIC_VIDEO_CORE_CAPTURE_AND_MODEL_INPUT_PACKING';
 
+export const OPENROUTER_VISION_PROFILE = Object.freeze({
+  baseUrl: 'https://openrouter.ai/api/v1',
+  model: 'deepseek/deepseek-v4.1-flash',
+  maxPrice: Object.freeze({ prompt: 0.30, completion: 1.20 }),
+});
+
+export function resolveVisionProvider(env = process.env) {
+  const deepseekKey = String(env.DEEPSEEK_API_KEY || '').trim();
+  const openrouterKey = String(env.OPENROUTER_API_KEY || '').trim();
+  const selected = String(env.YUTANG_VISION_PROVIDER || 'auto').trim().toLowerCase();
+  const profiles = {
+    deepseek: deepseekKey ? {
+      id: 'deepseek', name: 'DeepSeek API', apiKey: deepseekKey,
+      baseUrl: 'https://api.deepseek.com', model: 'deepseek-flash',
+    } : null,
+    openrouter: openrouterKey ? {
+      id: 'openrouter', name: 'OpenRouter', apiKey: openrouterKey,
+      baseUrl: OPENROUTER_VISION_PROFILE.baseUrl, model: OPENROUTER_VISION_PROFILE.model,
+    } : null,
+  };
+  if (!['auto', 'deepseek', 'openrouter'].includes(selected)) throw new Error('视觉模型提供商选择无效。');
+  if (selected === 'deepseek' || selected === 'openrouter') return profiles[selected];
+  return profiles.deepseek || profiles.openrouter || null;
+}
+
+export function createProviderTransport(provider, fetchImpl = fetch) {
+  let requestCount = 0;
+  let routeMetadata = null;
+  const wrappedFetch = async (url, init = {}) => {
+    requestCount++;
+    if (requestCount !== 1) throw new Error('单次视觉验收禁止重复模型请求。');
+    if (url !== provider.baseUrl + '/chat/completions' || init.method !== 'POST' || init.redirect !== 'error') {
+      throw new Error('视觉验收接口地址或请求方式不符合固定配置。');
+    }
+    let payload;
+    try { payload = JSON.parse(init.body); } catch { throw new Error('视觉模型请求正文不是有效 JSON。'); }
+    if (payload.model !== provider.model || payload.stream !== false ||
+        !Number.isSafeInteger(payload.max_tokens) || payload.max_tokens < 1 || payload.max_tokens > 1200 ||
+        payload.tools || payload.tool_choice) {
+      throw new Error('视觉模型请求超出固定模型、输出预算或无工具调用限制。');
+    }
+    const imageParts = (payload.messages || []).flatMap(message =>
+      Array.isArray(message.content) ? message.content.filter(part =>
+        part?.type === 'image_url' && typeof part.image_url?.url === 'string' &&
+        part.image_url.url.startsWith('data:image/jpeg;base64,')) : []);
+    if (!imageParts.length || imageParts.length > 3) throw new Error('视觉模型请求必须只包含一张分镜图（最多三张原帧）。');
+    if (provider.id === 'openrouter') {
+      // The upstream production ApiAgent sends DeepSeek's thinking extension.
+      // OpenRouter uses the OpenAI-compatible request body, so remove only that
+      // vendor-specific field and apply hard routing/privacy constraints.
+      delete payload.thinking;
+      payload.provider = {
+        sort: 'price',
+        max_price: { prompt: OPENROUTER_VISION_PROFILE.maxPrice.prompt,
+          completion: OPENROUTER_VISION_PROFILE.maxPrice.completion },
+        data_collection: 'deny',
+        zdr: true,
+        require_parameters: true,
+      };
+    }
+    const response = await fetchImpl(url, { ...init, body: JSON.stringify(payload) });
+    if (response.ok) {
+      try {
+        const data = await response.clone().json();
+        routeMetadata = {
+          servedModel: typeof data.model === 'string' ? data.model.slice(0, 160) : null,
+          servedProvider: typeof data.provider === 'string' ? data.provider.slice(0, 100) : null,
+        };
+      } catch { routeMetadata = null; }
+    }
+    return response;
+  };
+  return {
+    fetchImpl: wrappedFetch,
+    getRequestCount: () => requestCount,
+    getRouteMetadata: () => routeMetadata ? { ...routeMetadata } : null,
+  };
+}
+
 function sha256(bytes) {
   return createHash('sha256').update(bytes).digest('hex');
 }
@@ -142,8 +221,9 @@ async function main() {
   if (process.env.YUTANG_ALLOW_LIVE_VISION_ACCEPTANCE !== '1') {
     throw new Error('未明确启用真实模型验收；没有发送网络请求。设置 YUTANG_ALLOW_LIVE_VISION_ACCEPTANCE=1 后再运行。');
   }
-  const apiKey = String(process.env.DEEPSEEK_API_KEY || '').trim();
-  if (!apiKey) throw new Error('缺少 DEEPSEEK_API_KEY；没有发送网络请求。');
+  const provider = resolveVisionProvider(process.env);
+  if (!provider) throw new Error('没有配置 DeepSeek 或 OpenRouter API Key；没有发送网络请求。');
+  const apiKey = provider.apiKey;
   const evidenceDir = process.argv[2] || process.env.YUTANG_EVIDENCE_DIR;
   if (!evidenceDir) throw new Error('请提供含 probe-result.json 与三张 frame-N.jpg 的证据目录。');
 
@@ -158,12 +238,14 @@ async function main() {
   const { ApiAgent, normalizeApiConfig } = await import('../upstream/api-agent.mjs');
   const config = normalizeApiConfig({
     apiKey,
-    baseUrl: 'https://api.deepseek.com',
-    model: 'deepseek-flash',
+    baseUrl: provider.baseUrl,
+    model: provider.model,
   });
+  const transport = createProviderTransport(provider);
   const agent = new ApiAgent({
     controller: { execute: async () => { throw new Error('Live vision acceptance has no browser-tool execution path.'); } },
     config,
+    fetchImpl: transport.fetchImpl,
     apiTimeoutMs: 45_000,
     maxTokens: 1_200,
     maxFrames: 3,
@@ -180,9 +262,19 @@ async function main() {
   const elapsedMs = Date.now() - startedAt;
   const semantic = scoreVisionDecision(result.decision);
   const report = {
-    status: semantic.passed ? 'REVIEW_REQUIRED_LIVE_VISION_LEXICAL_PRECHECK' : 'FAIL_LIVE_DEEPSEEK_VISION_LEXICAL_PRECHECK',
-    provider: 'DeepSeek API',
+    status: semantic.passed ? 'REVIEW_REQUIRED_LIVE_VISION_LEXICAL_PRECHECK' : 'FAIL_LIVE_VISION_LEXICAL_PRECHECK',
+    provider: provider.name,
+    providerId: provider.id,
     model: config.model,
+    requestedModel: config.model,
+    routeMetadata: transport.getRouteMetadata(),
+    requestCountObserved: transport.getRequestCount(),
+    providerPolicy: provider.id === 'openrouter' ? {
+      sort: 'price', dataCollection: 'deny', zeroDataRetentionRequired: true,
+      maxPriceUsdPerMillion: { prompt: 0.30, completion: 1.20 },
+      requireParameters: true,
+    } : { directOfficialEndpoint: true },
+    priceCeilingUsdPerMillion: { prompt: 0.30, completion: 1.20 },
     requestCount: 1,
     videoId: evidence.actualVideoId,
     frameCount: frames.length,
@@ -209,7 +301,7 @@ async function main() {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   main().catch(error => {
-    console.error('YUTANG_LIVE_VISION_FAIL_CLOSED ' + safeError(error, process.env.DEEPSEEK_API_KEY || ''));
+    console.error('YUTANG_LIVE_VISION_FAIL_CLOSED ' + safeError(error, process.env.DEEPSEEK_API_KEY || process.env.OPENROUTER_API_KEY || ''));
     process.exitCode = 1;
   });
 }

@@ -1,18 +1,33 @@
-# One-shot DeepSeek production visual inference (bounded, opt-in secret only)
+# One-shot production vision: DeepSeek primary, OpenRouter backup
 
-## Why this next
-The prior experiment proved original Windows JPEG -> restricted FastMCP ImageContent -> pinned Qwen local inference. Qwen2B is only a transport/pipeline smoke model. The original YuTang production `ApiAgent.decideWatch` already sends a three-frame storyboard to `https://api.deepseek.com/chat/completions`, accepts a constrained decision, has no tool definitions in this method, and does not execute browser actions.
+## Why this is the right fallback
+The same pinned YuTang production `ApiAgent.decideWatch` is reused for both providers. It already handles the real three-frame storyboard, image payload, timeout, response JSON validation and safe-stop decision parsing. The provider switch changes only the HTTPS base URL, model identifier and API key; it does not replace the vision implementation.
 
-Official DeepSeek docs (checked 2026-11-13):
-- `deepseek-flash` is the current DeepSeek-V4.1-Flash-1017 model and accepts JPEG image input. The retired `deepseek-v4-flash-vision-exp` name routes to the same current Flash model. https://api-docs.deepseek.com/guides/vision/
-- Official peak pricing: input $0.30 / million tokens, output $1.20 / million; off-peak half. Images are tokenized at up to 1024 tokens per image. https://api-docs.deepseek.com/quick_start/pricing/
+## Provider selection
+- Automatic selection: use official DeepSeek if `DEEPSEEK_API_KEY` exists; otherwise use OpenRouter if `OPENROUTER_API_KEY` exists; otherwise skip with zero requests.
+- If both keys exist, set GitHub repository variable `YUTANG_VISION_PROVIDER=openrouter` to explicitly select the backup. Allowed values are `auto`, `deepseek`, `openrouter`. A selected provider without its matching secret fails closed.
+- A failed official request does **not** automatically trigger a second OpenRouter request. This avoids accidental double billing. After reviewing the error, the user may explicitly select OpenRouter and retry one time.
+- Only repository secrets are read by CI. No key is printed, written into Git, copied into an artifact, or exposed to this chat.
 
-## Guardrails
-- The workflow only reads the optional existing GitHub repository secret named `DEEPSEEK_API_KEY`. It never prints or copies the key. If absent, it records SKIPPED and sends zero requests.
-- Exactly one production `ApiAgent.decideWatch` request, three previously verified original public-video JPEGs, max 1200 output tokens, no retries, no tools, no browser, no action, no memory, no audio.
-- A conservative peak-rate cost upper estimate is calculated from actual token usage, ignoring cache-hit discounts. The receipt rejects an estimate above USD $0.01.
-- The exact original `LockyBee/dsh-douyin-agent` commit `912873e2556d16a088d81dcbc6f7c0060614dd58` and `api-agent.mjs` Git blob `8f5187dc9e48f1ca1a91b8c545236233d68268e6` are pinned.
-- The original script deliberately exits 1 after printing a response to force independent review. The workflow parser accepts only that expected review-gate exit and does NOT convert it to semantic acceptance.
+## Fixed model and endpoint
+- Official DeepSeek: `https://api.deepseek.com`, model `deepseek-flash` (DeepSeek V4.1 Flash; image-capable).
+- OpenRouter: `https://openrouter.ai/api/v1`, model `deepseek/deepseek-v4.1-flash`.
+- OpenRouter is a routing/billing intermediary, not the official DeepSeek endpoint. It routes the same named model across hosting providers; the actual inference host may differ from DeepSeek's own infrastructure.
+- Both paths use the original pinned production ApiAgent source `LockyBee/dsh-douyin-agent@912873e2556d16a088d81dcbc6f7c0060614dd58`, API-agent Git blob `8f5187dc9e48f1ca1a91b8c545236233d68268e6`.
 
-## Acceptance separation
-A received response proves a genuine paid production vision call and actual model output only. The lexical scorer is a precheck; current ChatGPT must independently compare the response to the exact original images. A correct three-frame answer still does not prove 18-minute playback, audio, continuous video understanding, autonomous actions, or DeepSeek-level equivalence of YuTang as a system. No merge/release or Windows EXE changes.
+## Privacy and cost limits
+- Exactly one API request; three previously verified original Windows JPEG samples; the production storyboard packs them into one bounded image; maximum 1200 output tokens; no retry, browser tools, autonomous action, audio, transcription or memory.
+- OpenRouter requests require `data_collection: "deny"` and `zdr: true` (zero data retention) and `require_parameters: true`. If no eligible ZDR image-capable provider exists, the request must fail rather than silently relaxing the privacy rule.
+- OpenRouter provider routing sorts by price and enforces `max_price` at $0.30/M prompt and $1.20/M completion. This is also the conservative official DeepSeek peak-price ceiling used by the independent verifier. A request above the $0.01 estimated upper bound is rejected from acceptance.
+- The upstream production ApiAgent adds DeepSeek's `thinking` extension. The OpenRouter transport removes only that unsupported vendor-specific field and applies its provider policy; all other production image packing, response parsing and decision validation remains unchanged.
+- No API request occurs unless a configured secret exists. No automatic top-up or payment is enabled.
+
+## Payment fallback facts (checked 2026-11-13)
+- DeepSeek's terms say recharge methods and prices are whatever the official platform currently displays; do not assume a particular card or region will work. Check its actual checkout page.
+- OpenRouter Standard currently lists major credit/debit cards, AliPay and USDC. It requires prepaid credits, with a $5 minimum per transaction. Unused-credit refunds can be requested within 24 hours; platform fees are non-refundable and cryptocurrency purchases are not refundable. Standard credit purchases have a 5.5% platform fee; model inference is charged at listed provider rates. Keep Auto Recharge OFF.
+- Use only the official sites: https://platform.deepseek.com/ and https://openrouter.ai/ . Do not use unofficial top-up agents, share API keys, or provide extra personal documents to a third party. USDC is not USDT; crypto is optional and not recommended as the first fallback if unfamiliar.
+
+## Exact source media and strict scope
+- Original Windows capture: video ID `7577614489533680959`, artifact `13951609541`, original archive SHA-256 `5b2f2432a25ef6e2581be64eb58c352652d39b245d1a0036682e39e7acac3849`.
+- One-shot visual inference is still only a three-frame sample from the public video. It does not prove full 18-minute playback, audio understanding, temporal reasoning across unseen intervals, autonomous actions, or DeepSeek-equivalent overall system capability.
+- A received model response is only a technical response record and lexical precheck. Independent visual review remains required. No merge, release or Windows EXE changes.
