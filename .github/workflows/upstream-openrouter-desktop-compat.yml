@@ -55,6 +55,7 @@ jobs:
           node --check upstream/public-comment-agent.mjs
           node --check upstream/desktop/src/model-settings-guard.mjs
           node --check upstream/desktop/src/main.mjs
+          node --check upstream/desktop/scripts/verify-packaged-api.mjs
           cp tests/openrouter-production-compat.test.mjs upstream/tests/openrouter-production-compat.test.mjs
           cp tests/openrouter-ui-preset.test.mjs upstream/desktop/ui-api/tests/openrouter-preset.test.mjs
           test -s upstream/openrouter-desktop-patch-receipt.json
