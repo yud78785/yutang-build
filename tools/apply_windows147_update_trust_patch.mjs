@@ -70,7 +70,7 @@ export async function applyUpdateTrustPatch(upstream, repositoryRoot = REPOSITOR
     "const packagedReadme = asar.extractFile(archive, 'README.md').toString('utf8');",
     "assert.ok(packagedReadme.includes('YuTang 的未签名验收候选'), '打包 README 必须说明该 EXE 是未签名候选而非正式发行版。');",
     "assert.ok(packagedReadme.includes('自动更新处于安全关闭状态'), '打包 README 必须说明未配置发布信任时自动更新保持关闭。');"
-  ].join('\\n');
+  ].join('\n');
   verifier = replaceExactlyOnce(verifier, packagedReadmeAnchor, packagedReadmeCheck, 'packaged-readme-trust-disclosure');
   await write(verifierPath, verifier);
 
