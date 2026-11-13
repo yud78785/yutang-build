@@ -323,6 +323,8 @@ jobs:
           if ($edgeNormal.rendererSandbox.rendererSandboxVerified -ne $true -or
               $edgeNormal.rendererSandbox.networkServiceSandboxReported -ne $true -or
               $edgeNormal.rendererSandbox.networkServiceWindowsTokenVerified -ne $true -or
+              $edgeNormal.rendererSandbox.networkServiceLowIntegrityVerified -ne $true -or
+              $edgeNormal.rendererSandbox.networkServiceTokenIntegrityLevel -cne 'Low' -or
               $edgeNormal.rendererSandbox.networkServiceProcessOwned -ne $true -or
               $edgeNormal.hostSummary.edgeWithNetworkSandboxArg -lt 1 -or
               $edgeNormal.lifecycle.finalCloseVerified -ne $true) { throw 'REAL_EDGE_SANDBOX_OR_NORMAL_LIFECYCLE_NOT_PROVEN' }

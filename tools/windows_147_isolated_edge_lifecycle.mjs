@@ -180,6 +180,8 @@ const readProcessToken = pid => {
     '  [DllImport("advapi32.dll", SetLastError=true)] public static extern bool OpenProcessToken(IntPtr process, uint access, out IntPtr token);',
     '  [DllImport("advapi32.dll", SetLastError=true)] public static extern bool GetTokenInformation(IntPtr token, int infoClass, IntPtr info, int length, out int returned);',
     '  [DllImport("advapi32.dll", CharSet=CharSet.Unicode, SetLastError=true)] public static extern bool ConvertSidToStringSid(IntPtr sid, out IntPtr text);',
+    '  [DllImport("advapi32.dll", SetLastError=true)] public static extern IntPtr GetSidSubAuthorityCount(IntPtr sid);',
+    '  [DllImport("advapi32.dll", SetLastError=true)] public static extern IntPtr GetSidSubAuthority(IntPtr sid, uint index);',
     '  [DllImport("kernel32.dll", SetLastError=true)] public static extern IntPtr LocalFree(IntPtr memory);',
     '  [DllImport("kernel32.dll", SetLastError=true)] public static extern bool CloseHandle(IntPtr handle);',
     '  public static object Read(int pid) {',
@@ -195,6 +197,25 @@ const readProcessToken = pid => {
     '        if (!GetTokenInformation(token, 29, appBuffer, 4, out returned)) throw new Win32Exception(Marshal.GetLastWin32Error());',
     '        isAppContainer = Marshal.ReadInt32(appBuffer) != 0;',
     '      } finally { Marshal.FreeHGlobal(appBuffer); }',
+    '      int integritySize = 0;',
+    '      GetTokenInformation(token, 25, IntPtr.Zero, 0, out integritySize);',
+    '      if (integritySize <= 0) throw new Win32Exception(Marshal.GetLastWin32Error(), "TokenIntegrityLevel size query failed");',
+    '      IntPtr integrityBuffer = Marshal.AllocHGlobal(integritySize);',
+    '      int integrityRid;',
+    '      string integrityLevel;',
+    '      try {',
+    '        if (!GetTokenInformation(token, 25, integrityBuffer, integritySize, out integritySize)) throw new Win32Exception(Marshal.GetLastWin32Error(), "TokenIntegrityLevel query failed");',
+    '        IntPtr integritySid = Marshal.ReadIntPtr(integrityBuffer);',
+    '        if (integritySid == IntPtr.Zero) throw new InvalidOperationException("TokenIntegrityLevel SID is null");',
+    '        IntPtr countPointer = GetSidSubAuthorityCount(integritySid);',
+    '        if (countPointer == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error(), "GetSidSubAuthorityCount failed");',
+    '        byte subAuthorityCount = Marshal.ReadByte(countPointer);',
+    '        if (subAuthorityCount == 0) throw new InvalidOperationException("TokenIntegrityLevel SID has no sub-authority");',
+    '        IntPtr ridPointer = GetSidSubAuthority(integritySid, (uint)(subAuthorityCount - 1));',
+    '        if (ridPointer == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error(), "GetSidSubAuthority failed");',
+    '        integrityRid = Marshal.ReadInt32(ridPointer);',
+    '        integrityLevel = integrityRid >= 0x5000 ? "ProtectedProcess" : integrityRid >= 0x4000 ? "System" : integrityRid >= 0x3000 ? "High" : integrityRid >= 0x2100 ? "MediumPlus" : integrityRid >= 0x2000 ? "Medium" : integrityRid >= 0x1000 ? "Low" : "Untrusted";',
+    '      } finally { Marshal.FreeHGlobal(integrityBuffer); }',
     '      string sidText = null;',
     '      if (isAppContainer) {',
     '        int required = 0;',
@@ -213,7 +234,7 @@ const readProcessToken = pid => {
     '          } finally { Marshal.FreeHGlobal(sidInfo); }',
     '        }',
     '      }',
-    '      return new { processId = pid, isAppContainer = isAppContainer, appContainerSid = sidText };',
+    '      return new { processId = pid, isAppContainer = isAppContainer, appContainerSid = sidText, integrityRid = integrityRid, integrityLevel = integrityLevel };',
     '    } finally { if (token != IntPtr.Zero) CloseHandle(token); CloseHandle(process); }',
     '  }',
     '}'
@@ -362,6 +383,7 @@ export async function inspectRendererSandbox(port = PORT, { profile, hostPid } =
           try { networkServiceToken = readProcessToken(networkServicePid); }
           catch (error) { networkServiceToken = { processId: networkServicePid, isAppContainer: false, appContainerSid: null, errorName: String(error?.name || 'Error'), errorCode: typeof error?.code === 'string' ? error.code : null }; }
           const networkServiceWindowsTokenVerified = networkServiceToken?.isAppContainer === true && networkServiceToken?.appContainerSid === networkServiceAppContainerSid && networkServiceAppContainerSid !== null;
+          const networkServiceLowIntegrityVerified = networkServiceToken?.integrityRid === 0x1000 && networkServiceToken?.integrityLevel === 'Low';
           let networkServiceProcessOwned = false;
           let networkServiceProcessDetails = null;
           try {
@@ -396,7 +418,7 @@ export async function inspectRendererSandbox(port = PORT, { profile, hostPid } =
           } catch (error) {
             networkServiceProcessDetails = { errorName: String(error?.name || 'Error'), errorCode: typeof error?.code === 'string' ? error.code : null };
           }
-          const networkServiceFullIsolationVerified = networkServiceWindowsTokenVerified && networkServiceProcessOwned;
+          const networkServiceFullIsolationVerified = networkServiceWindowsTokenVerified && networkServiceLowIntegrityVerified && networkServiceProcessOwned;
           const rendererRowsVerified = rendererRows.length > 0 && rendererRows.every(columns =>
             columns[3] === 'Renderer' && columns[4] === 'Lockdown' && /Untrusted/.test(columns[5] || '') && /^S-1-15-2-/.test(columns[8] || ''));
           const rendererSandboxVerified = rendererRowsVerified && rendererAppContainerEnabled;
@@ -422,13 +444,16 @@ export async function inspectRendererSandbox(port = PORT, { profile, hostPid } =
             networkServiceLowboxAppContainer: networkServiceAppContainerSid !== null,
             networkServiceToken,
             networkServiceWindowsTokenVerified,
+            networkServiceLowIntegrityVerified,
+            networkServiceTokenIntegrityLevel: networkServiceToken?.integrityLevel || null,
+            networkServiceTokenIntegrityRid: networkServiceToken?.integrityRid ?? null,
             networkServiceProcessOwned,
             networkServiceProcessDetails,
             networkServiceFullIsolationVerified,
             networkServiceReportedNotSandboxed: networkServiceRow?.[3] === 'Not Sandboxed',
             networkServiceSandboxReported: networkServiceSandboxEnabled && networkServiceRow?.[3] === 'Network',
             explicitSandboxPositive: rendererSandboxVerified && networkServiceSandboxEnabled && networkServiceRow?.[3] === 'Network',
-            explicitSandboxFullPositive: rendererSandboxVerified && networkServiceSandboxEnabled && networkServiceRow?.[3] === 'Network' && networkServiceFullIsolationVerified,
+            explicitSandboxFullPositive: rendererSandboxVerified && networkServiceSandboxEnabled && networkServiceRow?.[3] === 'Network' && networkServiceFullIsolationVerified && networkServiceLowIntegrityVerified,
             explicitSandboxNegative: false,
             attempts
           };
