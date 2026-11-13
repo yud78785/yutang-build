@@ -110,35 +110,12 @@ async function commitShortcut(stagedShortcut, shortcut, nonce) {
   const temporary = path.join(directory, '.' + path.basename(shortcut) + '.' + nonce + '.tmp.lnk');
   const backup = path.join(directory, '.' + path.basename(shortcut) + '.' + nonce + '.bak.lnk');
   await fs.copyFile(stagedShortcut, temporary, fsConstants.COPYFILE_EXCL);
-  let hadPrevious = false;
-  try {
-    await fs.rename(shortcut, backup);
-    hadPrevious = true;
-  } catch (error) {
-    if (error.code !== 'ENOENT') {
-      await fs.rm(temporary, { force: true });
-      throw error;
-    }
-  }
-  try {
-    await fs.rename(temporary, shortcut);
-  } catch (error) {
-    let restoreError = null;
-    if (hadPrevious) {
-      try { await fs.rename(backup, shortcut); } catch (failure) { restoreError = failure; }
-    }
-    await fs.rm(temporary, { force: true }).catch(() => {});
-    if (restoreError) {
-      throw new AggregateError([error, restoreError], '桌面快捷方式切换失败，旧快捷方式备份保留：' + backup);
-    }
-    throw error;
-  }
+  // Preserve the old entry by copying it, then atomically replace the visible shortcut.
+  // There is no interval in which the user's desktop shortcut is missing.
+  await fs.copyFile(shortcut, backup, fsConstants.COPYFILE_EXCL);
+  await fs.rename(temporary, shortcut);
   return {
     backup,
-    rollback: async function () {
-      await fs.rm(shortcut, { force: true });
-      if (hadPrevious) await fs.rename(backup, shortcut);
-    },
     finalize: async function () {
       await fs.rm(backup, { force: true });
     }
