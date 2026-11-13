@@ -1,0 +1,114 @@
+name: YuTang 1.4.7 LPAC semantics and real Edge HTTPS - no release
+
+on:
+  push:
+    branches:
+      - experiment/windows-147-lpac-network-20261114
+    paths:
+      - .github/workflows/windows-147-lpac-network.yml
+      - tools/windows_147_lpac_network_probe.mjs
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  lpac-network:
+    name: \${{ matrix.runner }} exact prior candidate
+    runs-on: \${{ matrix.runner }}
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-2022
+            artifact_id: "14060020678"
+            expected_sha256: "f153896ecb7687d35f8f1b0b66ead1470fe91f611fcb2bf515f4e90c57b5f043"
+          - runner: windows-2025
+            artifact_id: "14059508987"
+            expected_sha256: "c2cd51f7449a3ddc4413b4e06ead1470fe91f611fcb2bf515f4e90c57b5f043"
+
+    steps:
+      - name: Checkout isolated probe branch
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Set up pinned Node runtime
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24.17.0
+
+      - name: Download exact previously accepted candidate artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          repository: yud78785/yutang-build
+          run-id: 43467660911
+          artifact-ids: \${{ matrix.artifact_id }}
+          github-token: \${{ secrets.GITHUB_TOKEN }}
+          path: candidate
+
+      - name: Verify exact candidate receipt and executable hash
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Get-ChildItem candidate -Filter 'Dafeiyu-Douyin-API-1.4.7-win-x64.exe' -File -Recurse
+          if (@($exe).Count -ne 1) { throw 'EXPECTED_EXACTLY_ONE_CANDIDATE_EXE' }
+          $receipt = Get-ChildItem candidate -Filter 'windows-candidate-receipt.json' -File -Recurse
+          $verification = Get-ChildItem candidate -Filter 'verification-1.4.7.json' -File -Recurse
+          if (@($receipt).Count -ne 1 -or @($verification).Count -ne 1) { throw 'CANDIDATE_RECEIPT_MISSING_OR_AMBIGUOUS' }
+          $sha = (Get-FileHash -LiteralPath $exe[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($sha -cne '\${{ matrix.expected_sha256 }}') { throw 'CANDIDATE_SHA256_DOES_NOT_MATCH_PREVIOUS_ACCEPTED_ARTIFACT' }
+          $r = Get-Content -LiteralPath $receipt[0].FullName -Raw | ConvertFrom-Json
+          $v = Get-Content -LiteralPath $verification[0].FullName -Raw | ConvertFrom-Json
+          if ($r.yutangPatchCommit -cne '1c332d55a88c4be2f3bbffda60548ced52b1f061' -or $r.sha256 -cne $sha -or $r.release -ne $false -or $r.signatureStatus -cne 'NotSigned') { throw 'CANDIDATE_RECEIPT_IDENTITY_MISMATCH' }
+          if ($v.sha256 -cne $sha -or $v.version -cne '1.4.7') { throw 'PACKAGED_VERIFICATION_IDENTITY_MISMATCH' }
+          "YUTANG_CANDIDATE_EXE=$($exe[0].FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "YUTANG_EXPECTED_CANDIDATE_SHA256=$sha" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Output "PASS_PRIOR_CANDIDATE_IDENTITY $sha"
+
+      - name: Syntax-check the isolated probe tools
+        shell: pwsh
+        run: |
+          node --check tools/windows_147_lpac_network_probe.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'LPAC_NETWORK_PROBE_SYNTAX_FAILED' }
+          node --check tools/windows_147_isolated_edge_lifecycle.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'EXISTING_EDGE_HELPER_SYNTAX_FAILED' }
+
+      - name: Run real packaged EXE, AccessCheck LPAC semantics and public HTTPS
+        shell: pwsh
+        timeout-minutes: 25
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:YUTANG_NETWORK_RESULT_PATH = Join-Path $env:RUNNER_TEMP 'yutang-lpac-network-result.json'
+          node tools/windows_147_lpac_network_probe.mjs "$env:YUTANG_CANDIDATE_EXE"
+          if ($LASTEXITCODE -ne 0) { throw 'LPAC_OR_REAL_EDGE_HTTPS_PROBE_FAILED' }
+          if (-not (Test-Path -LiteralPath $env:YUTANG_NETWORK_RESULT_PATH -PathType Leaf)) { throw 'LPAC_NETWORK_RESULT_MISSING' }
+          $result = Get-Content -LiteralPath $env:YUTANG_NETWORK_RESULT_PATH -Raw | ConvertFrom-Json
+          if ($result.candidateSha256 -cne $env:YUTANG_EXPECTED_CANDIDATE_SHA256 -or
+              $result.networkProbePassed -ne $true -or
+              $result.sandbox.networkServiceIntegrity -cne 'Low' -or
+              $result.https.httpStatus -ne 200 -or
+              $result.https.tlsProtocol -notmatch '^TLS' -or
+              $result.https.pageContentVerified -ne $true -or
+              $result.cleanupVerified -ne $true) { throw 'LPAC_NETWORK_RESULT_ASSERTION_FAILED' }
+          Write-Output 'PASS_REAL_PACKAGED_EDGE_HTTPS_AND_CLEANUP'
+
+      - name: Upload redacted LPAC and network evidence only
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: YuTang-1.4.7-LPAC-Network-\${{ matrix.runner }}-EVIDENCE-NOT-RELEASE
+          path: \${{ runner.temp }}/yutang-lpac-network-result.json
+          if-no-files-found: warn
+          retention-days: 14
+          compression-level: 6
+
+      - name: Strict no-release boundary
+        if: always()
+        shell: pwsh
+        run: |
+          Write-Output 'EXACT PREVIOUS CANDIDATE ONLY; LPAC ACCESSCHECK SEMANTICS AND PUBLIC HTTPS TEST.'
+          Write-Output 'NO REAL MODEL KEY, NO LIVE MODEL CALL, NO DOUYIN LOGIN, NO USER PC.'
+          Write-Output 'NO FIREWALL POLICY CHANGE, NO MAIN, NO MERGE, NO RELEASE.'
