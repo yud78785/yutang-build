@@ -259,9 +259,12 @@ jobs:
           if ($edge.Count -ne 1) { throw 'EXPECTED_ONE_INSTALLED_EDGE_EXE' }
           if ((Get-AuthenticodeSignature -LiteralPath $edge[0]).Status -ne 'Valid') { throw 'EDGE_SIGNATURE_INVALID' }
           if (Get-NetFirewallRule -DisplayName 'YuTang147EphemeralEdgeEgressBlock' -ErrorAction SilentlyContinue) { throw 'PREEXISTING_FIREWALL_RULE' }
-          New-NetFirewallRule -DisplayName 'YuTang147EphemeralEdgeEgressBlock' -Direction Outbound -Program $edge[0] -Action Block -Profile Any -ErrorAction Stop | Out-Null
+          New-NetFirewallRule -DisplayName 'YuTang147EphemeralEdgeEgressBlock' -Direction Outbound -Program $edge[0] -RemoteAddress Internet -Action Block -Profile Any -ErrorAction Stop | Out-Null
           $gate = Get-NetFirewallRule -DisplayName 'YuTang147EphemeralEdgeEgressBlock'
           if ($gate.Direction -ne 'Outbound' -or $gate.Action -ne 'Block' -or $gate.Enabled -ne 'True') { throw 'EDGE_FIREWALL_NOT_ENFORCED' }
+          $remoteAddresses = @((Get-NetFirewallAddressFilter -AssociatedNetFirewallRule $gate).RemoteAddress)
+          if ($remoteAddresses -notcontains 'Internet' -or $remoteAddresses -contains 'Any') { throw ('EDGE_FIREWALL_SCOPE_NOT_INTERNET_ONLY: ' + ($remoteAddresses -join ',')) }
+          Write-Host 'EDGE_FIREWALL_SCOPE=Internet only; loopback CDP is not blocked'
           "YUTANG_EDGE_EXE=$($edge[0])" | Out-File -LiteralPath $env:GITHUB_ENV -Append -Encoding utf8
           'YUTANG_EDGE_FIREWALL_CONFIRMED=yes' | Out-File -LiteralPath $env:GITHUB_ENV -Append -Encoding utf8
           Write-Host ('NEW_CANDIDATE_EXE_SHA256=' + $sha)

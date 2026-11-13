@@ -704,9 +704,10 @@ async function run(exeFile, { forceMode = null, stressRestarts = 2, desktopOnly 
   await fs.mkdir(userData,{recursive:true});
   const env=Object.fromEntries(Object.entries(process.env).filter(([key])=>allowedEnv.test(key)));
   Object.assign(env,{USERPROFILE:home,HOME:home,DSH_HOME:path.join(home,'.dsh'),DOUYIN_DESKTOP_USER_DATA:userData,DOUYIN_DESKTOP_SMOKE:'1'});
-  // In ephemeral offline Windows CI only, capture Playwright browser lifecycle traces
-  // into the candidate's isolated browser-host.log; never print raw CLI arguments.
-  if (stressRestarts > 2) env.DEBUG = 'pw:browser*';
+  // In ephemeral offline Windows CI only, capture bounded Playwright startup traces
+  // into the candidate's isolated browser-host.log; diagnostics are redacted before output.
+  env.DEBUG = 'pw:browser*';
+  env.DEBUG_COLORS = '0';
   // Keep native Windows user-profile paths. Only YuTang state, app userData and memory are redirected to disposable paths.
   // No GITHUB_TOKEN, CI tokens, personal credentials or model API keys are passed to the EXE.
   const edgeExe=process.env.YUTANG_EDGE_EXE;
