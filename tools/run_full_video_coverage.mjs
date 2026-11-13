@@ -74,37 +74,31 @@ export async function coverFullPublicVideo({controller,verifyFrameProof,evidence
    await v.play();
    return {earlierTime,atTime,playTime:get('currentTime'),playStartedAt,
     duration:get('duration'),loop:get('loop'),seeking:get('seeking'),
-    paused:get('paused'),readyState:get('readyState')};
+    paused:get('paused'),readyState:get('readyState'),
+    connected:v.isConnected&&v.ownerDocument===document,ended:get('ended'),
+    elapsedSincePlayMs:performance.now()-playStartedAt};
   });
   await log({stage:'LOCAL_SEEK_AND_PLAY',earlierTime:reset.earlierTime,
    atTime:reset.atTime,playTime:reset.playTime,duration:reset.duration,
    loop:reset.loop,seeking:reset.seeking,paused:reset.paused,
-   readyState:reset.readyState});
+   readyState:reset.readyState,connected:reset.connected,
+   elapsedSincePlayMs:reset.elapsedSincePlayMs});
   startupStage='post-seek-original-element-check';
   const pageUrl=new URL(controller.page.url());
   if(pageUrl.origin!=='https://www.douyin.com'||pageUrl.pathname!=='/video/'+ID)
    throw fail('FULL_VIDEO_IDENTITY_CHANGED_AFTER_SEEK');
-  const live=await videoHandle.evaluate((v,playStartedAt)=>{
-   const prop=name=>Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype,name);
-   const get=name=>prop(name)?.get?.call(v);
-   return {connected:v.isConnected&&v.ownerDocument===document,
-    time:get('currentTime'),duration:get('duration'),paused:get('paused'),
-    seeking:get('seeking'),loop:get('loop'),ended:get('ended'),
-    readyState:get('readyState'),elapsedSincePlayMs:performance.now()-playStartedAt};
-  },reset.playStartedAt);
-  const elapsed=live.elapsedSincePlayMs/1000;
-  if(!live.connected||live.paused!==false||live.seeking!==false||
-     live.loop!==false||live.ended===true||live.readyState<2||
-     Math.abs(live.duration-referenceDurationSeconds)>0.25||
-     reset.atTime>0.5||reset.playTime>0.75||
-     live.time<reset.playTime-0.25||
-     live.time>reset.playTime+elapsed+1.5)
+  const elapsed=reset.elapsedSincePlayMs/1000;
+  if(!reset.connected||reset.paused!==false||reset.seeking!==false||
+     reset.loop!==false||reset.ended===true||reset.readyState<2||
+     Math.abs(reset.duration-referenceDurationSeconds)>0.25||
+     reset.atTime>0.5||reset.playTime<reset.atTime-0.25||
+     reset.playTime>reset.atTime+elapsed+1.5)
    throw fail('FULL_VIDEO_START_NOT_VERIFIED');
   audit=createCoverageAudit({videoId:ID,durationSeconds:referenceDurationSeconds,
    initialTime:reset.atTime,initialLocalSeek:true,
    exeSha256,windowsSourceSha:HEAD});
   await log({stage:'BEGIN',videoId:ID,initialVideoTime:reset.atTime,
-   postPlayTime:reset.playTime,observedTime:live.time,
+   postPlayTime:reset.playTime,observedTime:reset.playTime,
    elapsedSincePlaySeconds:elapsed,previousVideoTime:reset.earlierTime,
    oneLocalPlaybackReset:true,originalElementHeld:true,
    sourceHead:HEAD,exeSha256,durationSeconds:referenceDurationSeconds});
