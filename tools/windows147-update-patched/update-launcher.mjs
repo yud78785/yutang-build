@@ -122,11 +122,18 @@ async function commitShortcut(stagedShortcut, shortcut, nonce) {
   try {
     await fs.rename(temporary, shortcut);
   } catch (error) {
-    if (hadPrevious) await fs.rename(backup, shortcut).catch(() => {});
-    await fs.rm(temporary, { force: true });
+    let restoreError = null;
+    if (hadPrevious) {
+      try { await fs.rename(backup, shortcut); } catch (failure) { restoreError = failure; }
+    }
+    await fs.rm(temporary, { force: true }).catch(() => {});
+    if (restoreError) {
+      throw new AggregateError([error, restoreError], '桌面快捷方式切换失败，旧快捷方式备份保留：' + backup);
+    }
     throw error;
   }
   return {
+    backup,
     rollback: async function () {
       await fs.rm(shortcut, { force: true });
       if (hadPrevious) await fs.rename(backup, shortcut);
@@ -213,10 +220,22 @@ export async function runUpdateLauncher({
     await fs.rm(stagedShortcut, { force: true }).catch(() => {});
     return { status: 'healthy-update-started', pid: child.pid, version, sha256, health };
   } catch (error) {
-    if (rollbackShortcut) await rollbackShortcut.rollback().catch(() => {});
+    let rollbackError = null;
+    if (rollbackShortcut) {
+      try {
+        await rollbackShortcut.rollback();
+        rollbackShortcut = null;
+      } catch (failure) {
+        rollbackError = failure;
+      }
+    }
     await stopChild(child, delayImpl);
     await fs.rm(healthFile, { force: true }).catch(() => {});
     await fs.rm(stagedShortcut, { force: true }).catch(() => {});
+    if (rollbackError) {
+      throw new AggregateError([error, rollbackError],
+        '新版更新失败，旧快捷方式恢复失败；请保留并检查备份：' + rollbackShortcut.backup);
+    }
     throw error;
   }
 }
