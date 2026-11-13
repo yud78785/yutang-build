@@ -65,6 +65,8 @@ jobs:
           npx --yes pnpm@10.6.5 install --no-frozen-lockfile --ignore-scripts
           cd desktop/ui-api
           npx --yes pnpm@10.6.5 install --frozen-lockfile
+          cd ..
+          npx --yes pnpm@10.6.5 install --frozen-lockfile --ignore-scripts
 
       - name: Run production-agent and desktop-worker regression tests
         shell: bash
@@ -81,12 +83,36 @@ jobs:
             desktop/tests/api-process.test.mjs \
             desktop/ui-api/tests/openrouter-preset.test.mjs
 
-      - name: Run targeted desktop OpenRouter preset UI test
+      - name: Fetch and verify pinned official DeepSeek UI component source
+        shell: bash
+        run: |
+          set -euo pipefail
+          commit=fb2c4b9e698e30edb738bca4cf0618587db7d203
+          archive=/tmp/deepseek-harness-${commit}.tar.gz
+          destination=upstream/desktop/.cache/upstream/${commit}
+          mkdir -p \"$destination\"
+          curl --fail --location --retry 2 --silent --show-error \\
+            \"https://codeload.github.com/deepseek-ai/deepseek-harness/tar.gz/${commit}\" \\
+            --output \"$archive\"
+          echo '60038295d9ea8849dc50a9d77dfcbed6c14397f0d54fadb035f768841415a3bd  '\"$archive\" | sha256sum --check --status
+          tar -xzf \"$archive\" --strip-components=1 -C \"$destination\"
+          test -s \"$destination/packages/client/ui-primitives/src/index.ts\"
+
+      - name: Build the actual standalone desktop UI assets
+        shell: bash
+        working-directory: upstream/desktop
+        run: |
+          set -euo pipefail
+          node ui-api/build.mjs
+          test -s ui-api/dist/app.js
+          test -s ui-api/dist/licenses/manifest.json
+
+      - name: Run the complete desktop UI regression suite
         shell: bash
         working-directory: upstream/desktop/ui-api
         run: |
           set -euo pipefail
-          node --test tests/openrouter-preset.test.mjs
+          npx --yes pnpm@10.6.5 test
 
       - name: Parse the desktop JSX with esbuild
         shell: bash
