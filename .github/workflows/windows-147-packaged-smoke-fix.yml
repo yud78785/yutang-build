@@ -332,6 +332,7 @@ jobs:
                 $result.forcedExit.cdpListenersRemaining -ne 0 -or
                 $result.lifecycle.finalCloseVerified -ne $true) { throw ('JOB_OBJECT_FORCED_EXIT_NOT_PROVEN: ' + $item[1]) }
           }
+          if ($edgeDesktop.forcedExit.desktopGuardVerified -ne $true -or $edgeDesktop.forcedExit.desktopGuardPid -le 0) { throw 'DESKTOP_JOB_OBJECT_HELPER_NOT_PROVEN' }
           $edgeLifecycle = [ordered]@{ normal = $edgeNormal; forceHost = $edgeHost; forceGuard = $edgeGuard; forceDesktop = $edgeDesktop }
           if ($verification.sha256 -ne $sha) { throw 'CANDIDATE_EXE_SHA256_MISMATCH' }
           if ($verification.renderer.providerKeyIsolation -ne $true) { throw 'PACKAGED_PROVIDER_KEY_ISOLATION_NOT_PROVEN' }

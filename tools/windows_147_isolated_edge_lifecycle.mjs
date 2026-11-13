@@ -443,7 +443,7 @@ async function waitForBrowserGone(hostPid, profile, controlDir, port) {
 
 
 
-async function forceWindowsDesktopExit({ candidatePid, exeFile, backendPid, hostPid, profile, controlDir, unrelatedProfile }) {
+async function forceWindowsDesktopExit({ candidatePid, exeFile, backendPid, hostPid, profile, controlDir, unrelatedProfile, userData }) {
   // In an ephemeral Windows CI runner only. Kill the verified Electron main process,
   // not its process tree; surviving children are release-blocking.
   const rows = asRows(ps("Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,CommandLine,ExecutablePath | ConvertTo-Json -Compress -Depth 4"));
@@ -460,6 +460,16 @@ async function forceWindowsDesktopExit({ candidatePid, exeFile, backendPid, host
     String(desktop.Name || '') === '大肥鱼抖音助手.exe' &&
     hasHostAncestor(desktopPid, candidatePid, rows),
     'Refusing forced desktop exit: Electron main process is not owned by the packaged EXE');
+  const desktopGuards = rows.filter(p => /jobguard\.exe$/i.test(String(p.Name || '')) && Number(p.ParentProcessId) === desktopPid);
+  assert.equal(desktopGuards.length, 1, 'Expected exactly one desktop-owned Job Object helper for the API worker');
+  const desktopGuard = desktopGuards[0];
+  const desktopGuardPid = Number(desktopGuard.ProcessId);
+  assert.ok(Number.isSafeInteger(desktopGuardPid) && desktopGuardPid > 0, 'Invalid desktop Job Object helper PID');
+  assert.match(String(desktopGuard.CommandLine || ''), new RegExp('--owner-pid\\s+' + String(desktopPid) + '\\s+--target-pid\\s+' + String(backendPid) + '(?:\\s|$)', 'i'), 'Desktop Job Object helper was not bound to the exact desktop/API worker PID pair');
+  const desktopGuardPath = path.resolve(String(desktopGuard.ExecutablePath || ''));
+  const relativeDesktopGuard = path.relative(path.join(userData, 'runtimes'), desktopGuardPath);
+  const desktopGuardParts = relativeDesktopGuard.split(/[\\/]+/);
+  assert.ok(desktopGuardParts.length === 2 && /^[a-f0-9]{20}$/i.test(desktopGuardParts[0]) && /^jobguard\.exe$/i.test(desktopGuardParts[1]), 'Desktop Job Object helper is outside the isolated prepared runtime');
   const host = rows.find(p => Number(p.ProcessId) === hostPid);
   assert.ok(host && Number(host.ParentProcessId) === backendPid &&
     /browser-host\.mjs/i.test(String(host.CommandLine || '')) &&
@@ -479,8 +489,8 @@ async function forceWindowsDesktopExit({ candidatePid, exeFile, backendPid, host
   const ownedDescendants = rows.filter(p => hasHostAncestor(Number(p.ProcessId), desktopPid, rows));
   const trackedPids = [...new Set([candidatePid, desktopPid, ...ownedDescendants.map(p => Number(p.ProcessId))])];
   assert.ok(trackedPids.includes(backendPid) && trackedPids.includes(hostPid) &&
-    trackedPids.includes(Number(guards[0].ProcessId)),
-    'Desktop process ancestry does not contain required API/host/guard processes');
+    trackedPids.includes(Number(guards[0].ProcessId)) && trackedPids.includes(desktopGuardPid),
+    'Desktop process ancestry does not contain required API/host/browser guard/desktop guard processes');
   const filter = trackedPids.map(pid => 'ProcessId = ' + String(pid)).join(' OR ');
   const started = Date.now();
   execFileSync('taskkill.exe', ['/PID', String(desktopPid), '/F'], {
@@ -497,7 +507,8 @@ async function forceWindowsDesktopExit({ candidatePid, exeFile, backendPid, host
   assert.ok(unrelated.processCount > 0 && unrelated.listenerCount > 0,
     'Unrelated Edge sentinel did not survive desktop forced exit');
   return {
-    mode:'kill-electron-main-only', forcedPid:desktopPid, candidatePid, backendPid, hostPid,
+    mode:'kill-electron-main-only', forcedPid:desktopPid, candidatePid, backendPid, hostPid, desktopGuardPid,
+    desktopGuardVerified:true,
     trackedProcessesBefore:trackedPids.length, ownedEdgeBefore:edge.length,
     cdpListenersBefore:beforeListeners.length, elapsedMs:Date.now()-started,
     ...proof, unrelatedEdgeSurvived:true, recursiveTaskkillUsed:false
@@ -874,7 +885,7 @@ async function run(exeFile, { forceMode = null, stressRestarts = 2, desktopOnly 
       report.forcedExit = forceMode === 'desktop'
         ? await forceWindowsDesktopExit({
             candidatePid:child.pid, exeFile, backendPid:ready.backendPid, hostPid:finalPid,
-            profile, controlDir, unrelatedProfile
+            profile, controlDir, unrelatedProfile, userData
           })
         : await forceWindowsJobObjectExit({
             mode: forceMode, hostPid:finalPid, backendPid:ready.backendPid, profile, controlDir, unrelatedProfile, userData
