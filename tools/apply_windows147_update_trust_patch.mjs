@@ -53,6 +53,9 @@ export async function applyUpdateTrustPatch(upstream, repositoryRoot = REPOSITOR
   await write(path.join(upstream, 'desktop/src/update-service.mjs'), serviceTemplate);
   await write(path.join(upstream, 'desktop/src/update-launcher.mjs'), launcherTemplate);
 
+  const transactionTemplate = await read(path.join(repositoryRoot, 'tools/windows147-update-patched/update-transaction.mjs'));
+  await write(path.join(upstream, 'desktop/src/update-transaction.mjs'), transactionTemplate);
+
   const openrouterReceipt = JSON.parse(await read(path.join(upstream, 'openrouter-desktop-patch-receipt.json')));
   const dynamicReceipt = JSON.parse(await read(path.join(upstream, 'windows-security-147-dynamic-patch-receipt.json')));
   if (openrouterReceipt.status !== 'PATCH_APPLIED_TO_PINNED_UPSTREAM_SOURCE_ONLY' ||
@@ -93,6 +96,7 @@ export async function applyUpdateTrustPatch(upstream, repositoryRoot = REPOSITOR
 
   const mainPath = path.join(upstream, 'desktop/src/main.mjs');
   let main = await read(mainPath);
+  main = replaceExactlyOnce(main, "import { UpdateService } from './update-service.mjs';", "import { UpdateService } from './update-service.mjs';\nimport { recoverUpdateTransaction } from './update-transaction.mjs';", 'update-transaction-import');
   if (!main.includes("import { randomUUID, createHash } from 'node:crypto';") ||
       !main.includes("import { UpdateService } from './update-service.mjs';")) {
     throw new Error('UPDATE_TRUST_PATCH_MAIN_IMPORTS_CHANGED');
@@ -166,11 +170,11 @@ export async function applyUpdateTrustPatch(upstream, repositoryRoot = REPOSITOR
     throw new Error('UPDATE_TRUST_TEST_IMPORT_REWRITE_FAILED');
   }
   await fs.mkdir(path.join(upstream, 'desktop/tests'), { recursive: true });
-  await write(path.join(upstream, 'desktop/tests/update-trust.test.mjs'), upstreamTrustTests);
+  await write(path.join(upstream, 'desktop/tests/update-trust.test.mjs'), upstreamTrustTests);\n  await fs.copyFile(path.join(repositoryRoot, 'tests/windows147-update-transaction.test.mjs'), path.join(upstream, 'desktop/tests/update-transaction.test.mjs'));
   await fs.rm(path.join(upstream, 'desktop/tests/update-service.test.mjs'), { force: true });
 
   const modified = {};
-  for (const relative of ['desktop/src/update-service.mjs', 'desktop/src/update-launcher.mjs', 'desktop/src/main.mjs', 'desktop/README.md', 'desktop/scripts/verify-packaged-api.mjs']) {
+  for (const relative of ['desktop/src/update-service.mjs', 'desktop/src/update-launcher.mjs', 'desktop/src/update-transaction.mjs', 'desktop/src/main.mjs', 'desktop/README.md', 'desktop/scripts/verify-packaged-api.mjs']) {
     modified[relative] = createHash('sha256').update(await fs.readFile(path.join(upstream, relative))).digest('hex');
   }
   const updateTrustTestsSha256 = createHash('sha256').update(await fs.readFile(path.join(upstream, 'desktop/tests/update-trust.test.mjs'))).digest('hex');
@@ -195,7 +199,7 @@ export async function applyUpdateTrustPatch(upstream, repositoryRoot = REPOSITOR
     stagedShortcutUntilHealthy: true,
     postSwitchRollbackWindowMs: 30000,
     normalExitDuringObservationAccepted: true,
-    rollbackFailurePreservesBackupPath: true,
+    rollbackFailurePreservesBackupPath: true,\n    durableUpdateTransaction: true,\n    startupCrashRecovery: true,\n    recoveryDoesNotOverwriteUnknownShortcut: true,
     release: false,
     executableBuilt: false,
     windowsTested: false
