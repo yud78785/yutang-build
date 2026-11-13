@@ -1,0 +1,160 @@
+name: YuTang original-EXE player startup diagnostic (ONE SEGMENT ONLY / NOT FULL VIDEO)
+
+on:
+  push:
+    branches:
+      - experiment/remote-qwen-vision-20261112
+    paths:
+      - .github/workflows/windows-full-video-startup-diagnostic.yml
+      - tools/windows_full_video_playback_probe.mjs
+      - tools/run_full_video_coverage.mjs
+      - tools/full_video_coverage_audit.mjs
+      - tools/verify_full_video_natural_end.mjs
+      - tests/test-full-video-coverage-audit.mjs
+      - tests/test-verify-full-video-natural-end.mjs
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: yutang-full-video-startup-diagnostic-20261113
+  cancel-in-progress: false
+
+jobs:
+  public-video-startup-diagnostic:
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - name: Refuse self-hosted, wrong-repo, private or non-push run
+        shell: pwsh
+        env:
+          YUTANG_RUNNER_KIND: ${{ runner.environment }}
+          YUTANG_REPO: ${{ github.repository }}
+          YUTANG_VISIBILITY: ${{ github.event.repository.visibility }}
+          YUTANG_BRANCH: ${{ github.ref }}
+        run: |
+          $ErrorActionPreference='Stop'
+          if ($env:GITHUB_ACTIONS -ne 'true' -or $env:YUTANG_RUNNER_KIND -cne 'github-hosted' -or $env:RUNNER_OS -cne 'Windows' -or $env:RUNNER_ARCH -cne 'X64') { throw 'Not a disposable Windows GitHub-hosted runner.' }
+          if ($env:YUTANG_REPO -cne 'yud78785/yutang-build' -or $env:GITHUB_REPOSITORY -cne 'yud78785/yutang-build' -or $env:YUTANG_VISIBILITY -cne 'public') { throw 'Unexpected repository visibility or identity.' }
+          if ($env:GITHUB_EVENT_NAME -cne 'push' -or $env:YUTANG_BRANCH -cne 'refs/heads/experiment/remote-qwen-vision-20261112') { throw 'Unexpected event or branch.' }
+          Write-Host 'VERIFIED_CLOUD_WINDOWS_RUNNER; NO_MODEL; NO_CREDENTIALS; NO_RELEASE'
+      - name: Checkout reviewed probe without persisted Git credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+
+      - name: Verify old process-safety self-test and new coverage-ledger tests
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          node --check tools/windows_full_video_playback_probe.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Full-video probe syntax failed.' }
+          node --check tools/run_full_video_coverage.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Full-video coverage helper syntax failed.' }
+          node --check tools/verify_full_video_natural_end.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Original element ended-event validator syntax failed.' }
+          node --test tests/test-full-video-coverage-audit.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Coverage-ledger unit tests failed.' }
+          node --test tests/test-verify-full-video-natural-end.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Original element ended-event tests failed.' }
+          node tools/windows_full_video_playback_probe.mjs --self-test
+          if ($LASTEXITCODE -ne 0) { throw 'Candidate ownership self-tests failed.' }
+      - name: Confirm original exact-source successful build and candidate artifact metadata
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $headers=@{Authorization="Bearer $env:GH_TOKEN";Accept='application/vnd.github+json';'X-GitHub-Api-Version'='2022-11-28'}
+          $base='https://api.github.com/repos/yud78785/yutang-build'
+          $build=Invoke-RestMethod -Uri "$base/actions/runs/43233257376" -Headers $headers
+          if ($build.head_sha -cne '00f5ac8d560f8459f333cadeb9e9cb227cfaeca6' -or $build.status -cne 'completed' -or $build.conclusion -cne 'success') { throw 'Original EXE candidate build does not match successful source SHA.' }
+          $r=Invoke-RestMethod -Uri "$base/actions/runs/43233257376/artifacts?per_page=100" -Headers $headers
+          $matches=@($r.artifacts | Where-Object {$_.id -eq 13952955883 -and $_.name -ceq 'YuTang-Windows-CANDIDATE-NOT-RELEASE' -and -not $_.expired})
+          if ($matches.Count -ne 1 -or $matches[0].digest -cne 'sha256:9a510cb5c0361db8ab27a01aec90664bdbffcfad5c3af94ec7a09c02c6c2e376' -or $matches[0].workflow_run.head_sha -cne '00f5ac8d560f8459f333cadeb9e9cb227cfaeca6') { throw 'Artifact does not correspond to pinned candidate or its ZIP digest.' }
+          Write-Host 'PINNED_WINDOWS_CANDIDATE_ARTIFACT_VERIFIED: build=43233257376 artifact=13952955883'
+
+      - name: Download pinned EXE artifact from original build (no rebuild)
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          artifact-ids: 13952955883
+          repository: yud78785/yutang-build
+          run-id: 43233257376
+          github-token: ${{ github.token }}
+          path: candidate
+
+      - name: Verify EXE SHA-256 and source manifest independently
+        id: source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $folder=Join-Path $env:GITHUB_WORKSPACE 'candidate'
+          $exe=Join-Path $folder 'Dafeiyu-Douyin-API-1.4.6-win-x64.exe'
+          $manifest=Join-Path $folder 'YUTANG-RESULT.txt'
+          if (@(Get-ChildItem -LiteralPath $folder -File).Count -ne 2 -or @(Get-ChildItem -LiteralPath $folder -Directory).Count -ne 0) { throw 'Candidate artifact has unexpected contents.' }
+          if (-not (Test-Path -LiteralPath $exe -PathType Leaf) -or -not (Test-Path -LiteralPath $manifest -PathType Leaf)) { throw 'Candidate EXE or manifest missing.' }
+          $size=(Get-Item -LiteralPath $exe).Length
+          if ($size -lt 50000000 -or $size -gt 200000000) { throw 'Unexpected EXE bytes length.' }
+          $got=(Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($got -cne '51ac3c9e842aae7a44524d59da30d81269a3ad93785ad2071e0c2d461d9d9575') { throw 'EXE SHA-256 differs from tested Windows candidate.' }
+          $m=Get-Content -LiteralPath $manifest -Raw
+          if ($m -cnotmatch '(?m)^BUILD CONTROL SHA:\s*00f5ac8d560f8459f333cadeb9e9cb227cfaeca6\s*$' -or $m -cnotmatch '(?m)^SHA256:\s*51ac3c9e842aae7a44524d59da30d81269a3ad93785ad2071e0c2d461d9d9575\s*$') { throw 'Build source/EXE manifest mismatch.' }
+          "exe=$exe" | Out-File -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "ORIGINAL_WINDOWS_EXE_BYTES_VERIFIED sha256=$got"
+      - name: Permit ordinary Edge egress only on disposable CI runner
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $profiles=@(Get-NetFirewallProfile)
+          if ($profiles.Count -lt 1 -or @($profiles | Where-Object {$_.DefaultOutboundAction -eq 'Block'}).Count -gt 0) { throw 'Runner has a default outbound block policy; refusing to weaken global policy.' }
+          $locations=@(
+            (Join-Path $env:ProgramFiles 'Microsoft\Edge\Application\msedge.exe'),
+            (Join-Path ${env:ProgramFiles(x86)} 'Microsoft\Edge\Application\msedge.exe')
+          )
+          $edge=@($locations | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf })
+          if ($edge.Count -ne 1) { throw 'Expected exactly one installed Edge executable.' }
+          if ((Get-AuthenticodeSignature -LiteralPath $edge[0]).Status -ne 'Valid') { throw 'Microsoft Edge signature verification failed.' }
+          $existing=Get-NetFirewallRule -DisplayName 'YuTangPublicDouyinEdgeEgress' -ErrorAction SilentlyContinue
+          if ($existing) { throw 'Unexpected pre-existing test firewall rule.' }
+          $blockRules=@(Get-NetFirewallRule -Direction Outbound -Action Block -Enabled True -ErrorAction Stop)
+          foreach ($rule in $blockRules) {
+            $application=Get-NetFirewallApplicationFilter -AssociatedNetFirewallRule $rule -ErrorAction Stop
+            if ($application.Program -eq 'Any' -or $application.Program -ieq $edge[0]) { throw 'An explicit outbound block rule applies to Edge; refusing to override it.' }
+          }
+          $allow=New-NetFirewallRule -DisplayName 'YuTangPublicDouyinEdgeEgress' -Direction Outbound -Program $edge[0] -Action Allow -Profile Any -ErrorAction Stop
+          if ($allow.Action -ne 'Allow' -or $allow.Direction -ne 'Outbound' -or $allow.Enabled -ne 'True') { throw 'Could not verify the Edge outbound allow rule.' }
+          "YUTANG_EDGE_EXE=$($edge[0])" | Out-File -LiteralPath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host 'EDGE_EGRESS_ALLOWED: disposable runner only; no account, cookies, model key or posting.'
+
+      - name: One original video startup and first 20-second capture segment only
+        shell: pwsh
+        env:
+          YUTANG_FULL_VIDEO_TEST_ALLOWED: 'yes'
+          YUTANG_EXPECTED_CANDIDATE_SHA256: '51ac3c9e842aae7a44524d59da30d81269a3ad93785ad2071e0c2d461d9d9575'
+        run: |
+          node tools/windows_full_video_playback_probe.mjs '${{ steps.source.outputs.exe }}' --startup-diagnostic
+          if ($LASTEXITCODE -ne 0) { throw 'Startup diagnostic did not produce a verified first-segment result.' }
+          $result=Get-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'yutang-full-video-evidence/probe-result.json') -Raw | ConvertFrom-Json
+          if ($result.outcome -cne 'PASS_VIDEO_STARTUP_ONE_SEGMENT_ONLY_NOT_FULL_VIDEO' -or $result.fullPlaybackCoverage.segments -ne 1 -or $result.fullPlaybackCoverage.sampledVideoFrames -ne 3) { throw 'Startup diagnostic did not meet the one-segment-only acceptance contract.' }
+          Write-Host 'PASS_ONE_SEGMENT_STARTUP_DIAGNOSTIC; NOT_FULL_VIDEO'
+
+      - name: Upload only redacted startup receipt and coverage ledger
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: YuTang-Full-Video-Startup-Diagnostic-NOT-FULL-VIDEO
+          path: ${{ runner.temp }}/yutang-full-video-evidence/probe-result.json
+            ${{ runner.temp }}/yutang-full-video-evidence/full-coverage-ledger.jsonl
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Preserve strict non-release boundary
+        if: always()
+        shell: pwsh
+        run: |
+          Write-Host 'NO LOGIN: login/captcha/verification or unsupported page causes a safe stop; no bypass.'
+          Write-Host 'NO MODEL: API configuration remains empty; no model/API keys are passed to the candidate.'
+          Write-Host 'NO ACTIONS: no likes, comments, follows, shares, posts, downloads, or account changes.'
+          Write-Host 'ONE SEGMENT ONLY; this does not accept full video playback, audio transcription or video semantic understanding. No release.'
