@@ -41,3 +41,12 @@ Next after this pilot genuinely passes: build a narrow read-only MCP adapter for
 - Speech model source revision `0d3d19a32d3338f10357c0889762bd8d64bbdeba`, model.bin SHA-256 `1a5afae06a4db91c975c9a9d78be5cc110ee4ea022ad57d55492e4550e936b2a` previously verified and now pre-pinned.
 - Removes docs-only push triggers and uses concurrency cancel-in-progress to avoid repeated expensive processing. No rerun of original Windows EXE.
 - Upstream Watch Skill source pin `f1317c8fe64744a606c31867b05fbbe3144268c6` and separate independent verifier are unchanged. This version does not yet pin every transitive dependency by wheel hash, which remains a future supply-chain hardening gate.
+
+
+## 2026-11-13 next bridge gate: real Watch Skill output through restricted MCP
+
+The first real-media pilot intentionally uploaded only the manifest and independent verdict, not extracted JPEG bytes. The earlier MCP replay therefore verified the real transcript/timeline but correctly refused `peek_frame` because the original artifact did not contain the referenced image files. That was a safe refusal, not an MCP failure.
+
+The next CI revision adds `fastmcp==3.4.5` only as an in-memory client for YuTang's separately implemented five-tool read-only adapter. In the same disposable runner, after the pinned Watch Skill run and independent media/ASR verifier pass, it calls all five tools against the actual `work/pilot-manifest.json` and `work/extracted` files. It checks that the JPEG returned by `peek_frame` has the exact SHA-256 of the original Watch Skill frame. It uploads only the small MCP verdict metadata, not frames, audio or source video.
+
+This deliberately repeats the 128-second W3C media/ASR processing once because the earlier successful artifact omitted the actual frame bytes needed for an end-to-end MCP image transport check. It does not repeat Windows EXE playback, does not call a cloud model, and is not a full-video semantic or Windows acceptance.

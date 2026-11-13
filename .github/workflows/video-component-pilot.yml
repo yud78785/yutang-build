@@ -56,14 +56,15 @@ jobs:
           command -v ffprobe
           echo "Pinned Watch Skill source, license and ffmpeg verified"
 
-      - name: Install isolated audio-video processing subset - no browser or full MCP
+      - name: Install isolated AV subset plus restricted in-memory MCP client - no browser/full upstream MCP
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p work
           python3 -m venv .venv
-          .venv/bin/python -m pip install --disable-pip-version-check --no-cache-dir "./third_party/watch-skill[perceive,whisper]" "faster-whisper==1.2.1" "av==18.1.0"
+          .venv/bin/python -m pip install --disable-pip-version-check --no-cache-dir "./third_party/watch-skill[perceive,whisper]" "faster-whisper==1.2.1" "av==18.1.0" "fastmcp==3.4.5"
           .venv/bin/python -m pip freeze > work/dependency-freeze.txt
+          .venv/bin/python -c "import av, fastmcp; from importlib.metadata import version; assert av.__version__ == '18.1.0'; assert version('fastmcp') == '3.4.5'; print('PINNED_FASTMCP', version('fastmcp'))"
           .venv/bin/python -c "import av, watch_skill, cv2, scenedetect, faster_whisper; assert av.__version__ == '18.1.0', av.__version__; print('PINNED_PYAV', av.__version__)"
 
       - name: Download one genuinely narrated W3C attribution-required original clip and independent reference
@@ -118,6 +119,7 @@ jobs:
           PY
           .venv/bin/python tools/run_watch_skill_pilot.py
           .venv/bin/python tools/verify_watch_skill_pilot.py
+          .venv/bin/python tools/verify_watch_skill_mcp.py
 
       - name: Keep metadata and verdict only (no media, cookies, tokens or frames)
         if: always()
@@ -127,6 +129,7 @@ jobs:
           path: |
             work/pilot-manifest.json
             work/pilot-verdict.json
+            work/watch-skill-mcp-verdict.json
             work/model-revision.txt
             work/dependency-freeze.txt
             work/ffprobe.json
