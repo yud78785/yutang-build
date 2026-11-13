@@ -213,7 +213,7 @@ export async function runUpdateLauncher({
       healthFile, nonce, version, sha256, timeoutMs: healthTimeoutMs, pollMs, delayImpl
     });
     const backupShortcut = path.join(path.dirname(shortcut), '.' + path.basename(shortcut) + '.' + nonce + '.bak.lnk');
-    transaction = await beginUpdateTransaction({ updatesDirectory, shortcut, stagedShortcut, backupShortcut, targetExe: file, targetExeSha256: sha256 });
+    transaction = await beginUpdateTransaction({ updatesDirectory, shortcut, stagedShortcut, backupShortcut, targetExe: file, targetExeSha256: sha256, nonce });
     await setUpdateTransactionPhase(transaction, 'switching');
     rollbackShortcut = await commitShortcut(stagedShortcut, shortcut, nonce);
     await setUpdateTransactionPhase(transaction, 'switched');
@@ -228,29 +228,26 @@ export async function runUpdateLauncher({
     await fs.rm(stagedShortcut, { force: true }).catch(() => {});
     return { status: 'healthy-update-started', pid: child.pid, version, sha256, health };
   } catch (error) {
-    let rollbackError = null;
-    if (rollbackShortcut) {
-      try {
-        await rollbackShortcut.rollback();
-        rollbackShortcut = null;
-      } catch (failure) {
-        rollbackError = failure;
-      }
-    }
+    let recoveryError = null;
     if (transaction) {
       try {
-        const recovered = await recoverUpdateTransaction(updatesDirectory);
-        if (['rolled-back', 'old-shortcut-preserved', 'committed-cleanup'].includes(recovered.status)) rollbackError = null;
-        else rollbackError = new Error(recovered.reason || 'UPDATE_TRANSACTION_RECOVERY_INCOMPLETE');
-      } catch (failure) { rollbackError = failure; }
+        const recovered = await recoverUpdateTransaction(updatesDirectory, { shortcut });
+        if (!['rolled-back', 'old-shortcut-preserved', 'committed-cleanup'].includes(recovered.status)) {
+          recoveryError = new Error(recovered.reason || 'UPDATE_TRANSACTION_RECOVERY_INCOMPLETE');
+        }
+      } catch (failure) {
+        recoveryError = failure;
+      }
     }
-    if (transaction && !rollbackError) await fs.rm(transaction.transactionFile, { force: true }).catch(() => {});
     await stopChild(child, delayImpl);
-    await fs.rm(healthFile, { force: true }).catch(() => {});
-    await fs.rm(stagedShortcut, { force: true }).catch(() => {});
-    if (rollbackError) {
-      throw new AggregateError([error, rollbackError],
-        '新版更新失败，旧快捷方式恢复失败；请保留并检查备份：' + transaction?.backupShortcut || '更新事务备份文件');
+    if (!recoveryError) {
+      await fs.rm(healthFile, { force: true }).catch(() => {});
+      await fs.rm(stagedShortcut, { force: true }).catch(() => {});
+      if (transaction) await fs.rm(transaction.transactionFile, { force: true }).catch(() => {});
+    }
+    if (recoveryError) {
+      throw new AggregateError([error, recoveryError],
+        '新版更新失败，旧快捷方式恢复未完成；请保留更新事务及备份文件：' + (transaction?.backupShortcut || '更新事务备份文件'));
     }
     throw error;
   }
