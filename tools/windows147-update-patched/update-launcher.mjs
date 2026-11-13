@@ -236,10 +236,11 @@ export async function runUpdateLauncher({
         rollbackError = failure;
       }
     }
-    if (transaction && rollbackError) {
+    if (transaction) {
       try {
         const recovered = await recoverUpdateTransaction(updatesDirectory);
-        if (recovered.status === 'rolled-back' || recovered.status === 'old-shortcut-preserved') rollbackError = null;
+        if (['rolled-back', 'old-shortcut-preserved', 'committed-cleanup'].includes(recovered.status)) rollbackError = null;
+        else rollbackError = new Error(recovered.reason || 'UPDATE_TRANSACTION_RECOVERY_INCOMPLETE');
       } catch (failure) { rollbackError = failure; }
     }
     if (transaction && !rollbackError) await fs.rm(transaction.transactionFile, { force: true }).catch(() => {});
@@ -248,7 +249,7 @@ export async function runUpdateLauncher({
     await fs.rm(stagedShortcut, { force: true }).catch(() => {});
     if (rollbackError) {
       throw new AggregateError([error, rollbackError],
-        '新版更新失败，旧快捷方式恢复失败；请保留并检查备份：' + rollbackShortcut.backup);
+        '新版更新失败，旧快捷方式恢复失败；请保留并检查备份：' + transaction?.backupShortcut || '更新事务备份文件');
     }
     throw error;
   }
