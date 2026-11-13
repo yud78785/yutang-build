@@ -23,6 +23,7 @@ async function fixture(t) {
   const nonce = '12345678-1234-4234-8234-123456789abc';
   const staged = path.join(updates, '.shortcut-' + nonce + '.lnk');
   const backup = path.join(desktop, '.YuTang.lnk.' + nonce + '.bak.lnk');
+  const temporary = path.join(desktop, '.YuTang.lnk.' + nonce + '.tmp.lnk');
   const target = path.join(updates, 'Dafeiyu-Douyin-API-1.4.8-win-x64.exe');
   await fs.writeFile(shortcut, 'old shortcut');
   await fs.writeFile(staged, 'new shortcut');
@@ -36,15 +37,17 @@ async function fixture(t) {
     targetExeSha256: hash(await fs.readFile(target)),
     nonce
   });
-  return { updates, desktop, shortcut, staged, backup, target, nonce, transaction };
+  return { updates, desktop, shortcut, staged, backup, temporary, target, nonce, transaction };
 }
 
 test('更新助手在快捷方式替换前被强杀：旧入口保持且事务可清理', async t => {
   const f = await fixture(t);
+  await fs.copyFile(f.staged, f.temporary);
   const result = await recoverUpdateTransaction(f.updates, { shortcut: f.shortcut });
   assert.equal(result.status, 'old-shortcut-preserved');
   assert.equal(await fs.readFile(f.shortcut, 'utf8'), 'old shortcut');
   assert.equal(await fs.access(f.staged).then(() => true, () => false), false);
+  assert.equal(await fs.access(f.temporary).then(() => true, () => false), false);
 });
 
 test('更新助手在旧快捷方式已备份但新入口尚未落位时被强杀：自动恢复旧入口', async t => {
