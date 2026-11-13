@@ -65,3 +65,9 @@ test('strong chain deterministic and rejects invalid previous anchor',()=>{
  assert.notEqual(n,lineHash(h,{...e,after:21}));
  assert.throws(()=>lineHash('bad',e),/AUDIT_CHAIN_UNBOUND/);
 });
+
+test('one-segment startup diagnostic cannot be promoted to full playback pass',()=>{
+ const a=mk();appendCoverageSegment(a,seg(0,.2,20.2));
+ assert.throws(()=>endCoverageAudit(a,{ended:true,videoId:id,time:1082.518,
+  loop:false,seeking:false,decodedFrames:36000,finalWallMs:1082518}),/AUDIT_NO_COVERAGE/);
+});
