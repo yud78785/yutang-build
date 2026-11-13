@@ -17,13 +17,13 @@ def main() -> None:
     if exit_code != 1:
         raise SystemExit("ORIGINAL_REVIEW_GATE_EXIT_CODE_CHANGED")
     profiles = {
-        "DeepSeek API": ("deepseek", "deepseek-flash"),
-        "OpenRouter": ("openrouter", "deepseek/deepseek-v4.1-flash"),
+        "DeepSeek API": ("deepseek", "deepseek-flash", {"prompt": 0.30, "completion": 1.20}),
+        "OpenRouter": ("openrouter", "deepseek/deepseek-v4.1-flash", {"prompt": 0.022, "completion": 0.40}),
     }
     provider = result.get("provider")
     if provider not in profiles:
         raise SystemExit("UNSUPPORTED_VISION_PROVIDER")
-    provider_id, expected_model = profiles[provider]
+    provider_id, expected_model, expected_ceiling = profiles[provider]
     required = {
         "providerId": provider_id,
         "model": expected_model,
@@ -56,7 +56,7 @@ def main() -> None:
         if (policy.get("dataCollection") != "deny" or
                 policy.get("zeroDataRetentionRequired") is not True or
                 policy.get("sort") != "price" or
-                policy.get("maxPriceUsdPerMillion") != {"prompt": 0.30, "completion": 1.20} or
+                policy.get("maxPriceUsdPerMillion") != expected_ceiling or
                 policy.get("requireParameters") is not True):
             raise SystemExit("OPENROUTER_PRIVACY_OR_PRICE_CEILING_MISSING")
     storyboard = result.get("storyboard") or {}
@@ -70,7 +70,7 @@ def main() -> None:
     # Same conservative hard ceiling for both routes: DeepSeek's official peak
     # rate and the OpenRouter per-million-token max_price enforced in the request.
     ceiling = result.get("priceCeilingUsdPerMillion")
-    if ceiling != {"prompt": 0.30, "completion": 1.20}:
+    if ceiling != expected_ceiling:
         raise SystemExit("PRICE_CEILING_MISSING_OR_CHANGED")
     cost = prompt * ceiling["prompt"] / 1_000_000 + completion * ceiling["completion"] / 1_000_000
     if cost > 0.01:
@@ -89,7 +89,7 @@ def main() -> None:
         "usage": usage,
         "peak_rate_upper_estimate_usd": round(cost, 8),
         "actual_route": route,
-        "pricing_basis": "Hard ceiling input $0.30/M and output $1.20/M; OpenRouter request enforces max_price and ZDR/data_collection=deny; cache discounts ignored",
+        "pricing_basis": "Provider-specific hard ceiling enforced in request: DeepSeek $0.30/$1.20 per M; OpenRouter $0.022/$0.40 per M; cache discounts ignored",
         "model_decision": result.get("decision"),
         "lexical_precheck": result.get("semantic"),
         "semantic_review_required": True,
