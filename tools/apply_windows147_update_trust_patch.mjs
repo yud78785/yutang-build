@@ -213,7 +213,10 @@ export async function applyUpdateTrustPatch(upstream, repositoryRoot = REPOSITOR
     stagedShortcutUntilHealthy: true,
     postSwitchRollbackWindowMs: 30000,
     normalExitDuringObservationAccepted: true,
-    rollbackFailurePreservesBackupPath: true,\n    durableUpdateTransaction: true,\n    startupCrashRecovery: true,\n    recoveryDoesNotOverwriteUnknownShortcut: true,
+    rollbackFailurePreservesBackupPath: true,
+    durableUpdateTransaction: true,
+    startupCrashRecovery: true,
+    recoveryDoesNotOverwriteUnknownShortcut: true,
     release: false,
     executableBuilt: false,
     windowsTested: false
