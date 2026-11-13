@@ -7,10 +7,50 @@ import { createHash } from 'node:crypto';
 import {
   beginUpdateTransaction,
   recoverUpdateTransaction,
+  resolveDesktopShortcutPath,
   setUpdateTransactionPhase
 } from '../tools/windows147-update-patched/update-transaction.mjs';
 
 const hash = value => createHash('sha256').update(value).digest('hex');
+
+test('优先使用 Electron 提供的 Desktop 已知文件夹', () => {
+  const desktop = path.join(os.tmpdir(), 'YuTang Desktop');
+  const calls = [];
+  const shortcut = resolveDesktopShortcutPath({
+    getPath(name) {
+      calls.push(name);
+      if (name === 'desktop') return desktop;
+      throw new Error('home must not be requested');
+    }
+  });
+  assert.equal(shortcut, path.join(desktop, '大肥鱼抖音助手.lnk'));
+  assert.deepEqual(calls, ['desktop']);
+});
+
+test('干净 Windows 配置没有 Desktop 路径时回退到用户目录下的 Desktop', () => {
+  const home = path.join(os.tmpdir(), 'YuTang Test Home');
+  const calls = [];
+  const shortcut = resolveDesktopShortcutPath({
+    getPath(name) {
+      calls.push(name);
+      if (name === 'desktop') throw new Error("Failed to get 'desktop' path");
+      if (name === 'home') return home;
+      throw new Error('unexpected path key: ' + name);
+    }
+  });
+  assert.equal(shortcut, path.join(home, 'Desktop', '大肥鱼抖音助手.lnk'));
+  assert.deepEqual(calls, ['desktop', 'home']);
+});
+
+test('Desktop 与 home 都不可用时安全拒绝，不猜测快捷方式位置', () => {
+  assert.throws(() => resolveDesktopShortcutPath({
+    getPath(name) {
+      if (name === 'desktop') throw new Error('desktop unavailable');
+      if (name === 'home') return 'relative-home';
+      throw new Error('unexpected path key: ' + name);
+    }
+  }), /DESKTOP_SHORTCUT_PATH_UNAVAILABLE/);
+});
 
 async function fixture(t) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'yutang-update-transaction-'));
