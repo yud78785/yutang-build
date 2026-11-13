@@ -294,7 +294,7 @@ async function run(exeFile) {
   assert.equal(ps("Get-NetFirewallRule -DisplayName 'YuTang147EphemeralEdgeEgressBlock' -ErrorAction SilentlyContinue | Measure-Object | Select-Object -ExpandProperty Count"), 0,
     'Unexpected test firewall rule exists; refusing to change firewall policy');
   const profiles = asRows(ps('Get-NetFirewallProfile | Select-Object Name,Enabled,DefaultOutboundAction | ConvertTo-Json -Compress'));
-  if (profiles.some(item => item.Enabled -eq $true && String(item.DefaultOutboundAction).toLowerCase() === 'block'))
+  if (profiles.some(item => item.Enabled === true && String(item.DefaultOutboundAction).toLowerCase() === 'block'))
     throw new Error('Runner outbound firewall default is Block; no firewall policy changes will be made');
   const base = await fs.mkdtemp(path.join(process.env.RUNNER_TEMP || tmpdir(), 'yutang-lpac-network-'));
   const home = path.resolve(process.env.USERPROFILE || '');
