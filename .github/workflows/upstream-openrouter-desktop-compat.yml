@@ -53,6 +53,8 @@ jobs:
           node --check upstream/chat-agent.mjs
           node --check upstream/spark-agent.mjs
           node --check upstream/public-comment-agent.mjs
+          node --check upstream/desktop/src/model-settings-guard.mjs
+          node --check upstream/desktop/src/main.mjs
           cp tests/openrouter-production-compat.test.mjs upstream/tests/openrouter-production-compat.test.mjs
           cp tests/openrouter-ui-preset.test.mjs upstream/desktop/ui-api/tests/openrouter-preset.test.mjs
           test -s upstream/openrouter-desktop-patch-receipt.json
@@ -81,6 +83,7 @@ jobs:
             tests/public-comment-agent.test.mjs \
             desktop/tests/api-worker.test.mjs \
             desktop/tests/api-process.test.mjs \
+            desktop/tests/model-settings-guard.test.mjs \
             desktop/ui-api/tests/openrouter-preset.test.mjs
 
       - name: Fetch and verify pinned official DeepSeek UI component source

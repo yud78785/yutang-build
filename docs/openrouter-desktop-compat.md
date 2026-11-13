@@ -32,3 +32,8 @@ The API Key still goes only through the existing desktop IPC and encrypted local
 
 ## Verification
 The workflow checks exact original upstream file blob hashes before applying the patch, verifies that all patched modules are staged into the desktop runtime, then tests all five production request paths with mocked fetch responses. It also exercises the actual desktop worker IPC configuration path and parses the modified JSX. No live API key, model request, browser login, user PC, Windows EXE build, merge or release is involved.
+
+
+## Credential separation when changing providers
+
+The desktop settings UI clears the API Key input when the API base URL changes and requires the user to enter a key for the new provider. The Electron main process independently normalizes the requested endpoint and refuses to reuse the current key if the normalized endpoint changed. Dedicated tests cover same-provider reuse, normalized-equivalent URLs, provider switching without a new key, provider switching with a new key, and model changes within one provider. The main-process helper is included in the packaged desktop app file list.
