@@ -347,7 +347,11 @@ jobs:
               $updateTrust.windowsTested -ne $false -or
               $updateTrust.updatesDisabledUntilTrustConfigured -ne $true -or
               $updateTrust.manifestPublicKeyConfigured -ne $false -or
-              $updateTrust.authenticodePublisherThumbprintConfigured -ne $false) { throw 'WINDOWS_UPDATE_TRUST_PATCH_RECEIPT_INVALID' }
+              $updateTrust.authenticodePublisherThumbprintConfigured -ne $false -or
+              $updateTrust.startupHealthAfterRendererReady -ne $true -or
+              $updateTrust.postSwitchRollbackWindowMs -ne 30000 -or
+              $updateTrust.normalExitDuringObservationAccepted -ne $true -or
+              $updateTrust.rollbackFailurePreservesBackupPath -ne $true) { throw 'WINDOWS_UPDATE_TRUST_PATCH_RECEIPT_INVALID' }
           $edgeNormal = Get-Content 'release-api/windows-edge-lifecycle-normal.json' -Raw | ConvertFrom-Json
           $edgeHost = Get-Content 'release-api/windows-edge-lifecycle-force-host.json' -Raw | ConvertFrom-Json
           $edgeGuard = Get-Content 'release-api/windows-edge-lifecycle-force-guard.json' -Raw | ConvertFrom-Json
