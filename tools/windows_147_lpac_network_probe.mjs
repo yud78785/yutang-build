@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // Candidate-only Windows LPAC semantics and real Edge HTTPS probe.
+// Evidence accepts HTTP/3 QUIC, whose transport security uses TLS 1.3.
 // Exact artifact identity mapping rechecked on 2026-11-14; no candidate source changed.
 // Runs only on disposable GitHub-hosted Windows runners. It does not login,
 // call a model, visit Douyin, alter firewall policy, or touch a user PC.
@@ -208,6 +209,7 @@ async function probeHttps(port) {
     assert.equal(responseInfo.status, 200, 'Public HTTPS probe did not return HTTP 200');
     assert.ok(responseInfo.remoteIPAddress, 'Edge did not report the resolved remote IP');
     const securityProtocol = String(responseInfo.securityDetails?.protocol || '');
+    const tlsProtocol = /^QUIC$/i.test(securityProtocol) ? 'TLS 1.3 over QUIC' : securityProtocol;
     const httpProtocol = String(responseInfo.protocol || '');
     assert.ok(/^TLS/i.test(securityProtocol) || /^QUIC$/i.test(securityProtocol),
       'Edge did not report TLS or QUIC secure transport');
@@ -222,6 +224,7 @@ async function probeHttps(port) {
       httpStatus: responseInfo.status,
       mimeType: String(responseInfo.mimeType || ''),
       securityProtocol,
+      tlsProtocol,
       httpProtocol,
       tlsIssuer: String(responseInfo.securityDetails.issuer || '').slice(0, 160),
       title: String(snapshot.title || ''),
