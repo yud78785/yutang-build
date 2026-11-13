@@ -169,7 +169,7 @@ jobs:
           $env:YUTANG_EDGE_RESULT_PATH = Join-Path $release 'windows-2022-same-candidate-force-desktop.json'
           node tools/windows_147_isolated_edge_lifecycle.mjs "$env:YUTANG_CANDIDATE_EXE" --force-desktop
           if ($LASTEXITCODE -ne 0) { throw 'SAME_CANDIDATE_WINDOWS_2022_DESKTOP_FORCE_EXIT_FAILED' }
-          'YUTANG_CROSS_TEST_DIR=$release' | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "YUTANG_CROSS_TEST_DIR=$release" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Verify same-candidate Windows 2022 lifecycle receipts and write cross-platform receipt
         shell: pwsh
