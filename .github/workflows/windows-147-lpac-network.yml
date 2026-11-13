@@ -5,7 +5,6 @@ on:
     branches:
       - experiment/windows-147-lpac-network-20261114
     paths:
-      - .github/workflows/windows-147-lpac-network.yml
       - tools/windows_147_lpac_network_probe.mjs
   workflow_dispatch:
 
@@ -22,12 +21,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: windows-2022
-            artifact_id: "14060020678"
-            expected_sha256: "f153896ecb7687d35f8f1b0b66ead1470fe91f611fcb2bf515f4e90c57b5f043"
           - runner: windows-2025
             artifact_id: "14059508987"
-            expected_sha256: "c2cd51f7449a3ddc4413b4e06ead1470fe91f611fcb2bf515f4e90c57b5f043"
+            expected_sha256: "c2cd51f7449a3ddc4413b4e06d1ea30ae9bbb070e11b7aee540788b9d3f71ef0"
 
     steps:
       - name: Checkout isolated probe branch
