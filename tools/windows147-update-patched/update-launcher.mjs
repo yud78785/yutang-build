@@ -222,6 +222,7 @@ export async function runUpdateLauncher({
     await setUpdateTransactionPhase(transaction, 'committed');
     await rollbackShortcut.finalize();
     rollbackShortcut = null;
+    await fs.rm(transaction.transactionFile, { force: true });
     child.unref();
     await fs.rm(healthFile, { force: true }).catch(() => {});
     await fs.rm(stagedShortcut, { force: true }).catch(() => {});
