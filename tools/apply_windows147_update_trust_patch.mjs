@@ -92,6 +92,10 @@ export async function applyUpdateTrustPatch(upstream, repositoryRoot = REPOSITOR
     "assert.ok(packagedReadme.includes('自动更新处于安全关闭状态'), '打包 README 必须说明未配置发布信任时自动更新保持关闭。');"
   ].join('\n');
   verifier = replaceExactlyOnce(verifier, packagedReadmeAnchor, packagedReadmeCheck, 'packaged-readme-trust-disclosure');
+  verifier = replaceExactlyOnce(verifier,
+    "for (const name of ['main.mjs', 'api-process.mjs', 'prepare-api-runtime.mjs', 'media-key-store.mjs', 'startup-navigation.mjs', 'preload.cjs', 'update-service.mjs', 'update-launcher.mjs']) {",
+    "for (const name of ['main.mjs', 'api-process.mjs', 'prepare-api-runtime.mjs', 'media-key-store.mjs', 'startup-navigation.mjs', 'preload.cjs', 'update-service.mjs', 'update-launcher.mjs', 'update-transaction.mjs']) {",
+    'packaged-update-transaction-module');
   await write(verifierPath, verifier);
 
   const buildScriptPath = path.join(upstream, 'desktop/scripts/build-api-desktop.mjs');
