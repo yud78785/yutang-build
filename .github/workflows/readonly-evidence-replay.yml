@@ -59,7 +59,7 @@ jobs:
           python3 -m venv .venv
           .venv/bin/python -m pip install --no-cache-dir "fastmcp==3.4.5"
           .venv/bin/python -m py_compile tools/readonly_video_mcp.py tools/verify_readonly_real_evidence.py
-          .venv/bin/python tools/verify_readonly_real_evidence.py
+          .venv/bin/python -m tools.verify_readonly_real_evidence
       - name: Keep minimal real-evidence MCP query receipt, no transcript/video/images
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
