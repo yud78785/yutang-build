@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { execFileSync } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
-import { pathToFileURL } from 'node:url';\nimport { beginUpdateTransaction, setUpdateTransactionPhase } from './update-transaction.mjs';
+import { pathToFileURL } from 'node:url';\nimport { beginUpdateTransaction, recoverUpdateTransaction, setUpdateTransactionPhase } from './update-transaction.mjs';\nimport { beginUpdateTransaction, setUpdateTransactionPhase } from './update-transaction.mjs';
 
 export const UPDATE_PUBLISHER_THUMBPRINT = '';
 
@@ -213,7 +213,7 @@ export async function runUpdateLauncher({
     const backupShortcut = path.join(path.dirname(shortcut), '.' + path.basename(shortcut) + '.' + nonce + '.bak.lnk');\n    transaction = await beginUpdateTransaction({ updatesDirectory, shortcut, stagedShortcut, backupShortcut, targetExe: file, targetExeSha256: sha256 });\n    await setUpdateTransactionPhase(transaction, 'switching');\n    rollbackShortcut = await commitShortcut(stagedShortcut, shortcut, nonce);\n    await setUpdateTransactionPhase(transaction, 'switched');
     // Keep the old shortcut backup until the new process survives the post-switch observation window.
     await waitForStableChild(child, stabilityMs, pollMs, delayImpl);
-    await setUpdateTransactionPhase(transaction, 'committed');\n    await rollbackShortcut.finalize();
+    await setUpdateTransactionPhase(transaction, 'committed');\n    await setUpdateTransactionPhase(transaction, 'committed');\n    await rollbackShortcut.finalize();
     rollbackShortcut = null;
     child.unref();
     await fs.rm(healthFile, { force: true }).catch(() => {});
@@ -229,7 +229,7 @@ export async function runUpdateLauncher({
         rollbackError = failure;
       }
     }
-    await stopChild(child, delayImpl);
+    if (transaction && rollbackError) {\n      try {\n        const recovered = await recoverUpdateTransaction(updatesDirectory);\n        if (recovered.status === 'rolled-back' || recovered.status === 'old-shortcut-preserved') rollbackError = null;\n      } catch (failure) { rollbackError = failure; }\n    }\n    if (transaction && !rollbackError) await fs.rm(transaction.transactionFile, { force: true }).catch(() => {});\n    await stopChild(child, delayImpl);
     await fs.rm(healthFile, { force: true }).catch(() => {});
     await fs.rm(stagedShortcut, { force: true }).catch(() => {});
     if (rollbackError) {
