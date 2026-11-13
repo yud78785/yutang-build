@@ -15,6 +15,8 @@ on:
       - tools/windows147-patched/**
       - tools/jobguard/**
       - tools/windows_147_isolated_edge_lifecycle.mjs
+      - tests/test_windows147_test_fixtures.mjs
+      - tools/patch_windows147_test_fixtures.mjs
   workflow_dispatch:
 
 permissions:
@@ -139,8 +141,11 @@ jobs:
           go build -trimpath -ldflags="-s -w" -o jobguard.exe .
           if ($LASTEXITCODE -ne 0) { throw 'JOBGUARD_WINDOWS_BUILD_FAILED' }
           $guardSha = (Get-FileHash -LiteralPath jobguard.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          $guardPath = (Resolve-Path -LiteralPath 'jobguard.exe').Path
           "YUTANG_JOBGUARD_SHA256=$guardSha" | Out-File -LiteralPath $env:GITHUB_ENV -Append -Encoding utf8
+          "YUTANG_JOBGUARD_PATH=$guardPath" | Out-File -LiteralPath $env:GITHUB_ENV -Append -Encoding utf8
           Write-Host ('WINDOWS_JOBGUARD_SHA256=' + $guardSha)
+          Write-Host ('WINDOWS_JOBGUARD_PATH=' + $guardPath)
           Pop-Location
 
       - name: Install exact-lockfile project, desktop and UI dependencies
@@ -166,6 +171,10 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          node tools/patch_windows147_test_fixtures.mjs upstream
+          if ($LASTEXITCODE -ne 0) { throw 'WINDOWS_TEST_FIXTURE_PATCH_FAILED' }
+          node tests/test_windows147_test_fixtures.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'WINDOWS_TEST_FIXTURE_PATCH_REGRESSION_FAILED' }
           Push-Location upstream
           node --test tests/openrouter-production-compat.test.mjs tests/api-agent.test.mjs tests/chat.test.mjs tests/spark-agent.test.mjs tests/public-comment-agent.test.mjs desktop/tests/*.test.mjs desktop/ui-api/tests/openrouter-preset.test.mjs
           if ($LASTEXITCODE -ne 0) { throw 'Windows source regression suite failed' }
@@ -309,8 +318,10 @@ jobs:
           $verification = Get-Content 'release-api/verification-1.4.7.json' -Raw | ConvertFrom-Json
           $security = Get-Content '../windows-security-147-patch-receipt.json' -Raw | ConvertFrom-Json
           $dynamicSecurity = Get-Content '../windows-security-147-dynamic-patch-receipt.json' -Raw | ConvertFrom-Json
+          $testFixtures = Get-Content '../windows-security-147-test-fixture-receipt.json' -Raw | ConvertFrom-Json
           if ($security.status -cne 'PASS_EXACT_SOURCE_SECURITY_PATCH' -or $security.release -ne $false) { throw 'WINDOWS_SECURITY_PATCH_RECEIPT_INVALID' }
           if ($dynamicSecurity.status -cne 'PASS_EXACT_SOURCE_SECURITY_PATCH' -or $dynamicSecurity.release -ne $false) { throw 'WINDOWS_DYNAMIC_SECURITY_PATCH_RECEIPT_INVALID' }
+          if ($testFixtures.status -cne 'PASS_PATCHED_WINDOWS_TEST_FIXTURES' -or $testFixtures.release -ne $false -or $testFixtures.jobGuardSha256 -cne $env:YUTANG_JOBGUARD_SHA256) { throw 'WINDOWS_TEST_FIXTURE_RECEIPT_INVALID' }
           $edgeNormal = Get-Content 'release-api/windows-edge-lifecycle-normal.json' -Raw | ConvertFrom-Json
           $edgeHost = Get-Content 'release-api/windows-edge-lifecycle-force-host.json' -Raw | ConvertFrom-Json
           $edgeGuard = Get-Content 'release-api/windows-edge-lifecycle-force-guard.json' -Raw | ConvertFrom-Json
@@ -359,6 +370,7 @@ jobs:
             renderer = $verification.renderer
             securityPatch = $security
             dynamicSecurityPatch = $dynamicSecurity
+            testFixturePatch = $testFixtures
             jobGuardSha256 = $env:YUTANG_JOBGUARD_SHA256
             edgeLifecycle = $edgeLifecycle
             readOnlyEndpoints = $verification.readOnlyEndpoints
@@ -383,6 +395,7 @@ jobs:
             upstream/openrouter-desktop-patch-receipt.json
             upstream/windows-security-147-patch-receipt.json
             upstream/windows-security-147-dynamic-patch-receipt.json
+            upstream/windows-security-147-test-fixture-receipt.json
             upstream/desktop/release-api/windows-edge-lifecycle-*.json
           if-no-files-found: warn
           retention-days: 7
