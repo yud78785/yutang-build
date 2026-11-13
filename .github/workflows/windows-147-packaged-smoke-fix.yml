@@ -111,7 +111,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'DYNAMIC_SECURITY_PATCH_PREVIEW_FAILED' }
           node tools/patch_windows147_dynamic.mjs upstream
           if ($LASTEXITCODE -ne 0) { throw 'DYNAMIC_SECURITY_PATCH_APPLICATION_FAILED' }
-          $files = @('browser-host.mjs','core.mjs','runtime-paths.mjs','browser-launcher.mjs','desktop/src/api-process.mjs','desktop/src/prepare-api-runtime.mjs','desktop/src/main.mjs','desktop/src/startup-navigation.mjs','desktop/scripts/verify-packaged-api.mjs')
+          $files = @('browser-host.mjs','core.mjs','runtime-paths.mjs','browser-launcher.mjs','desktop/src/api-process.mjs','desktop/src/prepare-api-runtime.mjs','desktop/src/main.mjs','desktop/src/startup-navigation.mjs','desktop/src/update-transaction.mjs','desktop/scripts/verify-packaged-api.mjs')
           foreach ($file in $files) {
             node --check (Join-Path 'upstream' $file)
             if ($LASTEXITCODE -ne 0) { throw ('PATCHED_SOURCE_SYNTAX_FAILURE: ' + $file) }
@@ -238,7 +238,8 @@ jobs:
             @('src/main.mjs', 'app/main.mjs'),
             @('src/api-process.mjs', 'app/api-process.mjs'),
             @('src/prepare-api-runtime.mjs', 'app/prepare-api-runtime.mjs'),
-            @('src/startup-navigation.mjs', 'app/startup-navigation.mjs')
+            @('src/startup-navigation.mjs', 'app/startup-navigation.mjs'),
+            @('src/update-transaction.mjs', 'app/update-transaction.mjs')
           )
           foreach ($pair in $desktopPairs) {
             $sourceFile = Join-Path (Get-Location).Path $pair[0]
