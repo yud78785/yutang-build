@@ -12,7 +12,7 @@ const HEAD='00f5ac8d560f8459f333cadeb9e9cb227cfaeca6';
 const hash=b=>createHash('sha256').update(b).digest('hex');
 
 export async function coverFullPublicVideo({controller,verifyFrameProof,evidenceDir,
-    referenceDurationSeconds,exeSha256}){
+    referenceDurationSeconds,exeSha256,diagnosticOnly=false}){
  if(!controller||typeof controller.captureSharedFrames!=='function'||
     typeof verifyFrameProof!=='function'||!Number.isFinite(referenceDurationSeconds))
    throw Error('FULL_VIDEO_RUNTIME_MISSING');
@@ -35,41 +35,89 @@ export async function coverFullPublicVideo({controller,verifyFrameProof,evidence
    throw Error('FULL_VIDEO_ID_OR_ACCESS_CHANGED');
   return st;
  };
- await strict();
- // One auditable local player reset to t=0 (no network/account write or DRM bypass).
- const locator=await controller.currentVideo();
- const reset=await locator.evaluate(async v=>{
-  const prop=(name)=>Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype,name);
-  const get=(name)=>prop(name)?.get?.call(v);
-  const set=(name,value)=>prop(name)?.set?.call(v,value);
-  if(!v.isConnected||get('readyState')<2||
-    !Number.isFinite(get('duration'))||get('duration')<30)
-   throw Error('FULL_VIDEO_CURRENT_ELEMENT_NOT_READY');
-  const earlierTime=get('currentTime');
-  set('loop',false);set('currentTime',0);
-  for(let n=0;n<80;n++){
-   if(!get('seeking')&&get('currentTime')<0.4)break;
-   await new Promise(done=>setTimeout(done,50));
-  }
-  if(get('seeking')||get('currentTime')>0.5)throw Error('FULL_VIDEO_START_SEEK_NOT_SETTLED');
-  await v.play();
-  return {earlierTime,atTime:get('currentTime'),duration:get('duration'),
-    loop:get('loop'),seeking:get('seeking'),paused:get('paused')};
- });
- const state=await strict();
- if(reset.loop!==false||reset.seeking!==false||reset.paused!==false||
-   reset.atTime>1||state.video.time>1.25||
-   Math.abs(state.video.duration-referenceDurationSeconds)>0.25)
-  throw Error('FULL_VIDEO_START_NOT_VERIFIED');
- const audit=createCoverageAudit({videoId:ID,durationSeconds:referenceDurationSeconds,
-  initialTime:state.video.time,initialLocalSeek:true,
-  exeSha256,windowsSourceSha:HEAD});
- await log({stage:'BEGIN',videoId:ID,initialVideoTime:state.video.time,
-  previousVideoTime:reset.earlierTime,oneLocalPlaybackReset:true,
-  sourceHead:HEAD,exeSha256,durationSeconds:referenceDurationSeconds});
+ const safeCode=error=>{
+  const message=String(error?.message??'').trim();
+  const code=typeof error?.code==='string'?error.code:message;
+  return /^(?:FULL_VIDEO|AUDIT)_[A-Z0-9_]+$/.test(code)?code:null;
+ };
+ const fail=code=>Object.assign(new Error(code),{code});
+ await log({stage:'PREPARE',videoId:ID,durationSeconds:referenceDurationSeconds,
+  exeSha256,windowsSourceSha:HEAD,diagnosticOnly});
+ let startupStage='initial-state',videoHandle=null,audit,reset;
+ try{
+  const initialState=await strict();
+  await log({stage:'PRE_START_STATE',videoId:initialState.video.id,
+   currentTime:initialState.video.time,duration:initialState.video.duration,
+   readyState:initialState.video.readyState,paused:initialState.video.paused});
+  startupStage='current-video-element';
+  const locator=await controller.currentVideo();
+  videoHandle=await locator.elementHandle();
+  if(!videoHandle)throw fail('FULL_VIDEO_VIDEO_HANDLE_MISSING');
+  await log({stage:'ORIGINAL_VIDEO_ELEMENT_BOUND'});
+  startupStage='local-seek-and-play';
+  reset=await videoHandle.evaluate(async v=>{
+   const prop=name=>Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype,name);
+   const get=name=>prop(name)?.get?.call(v);
+   const set=(name,value)=>prop(name)?.set?.call(v,value);
+   if(!v.isConnected||get('readyState')<2||
+      !Number.isFinite(get('duration'))||get('duration')<30)
+     throw Error('FULL_VIDEO_CURRENT_ELEMENT_NOT_READY');
+   const earlierTime=get('currentTime');
+   set('loop',false);set('currentTime',0);
+   for(let n=0;n<80;n++){
+    if(!get('seeking')&&get('currentTime')<0.4)break;
+    await new Promise(done=>setTimeout(done,50));
+   }
+   const atTime=get('currentTime'),seeking=get('seeking');
+   if(seeking||atTime>0.5)throw Error('FULL_VIDEO_START_SEEK_NOT_SETTLED');
+   const playStartedAt=performance.now();
+   await v.play();
+   return {earlierTime,atTime,playTime:get('currentTime'),playStartedAt,
+    duration:get('duration'),loop:get('loop'),seeking:get('seeking'),
+    paused:get('paused'),readyState:get('readyState')};
+  });
+  await log({stage:'LOCAL_SEEK_AND_PLAY',earlierTime:reset.earlierTime,
+   atTime:reset.atTime,playTime:reset.playTime,duration:reset.duration,
+   loop:reset.loop,seeking:reset.seeking,paused:reset.paused,
+   readyState:reset.readyState});
+  startupStage='post-seek-original-element-check';
+  const pageUrl=new URL(controller.page.url());
+  if(pageUrl.origin!=='https://www.douyin.com'||pageUrl.pathname!=='/video/'+ID)
+   throw fail('FULL_VIDEO_IDENTITY_CHANGED_AFTER_SEEK');
+  const live=await videoHandle.evaluate((v,playStartedAt)=>{
+   const prop=name=>Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype,name);
+   const get=name=>prop(name)?.get?.call(v);
+   return {connected:v.isConnected&&v.ownerDocument===document,
+    time:get('currentTime'),duration:get('duration'),paused:get('paused'),
+    seeking:get('seeking'),loop:get('loop'),ended:get('ended'),
+    readyState:get('readyState'),elapsedSincePlayMs:performance.now()-playStartedAt};
+  },reset.playStartedAt);
+  const elapsed=live.elapsedSincePlayMs/1000;
+  if(!live.connected||live.paused!==false||live.seeking!==false||
+     live.loop!==false||live.ended===true||live.readyState<2||
+     Math.abs(live.duration-referenceDurationSeconds)>0.25||
+     reset.atTime>0.5||reset.playTime>0.75||
+     live.time<reset.playTime-0.25||
+     live.time>reset.playTime+elapsed+1.5)
+   throw fail('FULL_VIDEO_START_NOT_VERIFIED');
+  audit=createCoverageAudit({videoId:ID,durationSeconds:referenceDurationSeconds,
+   initialTime:reset.atTime,initialLocalSeek:true,
+   exeSha256,windowsSourceSha:HEAD});
+  await log({stage:'BEGIN',videoId:ID,initialVideoTime:reset.atTime,
+   postPlayTime:reset.playTime,observedTime:live.time,
+   elapsedSincePlaySeconds:elapsed,previousVideoTime:reset.earlierTime,
+   oneLocalPlaybackReset:true,originalElementHeld:true,
+   sourceHead:HEAD,exeSha256,durationSeconds:referenceDurationSeconds});
+ }catch(error){
+  const code=safeCode(error);
+  await log({stage:'STARTUP_ERROR',startupStage,
+   errorName:String(error?.name||'Error').slice(0,80),errorCode:code});
+  await videoHandle?.dispose().catch(()=>{});
+  throw fail(code||'FULL_VIDEO_STARTUP_UNCLASSIFIED');
+ }
  const startWall=Date.now(),deadline=startWall+26*60*1000;
  let audioUnavailable=false;
- for(let n=0;n<75;n++){
+ for(let n=0;n<(diagnosticOnly?1:75);n++){
   if(Date.now()>deadline)throw Error('FULL_VIDEO_WALL_BUDGET_EXCEEDED');
   const current=await strict();
   if(current.video.ended===true)break;
@@ -126,12 +174,29 @@ export async function coverFullPublicVideo({controller,verifyFrameProof,evidence
   // autoplay/next-video transition can change controller.state() at the boundary.
   if(audit.durationSeconds-entry.after<=2.0)break;
  }
+ if(diagnosticOnly){
+  const result={
+   result:'PASS_VIDEO_STARTUP_ONE_SEGMENT_ONLY_NOT_FULL_VIDEO',
+   videoId:ID,expectedDurationSeconds:audit.durationSeconds,
+   firstTime:audit.initialTime,lastCapturedTime:audit.priorEnd,
+   segments:audit.segments.length,sampledVideoFrames:audit.segments.length*3,
+   maxBoundaryGapSeconds:audit.maxGapSeconds,totalBoundaryGapsSeconds:audit.totalGapsSeconds,
+   audioSegments:audit.audioSegments,audioCoverageSeconds:audit.audioCoverageSeconds,
+   audioFailures:audit.audioFailures,exeSha256:audit.exeSha256,
+   windowsSourceSha:audit.windowsSourceSha,fullPlaybackVerified:false,
+   fullAudioTranscribed:false,videoSemanticsPassed:false,modelInferencePerformed:false
+  };
+  await log({stage:'DIAGNOSTIC_STOP',result});
+  await videoHandle.dispose().catch(()=>{});
+  return {...result,ledgerChainSha256:lastChain,diagnosticOnly:true,
+   noNaturalEndClaim:true,noFullVideoPassClaim:true};
+ }
  // Do not poll controller.state() once the original video is <2s from ending:
  // the Douyin application may replace the current page/video before that poll.
- // Instead, await the native ended event on the EXACT original video element.
+ // Attach to the exact ElementHandle captured before playback, not a re-resolving Locator.
  let terminal;
  try {
-  terminal=await locator.evaluate(async video=>{
+  terminal=await videoHandle.evaluate(async video=>{
    const beginTime=video.currentTime;
    const decodedBefore=Math.floor(video.getVideoPlaybackQuality?.().totalVideoFrames??0);
    const start=performance.now();
@@ -169,6 +234,7 @@ export async function coverFullPublicVideo({controller,verifyFrameProof,evidence
  // Save original terminal evidence even on rejection so a failed real Windows
  // artifact can distinguish auto-next, detachment, missing event and a true END.
  await log({stage:'TAIL_SNAPSHOT',snapshot:terminal});
+ await videoHandle.dispose().catch(()=>{});
  const verifiedEnd=verifyFullVideoNaturalEndEvent(terminal,{
   duration:audit.durationSeconds,previousTime:audit.priorEnd});
  const tail={ended:verifiedEnd.ended,loop:verifiedEnd.loop,
