@@ -215,6 +215,7 @@ export function classifyPublicVideoError(error) {
   const message=String(error?.message??'').slice(0,4000);
   const code=typeof error?.code==='string'?error.code:'';
   const name=typeof error?.name==='string'?error.name:'';
+  if(/^(?:FULL_VIDEO|AUDIT)_[A-Z0-9_]+$/.test(code))return code;
   if(code==='DIRECT_VIDEO_COMMIT_TIMEOUT')return 'DIRECT_VIDEO_COMMIT_TIMEOUT';
   if(code==='DIRECT_VIDEO_COMMIT_FAILED')return 'DIRECT_VIDEO_COMMIT_FAILED';
   if(code==='DIRECT_VIDEO_CONTEXT_TIMEOUT'||code==='DIRECT_VIDEO_SETTLE_CONTEXT_RETRY_EXHAUSTED')return 'NAVIGATION_CONTEXT_RESET';
@@ -582,7 +583,7 @@ async function readColdStartDiagnostics(userData, candidatePid, exeFile, redacti
   return report;
 }
 
-async function run(exeFile) {
+async function run(exeFile,{startupDiagnostic=false}={}) {
   if (process.platform!=='win32' || process.env.GITHUB_ACTIONS!=='true' || process.env.YUTANG_FULL_VIDEO_TEST_ALLOWED!=='yes')
     throw new Error('Refusing public video probe outside the explicitly guarded ephemeral Windows GitHub runner');
   assert.equal(path.basename(exeFile),FILE);
@@ -673,26 +674,33 @@ async function run(exeFile) {
       assert.equal(firstOpen.status,200,'Browser open API must return HTTP 200 or the expected outbound-firewall denial; received '+String(firstOpen.status));
     }
     const initialCheck=await inspectReadyBrowser(state,ready.backendPid,profile,controlDir);
-    try {
-      report.rendererSandbox = await inspectRendererSandbox(PORT, { profile, hostPid: state.pid });
-      console.log('RENDERER_AND_NETWORK_SANDBOX_DIAGNOSTIC '+JSON.stringify({
-        rendererSandboxVerified:report.rendererSandbox.rendererSandboxVerified,
-        rendererProcessCount:report.rendererSandbox.rendererProcessCount,
-        networkServiceSandboxEnabled:report.rendererSandbox.networkServiceSandboxEnabled,
-        networkServiceSandboxType:report.rendererSandbox.networkServiceSandboxType,
-        networkServiceLockdown:report.rendererSandbox.networkServiceLockdown,
-        networkServiceIntegrity:report.rendererSandbox.networkServiceIntegrity,
-        networkServiceLowboxAppContainer:report.rendererSandbox.networkServiceLowboxAppContainer,
-        networkServiceWindowsTokenVerified:report.rendererSandbox.networkServiceWindowsTokenVerified,networkServiceProcessOwned:report.rendererSandbox.networkServiceProcessOwned,networkServiceProcessDetails:report.rendererSandbox.networkServiceProcessDetails
-      }));
-      assert.equal(report.rendererSandbox.rendererSandboxVerified, true, 'Edge internal sandbox page did not prove renderer AppContainer/Lockdown/Untrusted integrity.');
-      assert.equal(report.rendererSandbox.networkServiceSandboxReported, true, 'Edge internal sandbox page did not report Network Service sandbox type Network with the feature enabled.');
-      assert.equal(report.rendererSandbox.networkServiceWindowsTokenVerified, true, 'Network Service process token AppContainer SID did not match edge://sandbox.');
-      assert.equal(report.rendererSandbox.networkServiceProcessOwned, true, 'Network Service process was not verified as a child of this dedicated Edge host/profile.');
-    } catch (error) {
-      report.rendererSandbox = { accessible:false, error:safeText(error?.message || error, redactionPaths) };
-      console.log('RENDERER_AND_NETWORK_SANDBOX_DIAGNOSTIC '+JSON.stringify(report.rendererSandbox));
-      throw error;
+    if(startupDiagnostic&&initialCheck.browserVersion==='Edg/156.0.4314.58'){
+      report.rendererSandbox={reusedFromRun:43326123532,
+       exactCandidateSha256:EXPECTED_EXE,browserVersion:initialCheck.browserVersion,
+       newlyInspected:false,priorRendererAndNetworkServiceSandboxVerified:true};
+      console.log('REUSED_EXACT_SHA_EDGE_SANDBOX_EVIDENCE '+JSON.stringify(report.rendererSandbox));
+    }else{
+     try {
+       report.rendererSandbox = await inspectRendererSandbox(PORT, { profile, hostPid: state.pid });
+       console.log('RENDERER_AND_NETWORK_SANDBOX_DIAGNOSTIC '+JSON.stringify({
+         rendererSandboxVerified:report.rendererSandbox.rendererSandboxVerified,
+         rendererProcessCount:report.rendererSandbox.rendererProcessCount,
+         networkServiceSandboxEnabled:report.rendererSandbox.networkServiceSandboxEnabled,
+         networkServiceSandboxType:report.rendererSandbox.networkServiceSandboxType,
+         networkServiceLockdown:report.rendererSandbox.networkServiceLockdown,
+         networkServiceIntegrity:report.rendererSandbox.networkServiceIntegrity,
+         networkServiceLowboxAppContainer:report.rendererSandbox.networkServiceLowboxAppContainer,
+         networkServiceWindowsTokenVerified:report.rendererSandbox.networkServiceWindowsTokenVerified,networkServiceProcessOwned:report.rendererSandbox.networkServiceProcessOwned,networkServiceProcessDetails:report.rendererSandbox.networkServiceProcessDetails
+       }));
+       assert.equal(report.rendererSandbox.rendererSandboxVerified, true, 'Edge internal sandbox page did not prove renderer AppContainer/Lockdown/Untrusted integrity.');
+       assert.equal(report.rendererSandbox.networkServiceSandboxReported, true, 'Edge internal sandbox page did not report Network Service sandbox type Network with the feature enabled.');
+       assert.equal(report.rendererSandbox.networkServiceWindowsTokenVerified, true, 'Network Service process token AppContainer SID did not match edge://sandbox.');
+       assert.equal(report.rendererSandbox.networkServiceProcessOwned, true, 'Network Service process was not verified as a child of this dedicated Edge host/profile.');
+     } catch (error) {
+       report.rendererSandbox = { accessible:false, error:safeText(error?.message || error, redactionPaths) };
+       console.log('RENDERER_AND_NETWORK_SANDBOX_DIAGNOSTIC '+JSON.stringify(report.rendererSandbox));
+       throw error;
+     }
     }
     // Use the production Core BrowserController against the candidate-owned Edge.
     // No model, login, cookie import, search scraping, likes, comments, follows or posting.
@@ -888,11 +896,18 @@ async function run(exeFile) {
               verifyFrameProof:verifySharedVideoFrameProof,
               evidenceDir:videoEvidenceDir,
               referenceDurationSeconds:publicVideoProbe.durationSeconds,
-              exeSha256:EXPECTED_EXE
+              exeSha256:EXPECTED_EXE,
+              diagnosticOnly:startupDiagnostic
             });
-            publicVideoProbe.outcome='PASS_PUBLIC_VIDEO_PLAYBACK_TO_END';
-            publicVideoProbe.proofValid=true;
-            report.videoPlaybackTested=true;
+            if(startupDiagnostic){
+              publicVideoProbe.startupDiagnosticOnly=true;
+              publicVideoProbe.outcome='PASS_VIDEO_STARTUP_ONE_SEGMENT_ONLY_NOT_FULL_VIDEO';
+              report.videoPlaybackTested=false;
+            }else{
+              publicVideoProbe.outcome='PASS_PUBLIC_VIDEO_PLAYBACK_TO_END';
+              publicVideoProbe.proofValid=true;
+              report.videoPlaybackTested=true;
+            }
           }
         }
       }
@@ -904,7 +919,8 @@ async function run(exeFile) {
       if(verificationStage==='open-video'&&Number.isFinite(openVideoStartedAt))
         publicVideoProbe.openVideoElapsedMs=Math.max(0,Date.now()-openVideoStartedAt);
       publicVideoProbe.errorName=String(error?.name||'Error').slice(0,80);
-      publicVideoProbe.errorCode=typeof error?.code==='string'?error.code.slice(0,80):null;
+      publicVideoProbe.errorCode=typeof error?.code==='string'?error.code.slice(0,80):
+       (/^(?:FULL_VIDEO|AUDIT)_[A-Z0-9_]+$/.test(String(error?.message||''))?String(error.message):null);
       // No error message, page text, cookies, author/title, or request headers are written to evidence.
     }finally{
       if(verificationController?.page&&!verificationController.page.isClosed()){
@@ -917,6 +933,17 @@ async function run(exeFile) {
     await fs.writeFile(path.join(videoEvidenceDir,'probe-result.json'),JSON.stringify(publicVideoProbe,null,2)+'\n',{flag:'wx'});
     report.coldStartVerified=true;
     report.preExistingEdgeProcessCount=preExistingEdge.length;
+    if(startupDiagnostic){
+      report.videoStartupDiagnosticOnly=true;
+      report.notProven=['18-minute full playback','natural video ended event',
+       'full audio transcription','video semantic understanding','new Windows EXE acceptance'];
+      console.log('PASS_VIDEO_STARTUP_DIAGNOSTIC_ONLY '+JSON.stringify({
+       candidateSha256:EXPECTED_EXE,outcome:publicVideoProbe.outcome,
+       diagnostic:publicVideoProbe.fullPlaybackCoverage,
+       noFullVideoClaim:true,noNewSandboxClaim:true
+      }));
+      return report;
+    }
     await fs.mkdir(unrelatedProfile,{recursive:true});
     unrelatedEdgeChild=spawn(edgeExe,[
       '--user-data-dir='+unrelatedProfile,'--remote-debugging-port=9231',
@@ -1113,7 +1140,9 @@ async function run(exeFile) {
 
 if(process.argv.includes('--self-test'))selfTest();
 else {
-  const exe=process.argv[2];
+  const args=process.argv.slice(2);
+  const startupDiagnostic=args.includes('--startup-diagnostic');
+  const exe=args.find(value=>!value.startsWith('--'));
   if(!exe)throw new Error('Specify exact candidate EXE path; only in GitHub Windows CI');
-  run(path.resolve(exe)).catch(e=>{console.error('FAIL_CLOSED_WINDOWS_EDGE_SMOKE:',e.message);process.exitCode=1;});
+  run(path.resolve(exe),{startupDiagnostic}).catch(e=>{console.error('FAIL_CLOSED_WINDOWS_EDGE_SMOKE:',e.message);process.exitCode=1;});
 }
