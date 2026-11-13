@@ -98,18 +98,18 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           git config core.autocrlf false
-          git checkout-index --force -- tools/windows147-patched
+          git checkout-index --force -- tools/windows147-patched/manifest.json tools/windows147-patched/browser-host.mjs tools/windows147-patched/core.mjs tools/windows147-patched/api-process.mjs tools/windows147-patched/runtime-paths.mjs tools/windows147-patched/prepare-api-runtime.mjs tools/windows147-patched/browser-launcher.mjs tools/windows147-patched/startup-navigation.mjs
           $manifest = Get-Content 'tools/windows147-patched/manifest.json' -Raw | ConvertFrom-Json
           if ($manifest.upstreamCommit -cne '9c49833078f4b4d18b9211ef86d024e7f2e15739' -or $manifest.sources.Count -ne 7) { throw 'STATIC_SECURITY_PATCH_MANIFEST_MISMATCH' }
           foreach ($item in $manifest.sources) {
             $target = Join-Path 'upstream' $item.path
-            $actualSource = (git -C upstream hash-object -- $target).Trim()
+            $actualSource = (git -C upstream hash-object -- $item.path).Trim()
             if ($actualSource -cne $item.originalGitBlobSha1) { throw ('UPSTREAM_SOURCE_BLOB_MISMATCH: ' + $item.path) }
             $patchFile = Join-Path 'tools/windows147-patched' $item.patchFile
             $actualPatch = (git hash-object -- $patchFile).Trim()
             if ($actualPatch -cne $item.patchedGitBlobSha1) { throw ('PATCH_FILE_BLOB_MISMATCH: ' + $item.patchFile) }
             Copy-Item -LiteralPath $patchFile -Destination $target -Force
-            $after = (git -C upstream hash-object -- $target).Trim()
+            $after = (git -C upstream hash-object -- $item.path).Trim()
             if ($after -cne $item.patchedGitBlobSha1) { throw ('PATCHED_SOURCE_BLOB_MISMATCH: ' + $item.path) }
             Write-Host ($item.path + ' patchedGitBlobSha1=' + $after + ' sha256=' + (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash.ToLowerInvariant())
           }
@@ -224,6 +224,7 @@ jobs:
           Write-Host 'PASS_DESKTOP_MAIN_WORKER_AND_STARTUP_PATCH_PROPAGATION'
           npx --yes pnpm@10.6.5 run package:dir
           if ($LASTEXITCODE -ne 0) { throw 'win-unpacked build failed' }
+          $runtime = Join-Path (Get-Location).Path '.cache/api-runtime'
           $packageRuntime = Join-Path (Get-Location).Path 'release-api/win-unpacked/resources/api-runtime'
           foreach ($file in @('browser-host.mjs','core.mjs','runtime-paths.mjs','browser-launcher.mjs','jobguard.exe')) {
             $stagedFile = Join-Path $runtime $file
