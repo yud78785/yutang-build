@@ -3,7 +3,7 @@ name: YuTang 1.4.7 Update Trust Candidate - isolated Windows matrix
 on:
   push:
     branches:
-      - experiment/windows-147-update-rollback-20261114
+      - experiment/windows-147-update-recovery-20261114
     paths:
       - .github/workflows/windows-147-packaged-smoke-fix.yml
       - tools/apply_windows147_update_trust_patch.mjs
