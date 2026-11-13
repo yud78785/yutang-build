@@ -10,7 +10,8 @@ const UPSTREAM_COMMIT = '9c49833078f4b4d18b9211ef86d024e7f2e15739';
 const EXPECTED_BLOBS = {
   'desktop/src/update-service.mjs': '92709845a54a961eb58cc76e1697dce917c6252e',
   'desktop/src/update-launcher.mjs': '1d98056c709de8d4ddcc4322cfb82b1204dc8538',
-  'desktop/README.md': '8cddcbad0e0309a10ea646f9673add4b3b710524'
+  'desktop/README.md': '8cddcbad0e0309a10ea646f9673add4b3b710524',
+  'desktop/scripts/verify-packaged-api.mjs': 'f6bc5bc28a54abaeddf188c94d4caef71fa943fb'
 };
 
 function gitBlobSha1(value) {
@@ -60,6 +61,18 @@ export async function applyUpdateTrustPatch(upstream, repositoryRoot = REPOSITOR
   const newReleaseParagraph = '当前 1.4.7 是 YuTang 的未签名验收候选，不是正式发行版；请勿把 GitHub Actions 的候选 Artifact 当作公开下载包。正式发布前会在 YuTang 的 Release 页面提供经过双平台验收并签名的 EXE。当前自动更新处于安全关闭状态：尚未配置可信的 Authenticode 发布者身份与 Ed25519 更新清单公钥，软件不会下载或安装更新。已安装版本、记忆、登录目录及本机设置不受此状态影响。';
   readme = replaceExactlyOnce(readme, oldReleaseParagraph, newReleaseParagraph, 'desktop-readme-update-channel');
   await write(readmePath, readme);
+
+  const verifierPath = path.join(upstream, 'desktop/scripts/verify-packaged-api.mjs');
+  let verifier = await read(verifierPath);
+  const packagedReadmeAnchor = "assert.equal(packaged.version, version); assert.equal(manifest.productVersion, version);";
+  const packagedReadmeCheck = [
+    "assert.equal(packaged.version, version); assert.equal(manifest.productVersion, version);",
+    "const packagedReadme = asar.extractFile(archive, 'README.md').toString('utf8');",
+    "assert.ok(packagedReadme.includes('YuTang 的未签名验收候选'), '打包 README 必须说明该 EXE 是未签名候选而非正式发行版。');",
+    "assert.ok(packagedReadme.includes('自动更新处于安全关闭状态'), '打包 README 必须说明未配置发布信任时自动更新保持关闭。');"
+  ].join('\\n');
+  verifier = replaceExactlyOnce(verifier, packagedReadmeAnchor, packagedReadmeCheck, 'packaged-readme-trust-disclosure');
+  await write(verifierPath, verifier);
 
   const mainPath = path.join(upstream, 'desktop/src/main.mjs');
   let main = await read(mainPath);
@@ -140,7 +153,7 @@ export async function applyUpdateTrustPatch(upstream, repositoryRoot = REPOSITOR
   await fs.rm(path.join(upstream, 'desktop/tests/update-service.test.mjs'), { force: true });
 
   const modified = {};
-  for (const relative of ['desktop/src/update-service.mjs', 'desktop/src/update-launcher.mjs', 'desktop/src/main.mjs', 'desktop/README.md']) {
+  for (const relative of ['desktop/src/update-service.mjs', 'desktop/src/update-launcher.mjs', 'desktop/src/main.mjs', 'desktop/README.md', 'desktop/scripts/verify-packaged-api.mjs']) {
     modified[relative] = createHash('sha256').update(await fs.readFile(path.join(upstream, relative))).digest('hex');
   }
   const updateTrustTestsSha256 = createHash('sha256').update(await fs.readFile(path.join(upstream, 'desktop/tests/update-trust.test.mjs'))).digest('hex');
@@ -154,6 +167,7 @@ export async function applyUpdateTrustPatch(upstream, repositoryRoot = REPOSITOR
     updateTrustTestsSha256,
     readmeUpdatedForUnsignedCandidate: true,
     updateChannelFailClosedExplained: true,
+    packagedReadmeVerified: true,
     updateRepository: 'yud78785/yutang-build',
     signedManifestRequired: true,
     manifestPublicKeyConfigured: false,
