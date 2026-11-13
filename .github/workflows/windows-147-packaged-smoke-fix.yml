@@ -1,0 +1,401 @@
+name: YuTang 1.4.7 packaged smoke synthetic key recovery - no release
+
+on:
+  push:
+    branches:
+      - experiment/windows-147-security-only-20261113
+    paths:
+      - .github/workflows/windows-147-packaged-smoke-fix.yml
+      - tests/windows-upstream-filename-fix.test.mjs
+      - tools/apply_openrouter_desktop_patch.mjs
+      - tests/openrouter-production-compat.test.mjs
+      - tests/openrouter-ui-preset.test.mjs
+      - tests/test_windows147_dynamic_patch.mjs
+      - tools/patch_windows147_dynamic.mjs
+      - tools/windows147-patched/**
+      - tools/jobguard/**
+      - tools/windows_147_isolated_edge_lifecycle.mjs
+      - tests/test_windows147_test_fixtures.mjs
+      - tools/patch_windows147_test_fixtures.mjs
+      - tools/apply_windows147_static_patches.mjs
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-smoke:
+    name: ${{ matrix.os }} exact-source portable EXE
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-2025]
+    concurrency:
+      group: yutang-147-security-hardening-${{ matrix.os }}
+      cancel-in-progress: true
+
+    steps:
+      - name: Checkout fix branch without persisted credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Verify exact isolated experiment scope
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REPOSITORY -cne 'yud78785/yutang-build') { throw 'WRONG_REPOSITORY' }
+          if ($env:GITHUB_REF -cne 'refs/heads/experiment/windows-147-security-only-20261113') { throw 'WRONG_FIX_BRANCH' }
+          if ($env:RUNNER_OS -cne 'Windows') { throw 'WINDOWS_RUNNER_REQUIRED' }
+
+      - name: Set up pinned Node.js build runtime
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24.17.0
+
+      - name: Fetch exact upstream desktop 1.4.7 source
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git init upstream
+          if ($LASTEXITCODE -ne 0) { throw 'git init failed' }
+          git -C upstream config core.autocrlf false
+          git -C upstream remote add origin https://github.com/LockyBee/dsh-douyin-agent.git
+          if ($LASTEXITCODE -ne 0) { throw 'git remote add failed' }
+          git -C upstream fetch --depth=1 origin 9c49833078f4b4d18b9211ef86d024e7f2e15739
+          if ($LASTEXITCODE -ne 0) { throw 'pinned upstream fetch failed' }
+          git -C upstream checkout --detach FETCH_HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'pinned upstream checkout failed' }
+          $actual = (git -C upstream rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $actual -ne '9c49833078f4b4d18b9211ef86d024e7f2e15739') { throw "UPSTREAM_COMMIT_MISMATCH: $actual" }
+          "UPSTREAM_COMMIT=$actual" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Apply exact-source DeepSeek/OpenRouter patch
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node tools/apply_openrouter_desktop_patch.mjs upstream
+          if ($LASTEXITCODE -ne 0) { throw 'exact-source patch failed' }
+          node --check upstream/api-agent.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'api-agent syntax check failed' }
+          node --check upstream/chat-agent.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'chat-agent syntax check failed' }
+          node --check upstream/spark-agent.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'spark-agent syntax check failed' }
+          node --check upstream/public-comment-agent.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'public-comment syntax check failed' }
+          node --check upstream/desktop/src/model-settings-guard.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'credential guard syntax check failed' }
+          node --check upstream/desktop/src/main.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'desktop main syntax check failed' }
+          node --check upstream/desktop/scripts/verify-packaged-api.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'packaged verifier syntax check failed' }
+          Copy-Item tests/openrouter-production-compat.test.mjs upstream/tests/openrouter-production-compat.test.mjs
+          Copy-Item tests/openrouter-ui-preset.test.mjs upstream/desktop/ui-api/tests/openrouter-preset.test.mjs
+          node --test tests/windows-upstream-filename-fix.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'WINDOWS_PINNED_FILENAME_REPAIR_REGRESSION' }
+
+      - name: Apply exact pinned 1.4.7 browser sandbox and isolation source patches
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git config core.autocrlf false
+          node tools/apply_windows147_static_patches.mjs upstream
+          if ($LASTEXITCODE -ne 0) { throw 'PINNED_STATIC_SECURITY_PATCH_APPLICATION_FAILED' }
+          node tests/test_windows147_dynamic_patch.mjs upstream
+          if ($LASTEXITCODE -ne 0) { throw 'DYNAMIC_SECURITY_PATCH_PREVIEW_FAILED' }
+          node tools/patch_windows147_dynamic.mjs upstream
+          if ($LASTEXITCODE -ne 0) { throw 'DYNAMIC_SECURITY_PATCH_APPLICATION_FAILED' }
+          $files = @('browser-host.mjs','core.mjs','runtime-paths.mjs','browser-launcher.mjs','desktop/src/api-process.mjs','desktop/src/prepare-api-runtime.mjs','desktop/src/main.mjs','desktop/src/startup-navigation.mjs','desktop/scripts/verify-packaged-api.mjs')
+          foreach ($file in $files) {
+            node --check (Join-Path 'upstream' $file)
+            if ($LASTEXITCODE -ne 0) { throw ('PATCHED_SOURCE_SYNTAX_FAILURE: ' + $file) }
+          }
+          $browserHostText = Get-Content 'upstream/browser-host.mjs' -Raw
+          if ($browserHostText -match '--no-sandbox' -or $browserHostText -notmatch 'chromiumSandbox: true' -or $browserHostText -notmatch '--enable-features=NetworkServiceSandbox') { throw 'EDGE_SANDBOX_PATCH_ASSERTION_FAILED' }
+          Write-Host 'PASS_EXACT_147_SOURCE_PATCH_AND_SANDBOX_STATIC_ASSERTIONS'
+
+      - name: Build and test Windows Job Object helper
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          go version
+          Push-Location tools/jobguard
+          go test -count=1 ./...
+          if ($LASTEXITCODE -ne 0) { throw 'JOBGUARD_GO_TEST_FAILED' }
+          go vet ./...
+          if ($LASTEXITCODE -ne 0) { throw 'JOBGUARD_GO_VET_FAILED' }
+          go build -trimpath -ldflags="-s -w" -o jobguard.exe .
+          if ($LASTEXITCODE -ne 0) { throw 'JOBGUARD_WINDOWS_BUILD_FAILED' }
+          $guardSha = (Get-FileHash -LiteralPath jobguard.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          $guardPath = (Resolve-Path -LiteralPath 'jobguard.exe').Path
+          "YUTANG_JOBGUARD_SHA256=$guardSha" | Out-File -LiteralPath $env:GITHUB_ENV -Append -Encoding utf8
+          "YUTANG_JOBGUARD_PATH=$guardPath" | Out-File -LiteralPath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host ('WINDOWS_JOBGUARD_SHA256=' + $guardSha)
+          Write-Host ('WINDOWS_JOBGUARD_PATH=' + $guardPath)
+          Pop-Location
+
+      - name: Install exact-lockfile project, desktop and UI dependencies
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Push-Location upstream
+          npx --yes pnpm@10.6.5 install --no-frozen-lockfile --ignore-scripts
+          if ($LASTEXITCODE -ne 0) { throw 'upstream root dependency installation failed' }
+          Push-Location desktop
+          npx --yes pnpm@10.6.5 --ignore-workspace install --ignore-scripts --frozen-lockfile
+          if ($LASTEXITCODE -ne 0) { throw 'desktop dependency installation failed' }
+          node node_modules/electron/install.js
+          if ($LASTEXITCODE -ne 0) { throw 'Electron runtime installation failed' }
+          Pop-Location
+          Push-Location desktop/ui-api
+          npx --yes pnpm@10.6.5 --ignore-workspace install --ignore-scripts --frozen-lockfile
+          if ($LASTEXITCODE -ne 0) { throw 'desktop UI dependency installation failed' }
+          Pop-Location
+          Pop-Location
+
+      - name: Run production and Windows desktop source regression tests
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node tools/patch_windows147_test_fixtures.mjs upstream
+          if ($LASTEXITCODE -ne 0) { throw 'WINDOWS_TEST_FIXTURE_PATCH_FAILED' }
+          node tests/test_windows147_test_fixtures.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'WINDOWS_TEST_FIXTURE_PATCH_REGRESSION_FAILED' }
+          Push-Location upstream
+          node --test tests/openrouter-production-compat.test.mjs tests/api-agent.test.mjs tests/chat.test.mjs tests/spark-agent.test.mjs tests/public-comment-agent.test.mjs desktop/tests/*.test.mjs desktop/ui-api/tests/openrouter-preset.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'Windows source regression suite failed' }
+          Pop-Location
+
+      - name: Acquire pinned official UI source and prepare the bundled Node runtime
+        shell: pwsh
+        working-directory: upstream/desktop
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node scripts/acquire-upstream.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'pinned official UI source acquisition failed' }
+          node scripts/stage-api-runtime.mjs --prepare-node-only
+          if ($LASTEXITCODE -ne 0) { throw 'pinned bundled Node preparation failed' }
+
+      - name: Build UI, isolated API runtime and desktop app
+        shell: pwsh
+        working-directory: upstream/desktop
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Push-Location ui-api
+          node build.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'desktop UI build failed' }
+          Pop-Location
+          node scripts/stage-api-runtime.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'isolated API runtime staging failed' }
+          $guardSource = Join-Path $env:GITHUB_WORKSPACE 'tools/jobguard/jobguard.exe'
+          $runtime = Join-Path (Get-Location).Path '.cache/api-runtime'
+          $guardTarget = Join-Path $runtime 'jobguard.exe'
+          if (-not (Test-Path -LiteralPath $guardSource -PathType Leaf) -or -not (Test-Path -LiteralPath $runtime -PathType Container)) { throw 'JOBGUARD_OR_API_RUNTIME_MISSING' }
+          Copy-Item -LiteralPath $guardSource -Destination $guardTarget -Force
+          $guardSha = (Get-FileHash -LiteralPath $guardTarget -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($guardSha -cne $env:YUTANG_JOBGUARD_SHA256) { throw 'STAGED_JOBGUARD_SHA256_MISMATCH' }
+          $upstreamRoot = (Resolve-Path '..').Path
+          foreach ($file in @('browser-host.mjs','core.mjs','runtime-paths.mjs','browser-launcher.mjs')) {
+            $sourceFile = Join-Path $upstreamRoot $file
+            $stagedFile = Join-Path $runtime $file
+            if (-not (Test-Path -LiteralPath $stagedFile -PathType Leaf)) { throw ('STAGED_SECURITY_RUNTIME_FILE_MISSING: ' + $file) }
+            if ((Get-FileHash -LiteralPath $sourceFile -Algorithm SHA256).Hash -cne (Get-FileHash -LiteralPath $stagedFile -Algorithm SHA256).Hash) { throw ('STAGED_SECURITY_RUNTIME_SHA_MISMATCH: ' + $file) }
+          }
+          Write-Host 'PASS_STAGED_BROWSER_CORE_PATHS_AND_JOBGUARD_HASH'
+          node scripts/build-api-desktop.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'desktop app source bundling failed' }
+          $desktopPairs = @(
+            @('src/main.mjs', 'app/main.mjs'),
+            @('src/api-process.mjs', 'app/api-process.mjs'),
+            @('src/prepare-api-runtime.mjs', 'app/prepare-api-runtime.mjs'),
+            @('src/startup-navigation.mjs', 'app/startup-navigation.mjs')
+          )
+          foreach ($pair in $desktopPairs) {
+            $sourceFile = Join-Path (Get-Location).Path $pair[0]
+            $appFile = Join-Path (Get-Location).Path $pair[1]
+            if (-not (Test-Path -LiteralPath $appFile -PathType Leaf)) { throw ('DESKTOP_PATCHED_APP_FILE_MISSING: ' + $pair[1]) }
+            if ((Get-FileHash -LiteralPath $sourceFile -Algorithm SHA256).Hash -cne (Get-FileHash -LiteralPath $appFile -Algorithm SHA256).Hash) { throw ('DESKTOP_PATCHED_APP_FILE_SHA_MISMATCH: ' + $pair[1]) }
+          }
+          Write-Host 'PASS_DESKTOP_MAIN_WORKER_AND_STARTUP_PATCH_PROPAGATION'
+          npx --yes pnpm@10.6.5 run package:dir
+          if ($LASTEXITCODE -ne 0) { throw 'win-unpacked build failed' }
+          $runtime = Join-Path (Get-Location).Path '.cache/api-runtime'
+          $packageRuntime = Join-Path (Get-Location).Path 'release-api/win-unpacked/resources/api-runtime'
+          foreach ($file in @('browser-host.mjs','core.mjs','runtime-paths.mjs','browser-launcher.mjs','jobguard.exe')) {
+            $stagedFile = Join-Path $runtime $file
+            $packagedFile = Join-Path $packageRuntime $file
+            if (-not (Test-Path -LiteralPath $packagedFile -PathType Leaf)) { throw ('PACKAGED_SECURITY_RUNTIME_FILE_MISSING: ' + $file) }
+            if ((Get-FileHash -LiteralPath $stagedFile -Algorithm SHA256).Hash -cne (Get-FileHash -LiteralPath $packagedFile -Algorithm SHA256).Hash) { throw ('PACKAGED_SECURITY_RUNTIME_SHA_MISMATCH: ' + $file) }
+          }
+          Write-Host 'PASS_PACKAGED_BROWSER_SANDBOX_JOBGUARD_AND_PROFILE_RUNTIME_HASHES'
+          npx --yes pnpm@10.6.5 exec electron-builder --win portable --x64 --config electron-builder.json --publish never
+          if ($LASTEXITCODE -ne 0) { throw 'portable EXE build failed' }
+
+      - name: Verify the exact packaged portable EXE in an isolated user profile
+        shell: pwsh
+        working-directory: upstream/desktop
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node scripts/verify-packaged-api.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'packaged EXE isolated startup and renderer smoke failed' }
+
+      - name: Pin new EXE SHA-256 and block Edge outbound network
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Join-Path $env:GITHUB_WORKSPACE 'upstream/desktop/release-api/Dafeiyu-Douyin-API-1.4.7-win-x64.exe'
+          if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw 'NEW_CANDIDATE_EXE_MISSING' }
+          $sha = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          "YUTANG_CANDIDATE_EXE=$exe" | Out-File -LiteralPath $env:GITHUB_ENV -Append -Encoding utf8
+          "YUTANG_EXPECTED_CANDIDATE_SHA256=$sha" | Out-File -LiteralPath $env:GITHUB_ENV -Append -Encoding utf8
+          $programFilesX86 = [Environment]::GetEnvironmentVariable('ProgramFiles(x86)')
+          $locations = @(
+            (Join-Path $env:ProgramFiles 'Microsoft\Edge\Application\msedge.exe'),
+            (Join-Path $programFilesX86 'Microsoft\Edge\Application\msedge.exe')
+          )
+          $edge = @($locations | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf })
+          if ($edge.Count -ne 1) { throw 'EXPECTED_ONE_INSTALLED_EDGE_EXE' }
+          if ((Get-AuthenticodeSignature -LiteralPath $edge[0]).Status -ne 'Valid') { throw 'EDGE_SIGNATURE_INVALID' }
+          if (Get-NetFirewallRule -DisplayName 'YuTang147EphemeralEdgeEgressBlock' -ErrorAction SilentlyContinue) { throw 'PREEXISTING_FIREWALL_RULE' }
+          New-NetFirewallRule -DisplayName 'YuTang147EphemeralEdgeEgressBlock' -Direction Outbound -Program $edge[0] -RemoteAddress Internet -Action Block -Profile Any -ErrorAction Stop | Out-Null
+          $gate = Get-NetFirewallRule -DisplayName 'YuTang147EphemeralEdgeEgressBlock'
+          if ($gate.Direction -ne 'Outbound' -or $gate.Action -ne 'Block' -or $gate.Enabled -ne 'True') { throw 'EDGE_FIREWALL_NOT_ENFORCED' }
+          $remoteAddresses = @((Get-NetFirewallAddressFilter -AssociatedNetFirewallRule $gate).RemoteAddress)
+          if ($remoteAddresses -notcontains 'Internet' -or $remoteAddresses -contains 'Any') { throw ('EDGE_FIREWALL_SCOPE_NOT_INTERNET_ONLY: ' + ($remoteAddresses -join ',')) }
+          Write-Host 'EDGE_FIREWALL_SCOPE=Internet only; loopback CDP is not blocked'
+          "YUTANG_EDGE_EXE=$($edge[0])" | Out-File -LiteralPath $env:GITHUB_ENV -Append -Encoding utf8
+          'YUTANG_EDGE_FIREWALL_CONFIRMED=yes' | Out-File -LiteralPath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host ('NEW_CANDIDATE_EXE_SHA256=' + $sha)
+          Write-Host 'EDGE_EGRESS_BLOCKED_ON_DISPOSABLE_RUNNER'
+
+      - name: Test real Edge sandbox, CDP, restarts and three forced-exit modes
+        shell: pwsh
+        working-directory: upstream/desktop
+        timeout-minutes: 75
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node "$env:GITHUB_WORKSPACE/tools/windows_147_isolated_edge_lifecycle.mjs" --self-test
+          if ($LASTEXITCODE -ne 0) { throw 'EDGE_LIFECYCLE_SELF_TEST_FAILED' }
+          $release = Join-Path (Get-Location).Path 'release-api'
+          $env:YUTANG_EDGE_RESULT_PATH = Join-Path $release 'windows-edge-lifecycle-normal.json'
+          node "$env:GITHUB_WORKSPACE/tools/windows_147_isolated_edge_lifecycle.mjs" "$env:YUTANG_CANDIDATE_EXE" --stress-restarts=2
+          if ($LASTEXITCODE -ne 0) { throw 'EDGE_SANDBOX_OR_NORMAL_CLEANUP_FAILED' }
+          $env:YUTANG_EDGE_RESULT_PATH = Join-Path $release 'windows-edge-lifecycle-force-host.json'
+          node "$env:GITHUB_WORKSPACE/tools/windows_147_isolated_edge_lifecycle.mjs" "$env:YUTANG_CANDIDATE_EXE" --force-host
+          if ($LASTEXITCODE -ne 0) { throw 'JOB_OBJECT_HOST_FORCE_EXIT_FAILED' }
+          $env:YUTANG_EDGE_RESULT_PATH = Join-Path $release 'windows-edge-lifecycle-force-guard.json'
+          node "$env:GITHUB_WORKSPACE/tools/windows_147_isolated_edge_lifecycle.mjs" "$env:YUTANG_CANDIDATE_EXE" --force-guard
+          if ($LASTEXITCODE -ne 0) { throw 'JOB_OBJECT_GUARD_FORCE_EXIT_FAILED' }
+          $env:YUTANG_EDGE_RESULT_PATH = Join-Path $release 'windows-edge-lifecycle-force-desktop.json'
+          node "$env:GITHUB_WORKSPACE/tools/windows_147_isolated_edge_lifecycle.mjs" "$env:YUTANG_CANDIDATE_EXE" --force-desktop
+          if ($LASTEXITCODE -ne 0) { throw 'DESKTOP_WORKER_FORCE_EXIT_FAILED' }
+
+      - name: Remove temporary Edge outbound firewall rule
+        if: always()
+        shell: pwsh
+        run: |
+          Get-NetFirewallRule -DisplayName 'YuTang147EphemeralEdgeEgressBlock' -ErrorAction SilentlyContinue | Remove-NetFirewallRule -ErrorAction SilentlyContinue
+          Write-Host 'EPHEMERAL_EDGE_FIREWALL_RULE_CLEANUP_REQUESTED'
+
+      - name: Verify candidate SHA-256 and write a redacted candidate receipt
+        shell: pwsh
+        working-directory: upstream/desktop
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Get-Item 'release-api/Dafeiyu-Douyin-API-1.4.7-win-x64.exe'
+          $sha = (Get-FileHash $exe.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          $verification = Get-Content 'release-api/verification-1.4.7.json' -Raw | ConvertFrom-Json
+          $staticSecurity = Get-Content '../windows-security-147-static-patch-receipt.json' -Raw | ConvertFrom-Json
+          $dynamicSecurity = Get-Content '../windows-security-147-dynamic-patch-receipt.json' -Raw | ConvertFrom-Json
+          $testFixtures = Get-Content '../windows-security-147-test-fixture-receipt.json' -Raw | ConvertFrom-Json
+          if ($staticSecurity.status -cne 'PASS_PINNED_STATIC_PATCH_BLOBS' -or $staticSecurity.release -ne $false -or $staticSecurity.upstreamCommit -cne $env:UPSTREAM_COMMIT) { throw 'WINDOWS_STATIC_SECURITY_PATCH_RECEIPT_INVALID' }
+          if ($dynamicSecurity.status -cne 'PASS_EXACT_SOURCE_SECURITY_PATCH' -or $dynamicSecurity.release -ne $false) { throw 'WINDOWS_DYNAMIC_SECURITY_PATCH_RECEIPT_INVALID' }
+          if ($testFixtures.status -cne 'PASS_PATCHED_WINDOWS_TEST_FIXTURES' -or $testFixtures.release -ne $false -or $testFixtures.jobGuardSha256 -cne $env:YUTANG_JOBGUARD_SHA256) { throw 'WINDOWS_TEST_FIXTURE_RECEIPT_INVALID' }
+          $edgeNormal = Get-Content 'release-api/windows-edge-lifecycle-normal.json' -Raw | ConvertFrom-Json
+          $edgeHost = Get-Content 'release-api/windows-edge-lifecycle-force-host.json' -Raw | ConvertFrom-Json
+          $edgeGuard = Get-Content 'release-api/windows-edge-lifecycle-force-guard.json' -Raw | ConvertFrom-Json
+          $edgeDesktop = Get-Content 'release-api/windows-edge-lifecycle-force-desktop.json' -Raw | ConvertFrom-Json
+          foreach ($edgeResult in @($edgeNormal,$edgeHost,$edgeGuard,$edgeDesktop)) {
+            if ($edgeResult.candidateSha256 -cne $sha -or $edgeResult.cleanupVerified -ne $true) { throw 'EDGE_RESULT_CANDIDATE_OR_CLEANUP_MISMATCH' }
+          }
+          if ($edgeNormal.rendererSandbox.rendererSandboxVerified -ne $true -or
+              $edgeNormal.rendererSandbox.networkServiceSandboxReported -ne $true -or
+              $edgeNormal.rendererSandbox.networkServiceWindowsTokenVerified -ne $true -or
+              $edgeNormal.rendererSandbox.networkServiceProcessOwned -ne $true -or
+              $edgeNormal.hostSummary.edgeWithNetworkSandboxArg -lt 1 -or
+              $edgeNormal.lifecycle.finalCloseVerified -ne $true) { throw 'REAL_EDGE_SANDBOX_OR_NORMAL_LIFECYCLE_NOT_PROVEN' }
+          foreach ($item in @(@($edgeHost,'kill-host-only'),@($edgeGuard,'kill-jobguard-only'),@($edgeDesktop,'kill-electron-main-only'))) {
+            $result = $item[0]
+            if ($result.forcedExit.mode -cne $item[1] -or
+                $result.forcedExit.trackedProcessesRemaining -ne 0 -or
+                $result.forcedExit.profileProcessesRemaining -ne 0 -or
+                $result.forcedExit.cdpListenersRemaining -ne 0 -or
+                $result.lifecycle.finalCloseVerified -ne $true) { throw ('JOB_OBJECT_FORCED_EXIT_NOT_PROVEN: ' + $item[1]) }
+          }
+          if ($edgeDesktop.forcedExit.desktopGuardVerified -ne $true -or $edgeDesktop.forcedExit.desktopGuardPid -le 0) { throw 'DESKTOP_JOB_OBJECT_HELPER_NOT_PROVEN' }
+          $edgeLifecycle = [ordered]@{ normal = $edgeNormal; forceHost = $edgeHost; forceGuard = $edgeGuard; forceDesktop = $edgeDesktop }
+          if ($verification.sha256 -ne $sha) { throw 'CANDIDATE_EXE_SHA256_MISMATCH' }
+          if ($verification.renderer.providerKeyIsolation -ne $true) { throw 'PACKAGED_PROVIDER_KEY_ISOLATION_NOT_PROVEN' }
+          if ($verification.realModelCalled -ne $false -or $verification.realMessageSent -ne $false) { throw 'SMOKE_EXCEEDED_NO-LIVE-ACTION_BOUNDARY' }
+          $signature = (Get-AuthenticodeSignature $exe.FullName).Status.ToString()
+          $receipt = [ordered]@{
+            schema = 'yutang.windows-openrouter-candidate.v1'
+            status = 'PASS_WINDOWS_PACKAGED_SMOKE_AND_EDGE_SECURITY'
+            yutangPatchCommit = $env:GITHUB_SHA
+            upstreamRepository = 'LockyBee/dsh-douyin-agent'
+            upstreamCommit = $env:UPSTREAM_COMMIT
+            productVersion = $verification.version
+            runnerImage = $env:ImageOS
+            runnerImageVersion = $env:ImageVersion
+            executable = $exe.Name
+            bytes = $exe.Length
+            sha256 = $sha
+            signatureStatus = $signature
+            archiveSourcesMatch = $verification.archiveSourcesMatch
+            iconsMatch = $verification.iconsMatch
+            domainFilesMatch = $verification.domainFilesMatch
+            runtimeId = $verification.runtimeId
+            startup = $verification.startup
+            renderer = $verification.renderer
+            staticSecurityPatch = $staticSecurity
+            dynamicSecurityPatch = $dynamicSecurity
+            testFixturePatch = $testFixtures
+            jobGuardSha256 = $env:YUTANG_JOBGUARD_SHA256
+            edgeLifecycle = $edgeLifecycle
+            readOnlyEndpoints = $verification.readOnlyEndpoints
+            exit = $verification.exit
+            realModelCalled = $verification.realModelCalled
+            realMessageSent = $verification.realMessageSent
+            release = $false
+          }
+          $receipt | ConvertTo-Json -Depth 20 | Set-Content 'release-api/windows-candidate-receipt.json' -Encoding utf8
+          Write-Output ($receipt | ConvertTo-Json -Depth 20)
+
+      - name: Upload exact Windows candidate and verification receipts (not a release)
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: YuTang-OpenRouter-Desktop-1.4.7-SecurityHardening-${{ matrix.os }}-CANDIDATE-NOT-RELEASE
+          path: |
+            upstream/desktop/release-api/Dafeiyu-Douyin-API-1.4.7-win-x64.exe
+            upstream/desktop/release-api/Dafeiyu-Douyin-API-1.4.7-win-x64.exe.sha256
+            upstream/desktop/release-api/verification-1.4.7.json
+            upstream/desktop/release-api/windows-candidate-receipt.json
+            upstream/openrouter-desktop-patch-receipt.json
+            upstream/windows-security-147-static-patch-receipt.json
+            upstream/windows-security-147-dynamic-patch-receipt.json
+            upstream/windows-security-147-test-fixture-receipt.json
+            upstream/desktop/release-api/windows-edge-lifecycle-*.json
+          if-no-files-found: warn
+          retention-days: 7
+          compression-level: 0
+
+      - name: Strict non-release and no-live-model boundary
+        if: always()
+        shell: pwsh
+        run: |
+          Write-Output 'EXACT 1.4.7 SOURCE PATCH + WINDOWS 2022/2025 REAL EDGE SANDBOX AND JOB OBJECT TESTS.'
+          Write-Output 'NO REAL API KEY, NO LIVE MODEL CALL, NO REAL DOUYIN LOGIN OR ACTION; EDGE OUTBOUND BLOCKED.'
+          Write-Output 'NO USER PC, NO MAIN BRANCH, NO MERGE, NO GITHUB RELEASE.'
