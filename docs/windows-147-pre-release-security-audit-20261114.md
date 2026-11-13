@@ -453,3 +453,18 @@ Azure Artifact Signing 的 GitHub Actions 集成支持 Windows 2022 / 2025，并
 - 先前同一候选 `4acebd4d...` 的双平台通过证据仍然有效，但不能替代本次更新器源码改动后的新候选验收。
 
 下一步需要在授权的 Windows 2025 构建 + Windows 2022 同文件交叉测试中，验证 17 项更新器测试、补丁器、真实打包 EXE 和 Edge 生命周期。签名密钥仍为空，更新服务仍 fail closed；本轮不做真实在线升级或正式发布。
+
+
+### 13.5 随包 README 的更新通道说明已修正
+
+固定上游 `desktop/README.md` 曾继续指向 `LockyBee/dsh-douyin-agent` 的旧 Release，并声称软件内检查更新只接受 GitHub 正式 Release。这与 YuTang 当前固定更新仓库及“未配置签名即安全关闭”的实现不一致。
+
+本分支补丁器现在会：
+- 将 `desktop/README.md` 加入固定上游 Git blob 校验。
+- 将旧下载段落精确替换为 YuTang 1.4.7 未签名候选说明。
+- 明确候选 Artifact 不是公开下载包。
+- 明确 Authenticode 与 Ed25519 信任尚未配置，自动更新关闭。
+- 将 README 的 SHA-256 纳入补丁回执的修改源码摘要。
+- 要求 Windows 工作流验证回执中的 README 更新标志。
+
+README 的修改仍需随下一版便携 EXE 构建后，检查 `app.asar` 内实际打包文本；当前还没有新 EXE 证据。
