@@ -10,6 +10,7 @@ import { createReadStream } from 'node:fs';
 import fs from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 
 export const EXPECTED_EXE = process.env.YUTANG_EXPECTED_CANDIDATE_SHA256 || '';
@@ -1109,16 +1110,19 @@ async function run(exeFile, { forceMode = null, stressRestarts = 2, desktopOnly 
   }
 }
 
-if(process.argv.includes('--self-test'))selfTest();
-else {
-  const exe=process.argv[2];
-  if(!exe)throw new Error('Specify exact candidate EXE path; only in GitHub Windows CI');
-  const modes = ['--force-host','--force-guard','--force-desktop'].filter(flag => process.argv.includes(flag));
-  if(modes.length > 1) throw new Error('Only one forced-exit mode may be selected');
-  const forceMode = modes[0] === '--force-host' ? 'host' : modes[0] === '--force-guard' ? 'guard' : modes[0] === '--force-desktop' ? 'desktop' : null;
-  const desktopOnly=process.argv.includes('--desktop-only');
-  const stressArgs=process.argv.filter(arg=>arg.startsWith('--stress-restarts='));
-  if(stressArgs.length>1)throw new Error('Only one cold-start stress count may be selected');
-  const stressRestarts=stressArgs.length ? Number(stressArgs[0].slice('--stress-restarts='.length)) : 2;
-  run(path.resolve(exe), { forceMode, stressRestarts, desktopOnly }).then(async report=>{const resultPath=process.env.YUTANG_EDGE_RESULT_PATH;if(resultPath)await fs.writeFile(resultPath,JSON.stringify(report,null,2)+'\n');}).catch(e=>{console.error('FAIL_CLOSED_WINDOWS_EDGE_SMOKE:',e.message);process.exitCode=1;});
+const invokedDirectly = process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href;
+if (invokedDirectly) {
+  if(process.argv.includes('--self-test'))selfTest();
+  else {
+    const exe=process.argv[2];
+    if(!exe)throw new Error('Specify exact candidate EXE path; only in GitHub Windows CI');
+    const modes = ['--force-host','--force-guard','--force-desktop'].filter(flag => process.argv.includes(flag));
+    if(modes.length > 1) throw new Error('Only one forced-exit mode may be selected');
+    const forceMode = modes[0] === '--force-host' ? 'host' : modes[0] === '--force-guard' ? 'guard' : modes[0] === '--force-desktop' ? 'desktop' : null;
+    const desktopOnly=process.argv.includes('--desktop-only');
+    const stressArgs=process.argv.filter(arg=>arg.startsWith('--stress-restarts='));
+    if(stressArgs.length>1)throw new Error('Only one cold-start stress count may be selected');
+    const stressRestarts=stressArgs.length ? Number(stressArgs[0].slice('--stress-restarts='.length)) : 2;
+    run(path.resolve(exe), { forceMode, stressRestarts, desktopOnly }).then(async report=>{const resultPath=process.env.YUTANG_EDGE_RESULT_PATH;if(resultPath)await fs.writeFile(resultPath,JSON.stringify(report,null,2)+'\n');}).catch(e=>{console.error('FAIL_CLOSED_WINDOWS_EDGE_SMOKE:',e.message);process.exitCode=1;});
+  }
 }
