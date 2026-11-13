@@ -366,7 +366,7 @@ async function run(exeFile) {
   const candidateChild = spawn(exeFile, ['--remote-debugging-port=0', '--remote-debugging-address=127.0.0.1'], {
     env, windowsHide: true, stdio: 'ignore', shell: false
   });
-  let candidateExit = null, backendPid = null, desktopPid = null, hostChild = null, hostPid = null;
+  let candidateExit = null, backendPid = null, desktopPid = null, hostChild = null, hostPid = null, candidateOwned = [];
   const report = {
     schema: 'yutang.windows-147-lpac-network-probe.v1',
     candidateSha256: EXPECTED_SHA,
@@ -420,10 +420,10 @@ async function run(exeFile) {
       let cursor = currentBackend, desktop = null;
       for (let depth = 0; cursor && depth < 24; depth++) {
         const pid = Number(cursor.ProcessId);
-        chain.push({ pid, parentPid: Number(cursor.ParentProcessId) || null, name: String(cursor.Name || '').slice(0, 100) });
         const name = String(cursor.Name || '');
-        if (pid !== backendPid && pid !== candidateChild.pid &&
-            (name.includes('大肥鱼') || /dafeiyu.*assistant\.exe$/i.test(name)) &&
+        chain.push({ pid, parentPid: Number(cursor.ParentProcessId) || null, name: name.slice(0, 100) });
+        const helperProcess = /^(?:node|conhost|jobguard)\.exe$/i.test(name);
+        if (pid !== backendPid && pid !== candidateChild.pid && !helperProcess &&
             hasHostAncestor(pid, candidateChild.pid, currentRows)) {
           desktop = cursor;
           break;
@@ -436,6 +436,12 @@ async function run(exeFile) {
       return { rows: currentRows, backend: currentBackend, desktop, chain };
     }, 10000, 'candidate desktop main process ancestry');
     const rows = ancestry.rows;
+    candidateOwned = rows.filter(item => Number(item.ProcessId) === candidateChild.pid ||
+      hasHostAncestor(Number(item.ProcessId), candidateChild.pid, rows)).map(item => ({
+        pid: Number(item.ProcessId),
+        name: String(item.Name || ''),
+        executablePath: String(item.ExecutablePath || '')
+      }));
     const backend = ancestry.backend;
     assert.ok(/node\.exe$/i.test(String(backend.Name || '')), 'Candidate API worker is not a Node process');
     assert.match(String(backend.CommandLine || ''), /api-worker\.mjs/i, 'Candidate API worker command identity mismatch');
@@ -554,23 +560,34 @@ async function run(exeFile) {
           try { execFileSync('taskkill.exe', ['/PID', String(candidateChild.pid), '/F'], { stdio: 'ignore', windowsHide: true, timeout: 10000 }); } catch {}
         }
       }
-      await delay(1200);
-      const currentRows = processRows();
-      const owned = ownedProfileProcesses(path.join(home, '.yutang-observer-isolated', 'cli-profile'),
-        path.join(home, '.yutang-observer-isolated', 'control'), currentRows);
-      const portLeft = listeners(PORT);
-      const candidateTree = currentRows.filter(item => Number(item.ProcessId) === candidateChild.pid ||
-        hasHostAncestor(Number(item.ProcessId), candidateChild.pid, currentRows));
-      const hostStillAlive = hostPid && currentRows.some(item => Number(item.ProcessId) === hostPid);
-      const desktopStillAlive = desktopPid && currentRows.some(item => Number(item.ProcessId) === desktopPid);
-      if (owned.length || portLeft.length || candidateTree.length || hostStillAlive || desktopStillAlive) {
-        throw new Error('CANDIDATE_OR_EDGE_CLEANUP_FAILED: ' + JSON.stringify({
+      let cleanupSnapshot = null;
+      await until(async () => {
+        const currentRows = processRows();
+        const owned = ownedProfileProcesses(path.join(home, '.yutang-observer-isolated', 'cli-profile'),
+          path.join(home, '.yutang-observer-isolated', 'control'), currentRows);
+        const portLeft = listeners(PORT);
+        const candidateTree = currentRows.filter(item => Number(item.ProcessId) === candidateChild.pid ||
+          hasHostAncestor(Number(item.ProcessId), candidateChild.pid, currentRows));
+        const candidateOwnedRemaining = candidateOwned.filter(identity =>
+          currentRows.some(item => Number(item.ProcessId) === identity.pid &&
+            String(item.Name || '') === identity.name &&
+            String(item.ExecutablePath || '') === identity.executablePath));
+        const hostStillAlive = Boolean(hostPid && currentRows.some(item => Number(item.ProcessId) === hostPid));
+        const desktopStillAlive = Boolean(desktopPid && currentRows.some(item => Number(item.ProcessId) === desktopPid));
+        cleanupSnapshot = {
           profileProcesses: owned.map(item => ({ pid: Number(item.ProcessId), name: String(item.Name || '') })),
           listeners: portLeft.map(item => ({ pid: Number(item.OwningProcess), address: String(item.LocalAddress || '') })),
           candidateTree: candidateTree.map(item => ({ pid: Number(item.ProcessId), name: String(item.Name || '') })),
+          candidateOwnedRemaining: candidateOwnedRemaining.map(item => ({ pid: item.pid, name: item.name })),
           hostStillAlive, desktopStillAlive
-        }));
-      }
+        };
+        if (owned.length || portLeft.length || candidateTree.length || candidateOwnedRemaining.length ||
+            hostStillAlive || desktopStillAlive) return null;
+        return true;
+      }, 20000, 'candidate desktop, worker, JobGuard and Edge process cleanup').catch(error => {
+        throw new Error('CANDIDATE_OR_EDGE_CLEANUP_FAILED: ' + JSON.stringify(cleanupSnapshot) +
+          ' | ' + String(error?.message || error));
+      });
       await fs.rm(common, { recursive: true, force: true });
       await fs.rm(base, { recursive: true, force: true });
       report.cleanupVerified = true;
