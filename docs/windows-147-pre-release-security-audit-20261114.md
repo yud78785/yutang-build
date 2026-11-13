@@ -267,3 +267,51 @@ Edge 版本为 `156.0.4314.58`。Renderer 证据为 AppContainer + Lockdown + Un
 4. 在具备真实发布信任配置后，再做真实 Windows 2022 / 2025 更新下载、签名拒绝、成功升级、启动失败回滚与用户数据保留端到端验收。
 
 在这些阻塞解除前，两个 Artifact 只作为已验收的**未签名候选**保留，不发布、不向用户电脑推送、不启用自动更新。
+
+
+## 11. 2026-11-14 单一候选与正式签名准备（新实验分支）
+
+本轮没有修改已验收候选 EXE，也没有运行新的 Windows Actions 工作流。
+
+### 11.1 单一候选问题已定位
+
+Run `43495140768` 的两个独立 runner 构建了不同 EXE：
+
+- Windows 2022：`57a40e8c743e68b7502f7ababc04dd689f21f1bffda1b1f3efe2abab606e69d7`，Artifact `14071038566`。
+- Windows 2025：`4acebd4d914133d14806ffab71c464aa9f6d80e39d968bf009ded0da6075f519`，Artifact `14072426069`。
+
+两份产物各自的 Windows 实测都通过，但 SHA 不同，不能作为同一个发行资产的双平台验收证据。
+
+### 11.2 唯一候选预检工作流已准备，尚未运行
+
+新工作流：
+
+`.github/workflows/windows-147-same-candidate-cross-platform-preflight.yml`
+
+固定候选：Windows 2025 的 1.4.7 EXE，来源 Run `43495140768`、Artifact `14072426069`、构建提交 `5713e2db0a583439be31020062e07a84297105b3`、SHA-256 `4acebd4d914133d14806ffab71c464aa9f6d80e39d968bf009ded0da6075f519`。
+
+该工作流只下载此 EXE，在 Windows 2022 上重新实测 Edge 沙盒、CDP、两次重启及三种强制退出。它先通过 GitHub API 核对来源工作流、Windows 2025 job、Artifact ID 和候选回执，再核对每个实测回执绑定同一个 SHA。它不重新构建、不签名、不创建 Release。
+
+- 工作流文件 blob：`c8a73cfa1257e087651c2c5630da8843368fdddf`
+- 触发方式：仅 `workflow_dispatch`。
+- 状态：已提交到独立分支，**未运行、未消耗新的 Actions 额度**。
+- 交叉验收通过前，不能宣称“同一个 EXE 已在两台 Windows 通过”。
+
+### 11.3 签名服务选择边界已核实
+
+新增操作手册：`docs/windows-147-release-signing-runbook-20261114.md`。
+
+Microsoft 当前公开的 Azure Artifact Signing Public Trust 地区规则是：组织发行主体限于列明地区（包括美国、加拿大、欧盟、英国等）；个人开发者目前仅美国和加拿大。塞尔维亚不在 Public Trust 列表中。若 YuTang 的发行主体是塞尔维亚个人或塞尔维亚注册公司，不能假设可用 Azure Public Trust；应评估受信任 CA 的 OV Code Signing Certificate。若发行主体是符合条件的欧盟/英国等地区注册组织，可评估 Azure 组织身份验证路线。
+
+Azure Artifact Signing 的 GitHub Actions 集成支持 Windows 2022 / 2025，并可使用 Entra OIDC 联邦登录与 `Artifact Signing Certificate Profile Signer` 权限。无论选哪条路线，都必须由真实发行主体完成身份验证；不向 ChatGPT 发送身份证件、私钥或证书密码。
+
+### 11.4 当前结论
+
+- 双平台独立构建的旧候选：各自验收通过，但不能合并成一个发行文件。
+- Windows 2025 唯一候选：已在 Windows 2025 通过；Windows 2022 同 SHA 交叉实测待执行。
+- 正式发行主体类型/司法辖区：尚未确认。
+- Authenticode 证书/服务、Publisher thumbprint、Ed25519 manifest key：尚未配置。
+- 自动更新：继续 fail closed。
+- 正式 Release：未创建。
+
+下一步先完成单一 EXE 的 Windows 2022 交叉实测，再根据真实发行主体的类型与司法辖区选择 Azure Artifact Signing 或 OV 证书。完成真实签名身份配置前，不生成伪造签名、不启用更新、不发布。
