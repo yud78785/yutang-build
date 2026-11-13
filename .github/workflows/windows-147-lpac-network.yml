@@ -89,7 +89,31 @@ jobs:
               $result.networkProbePassed -ne $true -or
               $result.sandbox.networkServiceIntegrity -cne 'Low' -or
               $result.https.httpStatus -ne 200 -or
-              $result.https.tlsProtocol -notmatch '^TLS' -or
+              $result.https.httpProtocol -notmatch '^(h2|h3|http/1\.1)
+              $result.https.securityProtocol -notmatch '^(TLS|QUIC)' -or
+              $result.https.pageContentVerified -ne $true -or
+              $result.cleanupVerified -ne $true) { throw 'LPAC_NETWORK_RESULT_ASSERTION_FAILED' }
+          Write-Output 'PASS_REAL_PACKAGED_EDGE_HTTPS_AND_CLEANUP'
+
+      - name: Upload redacted LPAC and network evidence only
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: YuTang-1.4.7-LPAC-Network-${{ matrix.runner }}-EVIDENCE-NOT-RELEASE
+          path: ${{ runner.temp }}/yutang-lpac-network-result.json
+          if-no-files-found: warn
+          retention-days: 14
+          compression-level: 6
+
+      - name: Strict no-release boundary
+        if: always()
+        shell: pwsh
+        run: |
+          Write-Output 'EXACT PREVIOUS CANDIDATE ONLY; LPAC ACCESSCHECK SEMANTICS AND PUBLIC HTTPS TEST.'
+          Write-Output 'NO REAL MODEL KEY, NO LIVE MODEL CALL, NO DOUYIN LOGIN, NO USER PC.'
+          Write-Output 'NO FIREWALL POLICY CHANGE, NO MAIN, NO MERGE, NO RELEASE.'
+ -or
+              $result.https.securityProtocol -notmatch '^(TLS|QUIC)' -or
               $result.https.pageContentVerified -ne $true -or
               $result.cleanupVerified -ne $true) { throw 'LPAC_NETWORK_RESULT_ASSERTION_FAILED' }
           Write-Output 'PASS_REAL_PACKAGED_EDGE_HTTPS_AND_CLEANUP'
