@@ -113,27 +113,13 @@ export async function applyUpdateTrustPatch(upstream, repositoryRoot = REPOSITOR
   ].join('\n');
   verifier = replaceExactlyOnce(verifier, readJsonAnchor, diagnosticsCode, 'packaged-startup-diagnostics-reader');
 
-  const oldUntil = [
-    "async function until(action, milliseconds = 60_000) {",
-    "  const end = Date.now() + milliseconds;",
-    "  let last;",
-    "  do { try { const value = await action(); if (value) return value; } catch (error) { last = error; } await delay(200); } while (Date.now() < end);",
+  const earlyExitAnchor = "  do { try { const value = await action();";
+  const earlyExitReplacement = "  do { if (!ready && (child.exitCode !== null || child.signalCode !== null)) return failWithStartupDiagnostics('便携 EXE 在桌面就绪前退出。', 'exit=' + child.exitCode + ' signal=' + child.signalCode); try { const value = await action();";
+  verifier = replaceExactlyOnce(verifier, earlyExitAnchor, earlyExitReplacement, 'packaged-startup-early-exit-diagnostics');
+  verifier = replaceExactlyOnce(verifier,
     "  throw last || new Error('独立便携包检查超时。');",
-    "}"
-  ].join('\n');
-  const newUntil = [
-    "async function until(action, milliseconds = 60_000) {",
-    "  const end = Date.now() + milliseconds;",
-    "  let last;",
-    "  do {",
-    "    if (!ready && (child.exitCode !== null || child.signalCode !== null)) return failWithStartupDiagnostics('便携 EXE 在桌面就绪前退出。', 'exit=' + child.exitCode + ' signal=' + child.signalCode);",
-    "    try { const value = await action(); if (value) return value; } catch (error) { last = error; }",
-    "    await delay(200);",
-    "  } while (Date.now() < end);",
     "  return failWithStartupDiagnostics('独立便携包检查超时。', last);",
-    "}"
-  ].join('\n');
-  verifier = replaceExactlyOnce(verifier, oldUntil, newUntil, 'packaged-startup-diagnostics-until');
+    'packaged-startup-timeout-diagnostics');
 
   const packagedReadmeAnchor = "assert.equal(packaged.version, version); assert.equal(manifest.productVersion, version);";
   const packagedReadmeCheck = [
