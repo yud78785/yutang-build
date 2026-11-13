@@ -97,7 +97,7 @@ export async function applyUpdateTrustPatch(upstream, repositoryRoot = REPOSITOR
   const mainPath = path.join(upstream, 'desktop/src/main.mjs');
   let main = await read(mainPath);
   main = replaceExactlyOnce(main, "import { UpdateService } from './update-service.mjs';", "import { UpdateService } from './update-service.mjs';\nimport { recoverUpdateTransaction } from './update-transaction.mjs';", 'update-transaction-import');
-  main = replaceExactlyOnce(main, "    await fs.mkdir(userData, { recursive: true });", "    await fs.mkdir(userData, { recursive: true });\n    const updateRecovery = await recoverUpdateTransaction(path.join(userData, 'updates'));\n    if (updateRecovery.status === 'blocked') throw new Error('更新恢复被安全保护阻止：' + updateRecovery.reason + '。旧版备份已保留，请联系支持人员。');", 'update-transaction-startup-recovery');
+  main = replaceExactlyOnce(main, "    await fs.mkdir(userData, { recursive: true });", "    await fs.mkdir(userData, { recursive: true });\n    const updateRecovery = await recoverUpdateTransaction(path.join(userData, 'updates'), { shortcut: path.join(app.getPath('desktop'), '大肥鱼抖音助手.lnk') });\n    if (updateRecovery.status === 'blocked') throw new Error('更新恢复被安全保护阻止：' + updateRecovery.reason + '。旧版备份已保留，请联系支持人员。');", 'update-transaction-startup-recovery');
   if (!main.includes("import { randomUUID, createHash } from 'node:crypto';") ||
       !main.includes("import { UpdateService } from './update-service.mjs';")) {
     throw new Error('UPDATE_TRUST_PATCH_MAIN_IMPORTS_CHANGED');
