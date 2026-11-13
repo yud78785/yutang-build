@@ -190,6 +190,7 @@ export async function applyUpdateTrustPatch(upstream, repositoryRoot = REPOSITOR
     modified[relative] = createHash('sha256').update(await fs.readFile(path.join(upstream, relative))).digest('hex');
   }
   const updateTrustTestsSha256 = createHash('sha256').update(await fs.readFile(path.join(upstream, 'desktop/tests/update-trust.test.mjs'))).digest('hex');
+  const updateTransactionTestsSha256 = createHash('sha256').update(await fs.readFile(path.join(upstream, 'desktop/tests/update-transaction.test.mjs'))).digest('hex');
   const receipt = {
     schema: 'yutang.windows-update-trust-patch.v1',
     status: 'PASS_FAIL_CLOSED_UPDATE_TRUST_AND_HEALTH_HANDSHAKE_PATCH',
@@ -198,6 +199,7 @@ export async function applyUpdateTrustPatch(upstream, repositoryRoot = REPOSITOR
     originalSourceGitBlobSha1: EXPECTED_BLOBS,
     modifiedSourceSha256: modified,
     updateTrustTestsSha256,
+    updateTransactionTestsSha256,
     readmeUpdatedForUnsignedCandidate: true,
     updateChannelFailClosedExplained: true,
     packagedReadmeVerified: true,
