@@ -270,12 +270,12 @@ test('更新启动器等待新版 UI/API 健康回执后才切换桌面快捷方
   await fs.mkdir(desktop, { recursive: true });
   const file = path.join(updates, 'Dafeiyu-Douyin-API-1.4.8-win-x64.exe');
   const healthFile = path.join(updates, '.health-test.json');
-  const stagedShortcut = path.join(updates, '.staged-test.lnk');
+  const nonce = '12345678-1234-4234-8234-123456789abc';
+  const stagedShortcut = path.join(updates, '.shortcut-' + nonce + '.lnk');
   const shortcut = path.join(desktop, '大肥鱼抖音助手.lnk');
   await fs.writeFile(file, bytes);
   await fs.writeFile(stagedShortcut, 'new shortcut');
   await fs.writeFile(shortcut, 'old shortcut');
-  const nonce = '12345678-1234-4234-8234-123456789abc';
   const child = fakeChild(5555);
   const result = await runUpdateLauncher({
     pid: 4444,
@@ -321,7 +321,8 @@ test('新版未写健康回执时，旧快捷方式保留且新版进程被终�
   await fs.mkdir(desktop, { recursive: true });
   const file = path.join(updates, 'Dafeiyu-Douyin-API-1.4.8-win-x64.exe');
   const healthFile = path.join(updates, '.health-fail.json');
-  const stagedShortcut = path.join(updates, '.staged-fail.lnk');
+  const nonce = '12345678-1234-4234-8234-123456789abd';
+  const stagedShortcut = path.join(updates, '.shortcut-' + nonce + '.lnk');
   const shortcut = path.join(desktop, '大肥鱼抖音助手.lnk');
   await fs.writeFile(file, bytes);
   await fs.writeFile(stagedShortcut, 'new shortcut');
@@ -333,7 +334,7 @@ test('新版未写健康回执时，旧快捷方式保留且新版进程被终�
     sha256,
     publisherThumbprint: THUMBPRINT,
     version: '1.4.8',
-    nonce: '12345678-1234-4234-8234-123456789abd',
+    nonce,
     healthFile,
     stagedShortcut,
     shortcut,
@@ -362,12 +363,12 @@ test('新版在快捷方式切换后的稳定观察期内崩溃时，恢复旧�
   await fs.mkdir(desktop, { recursive: true });
   const file = path.join(updates, 'Dafeiyu-Douyin-API-1.4.8-win-x64.exe');
   const healthFile = path.join(updates, '.health-post-switch-crash.json');
-  const stagedShortcut = path.join(updates, '.staged-post-switch-crash.lnk');
+  const nonce = '12345678-1234-4234-8234-123456789abf';
+  const stagedShortcut = path.join(updates, '.shortcut-' + nonce + '.lnk');
   const shortcut = path.join(desktop, '大肥鱼抖音助手.lnk');
   await fs.writeFile(file, bytes);
   await fs.writeFile(stagedShortcut, 'new shortcut');
   await fs.writeFile(shortcut, 'old shortcut');
-  const nonce = '12345678-1234-4234-8234-123456789abf';
   const child = fakeChild(5557);
   let switchedBeforeCrash = false;
   await assert.rejects(runUpdateLauncher({
@@ -419,12 +420,12 @@ test('新版在稳定观察期内正常退出时保留新版快捷方式', async
   await fs.mkdir(desktop, { recursive: true });
   const file = path.join(updates, 'Dafeiyu-Douyin-API-1.4.8-win-x64.exe');
   const healthFile = path.join(updates, '.health-post-switch-normal.json');
-  const stagedShortcut = path.join(updates, '.staged-post-switch-normal.lnk');
+  const nonce = '12345678-1234-4234-8234-123456789ac0';
+  const stagedShortcut = path.join(updates, '.shortcut-' + nonce + '.lnk');
   const shortcut = path.join(desktop, '大肥鱼抖音助手.lnk');
   await fs.writeFile(file, bytes);
   await fs.writeFile(stagedShortcut, 'new shortcut');
   await fs.writeFile(shortcut, 'old shortcut');
-  const nonce = '12345678-1234-4234-8234-123456789ac0';
   const child = fakeChild(5558);
   let switchedBeforeExit = false;
   const result = await runUpdateLauncher({
