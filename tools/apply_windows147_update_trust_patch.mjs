@@ -60,6 +60,18 @@ export async function applyUpdateTrustPatch(upstream, repositoryRoot = REPOSITOR
     throw new Error('UPDATE_TRUST_PATCH_MAIN_IMPORTS_CHANGED');
   }
 
+  const backendStartIndex = main.indexOf('    await backend.start(current);');
+  const navigationIndex = main.indexOf('    await navigateStartup({');
+  const rendererCheckIndex = main.indexOf('checkRenderer:', navigationIndex);
+  const startupSuccessIndex = main.indexOf('    await startup.success();', navigationIndex);
+  const backendAliveIndex = main.indexOf('    if (!backend.child.connected', startupSuccessIndex);
+  const startupReadyIndex = main.indexOf('    startupReady = true;', backendAliveIndex);
+  if (backendStartIndex < 0 || navigationIndex < backendStartIndex ||
+      rendererCheckIndex < navigationIndex || startupSuccessIndex < rendererCheckIndex ||
+      backendAliveIndex < startupSuccessIndex || startupReadyIndex < backendAliveIndex) {
+    throw new Error('UPDATE_HEALTH_SIGNAL_NOT_AFTER_BACKEND_AND_RENDERER_READINESS');
+  }
+
   const oldInstallBlock = [
     "      const {file,sha256}=await updater.verifiedExecutable();",
     "      // 便携版退出后会清理解压目录，更新助手必须先放到持久目录。",
