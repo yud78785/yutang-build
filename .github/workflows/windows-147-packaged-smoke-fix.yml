@@ -1,11 +1,14 @@
-name: YuTang 1.4.7 packaged smoke synthetic key recovery - no release
+name: YuTang 1.4.7 Update Trust Candidate - manual only
 
 on:
   push:
     branches:
-      - experiment/windows-147-security-only-20261113
+      - experiment/windows-147-update-trust-20261114
     paths:
       - .github/workflows/windows-147-packaged-smoke-fix.yml
+      - tools/apply_windows147_update_trust_patch.mjs
+      - tools/windows147-update-patched/**
+      - tests/windows147-update-trust.test.mjs
       - tests/windows-upstream-filename-fix.test.mjs
       - tools/apply_openrouter_desktop_patch.mjs
       - tests/openrouter-production-compat.test.mjs
@@ -46,7 +49,7 @@ jobs:
         shell: pwsh
         run: |
           if ($env:GITHUB_REPOSITORY -cne 'yud78785/yutang-build') { throw 'WRONG_REPOSITORY' }
-          if ($env:GITHUB_REF -cne 'refs/heads/experiment/windows-147-security-only-20261113') { throw 'WRONG_FIX_BRANCH' }
+          if ($env:GITHUB_REF -cne 'refs/heads/experiment/windows-147-update-trust-20261114') { throw 'WRONG_FIX_BRANCH' }
           if ($env:RUNNER_OS -cne 'Windows') { throw 'WINDOWS_RUNNER_REQUIRED' }
 
       - name: Set up pinned Node.js build runtime
@@ -115,6 +118,30 @@ jobs:
           $browserHostText = Get-Content 'upstream/browser-host.mjs' -Raw
           if ($browserHostText -match '--no-sandbox' -or $browserHostText -notmatch 'chromiumSandbox: true' -or $browserHostText -notmatch '--enable-features=NetworkServiceSandbox') { throw 'EDGE_SANDBOX_PATCH_ASSERTION_FAILED' }
           Write-Host 'PASS_EXACT_147_SOURCE_PATCH_AND_SANDBOX_STATIC_ASSERTIONS'
+
+      - name: Apply fail-closed YuTang update trust and health rollback patch
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node --check tools/apply_windows147_update_trust_patch.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'UPDATE_TRUST_PATCH_TOOL_SYNTAX_FAILED' }
+          node --check tools/windows147-update-patched/update-service.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'UPDATE_TRUST_SERVICE_SYNTAX_FAILED' }
+          node --check tools/windows147-update-patched/update-launcher.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'UPDATE_TRUST_LAUNCHER_SYNTAX_FAILED' }
+          node tools/apply_windows147_update_trust_patch.mjs upstream
+          if ($LASTEXITCODE -ne 0) { throw 'UPDATE_TRUST_PATCH_APPLICATION_FAILED' }
+          foreach ($file in @('desktop/src/update-service.mjs','desktop/src/update-launcher.mjs','desktop/src/main.mjs')) {
+            node --check (Join-Path 'upstream' $file)
+            if ($LASTEXITCODE -ne 0) { throw ('UPDATE_TRUST_PATCHED_SOURCE_SYNTAX_FAILED: ' + $file) }
+          }
+
+      - name: Run YuTang updater trust and rollback template tests
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node --test tests/windows147-update-trust.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'YU TANG UPDATE TRUST AND HEALTH ROLLBACK TESTS FAILED' }
 
       - name: Build and test Windows Job Object helper
         shell: pwsh
@@ -310,9 +337,17 @@ jobs:
           $staticSecurity = Get-Content '../windows-security-147-static-patch-receipt.json' -Raw | ConvertFrom-Json
           $dynamicSecurity = Get-Content '../windows-security-147-dynamic-patch-receipt.json' -Raw | ConvertFrom-Json
           $testFixtures = Get-Content '../windows-security-147-test-fixture-receipt.json' -Raw | ConvertFrom-Json
+          $updateTrust = Get-Content '../windows-update-trust-patch-receipt.json' -Raw | ConvertFrom-Json
           if ($staticSecurity.status -cne 'PASS_PINNED_STATIC_PATCH_BLOBS' -or $staticSecurity.release -ne $false -or $staticSecurity.upstreamCommit -cne $env:UPSTREAM_COMMIT) { throw 'WINDOWS_STATIC_SECURITY_PATCH_RECEIPT_INVALID' }
           if ($dynamicSecurity.status -cne 'PASS_EXACT_SOURCE_SECURITY_PATCH' -or $dynamicSecurity.release -ne $false) { throw 'WINDOWS_DYNAMIC_SECURITY_PATCH_RECEIPT_INVALID' }
           if ($testFixtures.status -cne 'PASS_PATCHED_WINDOWS_TEST_FIXTURES' -or $testFixtures.release -ne $false -or $testFixtures.jobGuardSha256 -cne $env:YUTANG_JOBGUARD_SHA256) { throw 'WINDOWS_TEST_FIXTURE_RECEIPT_INVALID' }
+          if ($updateTrust.status -cne 'PASS_FAIL_CLOSED_UPDATE_TRUST_AND_HEALTH_HANDSHAKE_PATCH' -or
+              $updateTrust.release -ne $false -or
+              $updateTrust.executableBuilt -ne $false -or
+              $updateTrust.windowsTested -ne $false -or
+              $updateTrust.updatesDisabledUntilTrustConfigured -ne $true -or
+              $updateTrust.manifestPublicKeyConfigured -ne $false -or
+              $updateTrust.authenticodePublisherThumbprintConfigured -ne $false) { throw 'WINDOWS_UPDATE_TRUST_PATCH_RECEIPT_INVALID' }
           $edgeNormal = Get-Content 'release-api/windows-edge-lifecycle-normal.json' -Raw | ConvertFrom-Json
           $edgeHost = Get-Content 'release-api/windows-edge-lifecycle-force-host.json' -Raw | ConvertFrom-Json
           $edgeGuard = Get-Content 'release-api/windows-edge-lifecycle-force-guard.json' -Raw | ConvertFrom-Json
@@ -364,6 +399,7 @@ jobs:
             staticSecurityPatch = $staticSecurity
             dynamicSecurityPatch = $dynamicSecurity
             testFixturePatch = $testFixtures
+             updateTrustPatch = $updateTrust
             jobGuardSha256 = $env:YUTANG_JOBGUARD_SHA256
             edgeLifecycle = $edgeLifecycle
             readOnlyEndpoints = $verification.readOnlyEndpoints
@@ -389,6 +425,7 @@ jobs:
             upstream/windows-security-147-static-patch-receipt.json
             upstream/windows-security-147-dynamic-patch-receipt.json
             upstream/windows-security-147-test-fixture-receipt.json
+             upstream/windows-update-trust-patch-receipt.json
             upstream/desktop/release-api/windows-edge-lifecycle-*.json
           if-no-files-found: warn
           retention-days: 7
