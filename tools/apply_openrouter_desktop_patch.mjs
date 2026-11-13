@@ -141,6 +141,10 @@ await write('desktop/scripts/build-api-desktop.mjs', desktopBuild);
 
 let packagedVerifier = await loadVerified('desktop/scripts/verify-packaged-api.mjs');
 packagedVerifier = replaceOnce(packagedVerifier,
+  "await page.getByRole('heading', { name: '先连接你的 DeepSeek' }).waitFor();",
+  "await page.getByRole('heading', { name: '先连接模型服务' }).waitFor();",
+  'packaged verifier uses provider-neutral model setup heading');
+packagedVerifier = replaceOnce(packagedVerifier,
   "for (const name of ['main.mjs', 'api-process.mjs', 'prepare-api-runtime.mjs', 'media-key-store.mjs', 'startup-navigation.mjs', 'preload.cjs', 'update-service.mjs', 'update-launcher.mjs']) {",
   "for (const name of ['main.mjs', 'model-settings-guard.mjs', 'api-process.mjs', 'prepare-api-runtime.mjs', 'media-key-store.mjs', 'startup-navigation.mjs', 'preload.cjs', 'update-service.mjs', 'update-launcher.mjs']) {",
   'packaged verifier checks the new main-process guard');
