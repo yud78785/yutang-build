@@ -62,7 +62,7 @@ jobs:
         run: |
           set -euo pipefail
           cd upstream
-          npx --yes pnpm@10.6.5 install --frozen-lockfile
+          npx --yes pnpm@10.6.5 install --no-frozen-lockfile --ignore-scripts
           cd desktop/ui-api
           npx --yes pnpm@10.6.5 install --frozen-lockfile
 
