@@ -17,6 +17,7 @@ on:
       - tools/windows_147_isolated_edge_lifecycle.mjs
       - tests/test_windows147_test_fixtures.mjs
       - tools/patch_windows147_test_fixtures.mjs
+      - tools/apply_windows147_static_patches.mjs
   workflow_dispatch:
 
 permissions:
@@ -100,21 +101,8 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           git config core.autocrlf false
-          git checkout-index --force -- tools/windows147-patched/manifest.json tools/windows147-patched/browser-host.mjs tools/windows147-patched/core.mjs tools/windows147-patched/api-process.mjs tools/windows147-patched/runtime-paths.mjs tools/windows147-patched/prepare-api-runtime.mjs tools/windows147-patched/browser-launcher.mjs tools/windows147-patched/startup-navigation.mjs
-          $manifest = Get-Content 'tools/windows147-patched/manifest.json' -Raw | ConvertFrom-Json
-          if ($manifest.upstreamCommit -cne '9c49833078f4b4d18b9211ef86d024e7f2e15739' -or $manifest.sources.Count -ne 7) { throw 'STATIC_SECURITY_PATCH_MANIFEST_MISMATCH' }
-          foreach ($item in $manifest.sources) {
-            $target = Join-Path 'upstream' $item.path
-            $actualSource = (git -C upstream hash-object -- $item.path).Trim()
-            if ($actualSource -cne $item.originalGitBlobSha1) { throw ('UPSTREAM_SOURCE_BLOB_MISMATCH: ' + $item.path) }
-            $patchFile = Join-Path 'tools/windows147-patched' $item.patchFile
-            $actualPatch = (git hash-object -- $patchFile).Trim()
-            if ($actualPatch -cne $item.patchedGitBlobSha1) { throw ('PATCH_FILE_BLOB_MISMATCH: ' + $item.patchFile) }
-            Copy-Item -LiteralPath $patchFile -Destination $target -Force
-            $after = (git -C upstream hash-object -- $item.path).Trim()
-            if ($after -cne $item.patchedGitBlobSha1) { throw ('PATCHED_SOURCE_BLOB_MISMATCH: ' + $item.path) }
-            Write-Host ($item.path + ' patchedGitBlobSha1=' + $after + ' sha256=' + (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash.ToLowerInvariant())
-          }
+          node tools/apply_windows147_static_patches.mjs upstream
+          if ($LASTEXITCODE -ne 0) { throw 'PINNED_STATIC_SECURITY_PATCH_APPLICATION_FAILED' }
           node tests/test_windows147_dynamic_patch.mjs upstream
           if ($LASTEXITCODE -ne 0) { throw 'DYNAMIC_SECURITY_PATCH_PREVIEW_FAILED' }
           node tools/patch_windows147_dynamic.mjs upstream
@@ -316,9 +304,11 @@ jobs:
           $exe = Get-Item 'release-api/Dafeiyu-Douyin-API-1.4.7-win-x64.exe'
           $sha = (Get-FileHash $exe.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
           $verification = Get-Content 'release-api/verification-1.4.7.json' -Raw | ConvertFrom-Json
+          $staticSecurity = Get-Content '../windows-security-147-static-patch-receipt.json' -Raw | ConvertFrom-Json
           $security = Get-Content '../windows-security-147-patch-receipt.json' -Raw | ConvertFrom-Json
           $dynamicSecurity = Get-Content '../windows-security-147-dynamic-patch-receipt.json' -Raw | ConvertFrom-Json
           $testFixtures = Get-Content '../windows-security-147-test-fixture-receipt.json' -Raw | ConvertFrom-Json
+          if ($staticSecurity.status -cne 'PASS_PINNED_STATIC_PATCH_BLOBS' -or $staticSecurity.release -ne $false -or $staticSecurity.upstreamCommit -cne $env:UPSTREAM_COMMIT) { throw 'WINDOWS_STATIC_SECURITY_PATCH_RECEIPT_INVALID' }
           if ($security.status -cne 'PASS_EXACT_SOURCE_SECURITY_PATCH' -or $security.release -ne $false) { throw 'WINDOWS_SECURITY_PATCH_RECEIPT_INVALID' }
           if ($dynamicSecurity.status -cne 'PASS_EXACT_SOURCE_SECURITY_PATCH' -or $dynamicSecurity.release -ne $false) { throw 'WINDOWS_DYNAMIC_SECURITY_PATCH_RECEIPT_INVALID' }
           if ($testFixtures.status -cne 'PASS_PATCHED_WINDOWS_TEST_FIXTURES' -or $testFixtures.release -ne $false -or $testFixtures.jobGuardSha256 -cne $env:YUTANG_JOBGUARD_SHA256) { throw 'WINDOWS_TEST_FIXTURE_RECEIPT_INVALID' }
@@ -368,6 +358,7 @@ jobs:
             runtimeId = $verification.runtimeId
             startup = $verification.startup
             renderer = $verification.renderer
+            staticSecurityPatch = $staticSecurity
             securityPatch = $security
             dynamicSecurityPatch = $dynamicSecurity
             testFixturePatch = $testFixtures
@@ -393,6 +384,7 @@ jobs:
             upstream/desktop/release-api/verification-1.4.7.json
             upstream/desktop/release-api/windows-candidate-receipt.json
             upstream/openrouter-desktop-patch-receipt.json
+            upstream/windows-security-147-static-patch-receipt.json
             upstream/windows-security-147-patch-receipt.json
             upstream/windows-security-147-dynamic-patch-receipt.json
             upstream/windows-security-147-test-fixture-receipt.json

@@ -156,7 +156,7 @@ export async function applyTestFixturePatches(root) {
     desktopGuardReleasedAsserted: true,
     legacyMemoryImportDisabled: true,
     oldMemoryDatabaseReadOnlyPreserved: true,
-    noTestsSkipped: true,
+    patchIntroducedSkippedTests: false,
     liveModelCalled: false,
     realMessageSent: false,
     release: false
