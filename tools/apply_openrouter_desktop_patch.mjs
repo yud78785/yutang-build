@@ -13,6 +13,7 @@ const EXPECTED = {
   'desktop/ui-api/tests/browser.test.mjs': '3e39c22c8a50d07578e55f3a03bf0c8e8d466c24',
   'desktop/src/main.mjs': '5296770bcb87e6a60c96cbb2959f615ff4192e5e',
   'desktop/scripts/build-api-desktop.mjs': 'b66c464f93776536e69dece46bdfedd23ce38ed1',
+  'desktop/scripts/verify-packaged-api.mjs': 'f6bc5bc28a54abaeddf188c94d4caef71fa943fb',
   'desktop/README.md': '8cddcbad0e0309a10ea646f9673add4b3b710524',
   'desktop/tests/api-worker.test.mjs': '42f351a26235508d595eb5daadabbc81039d5276',
   'desktop/scripts/stage-api-runtime.mjs': 'c80c1670e08a986984b91191d361bf75202a7d73',
@@ -137,6 +138,39 @@ desktopBuild = replaceOnce(desktopBuild,
   "const entries = ['main.mjs', 'model-settings-guard.mjs', 'api-process.mjs',",
   'desktop main bundle includes credential guard');
 await write('desktop/scripts/build-api-desktop.mjs', desktopBuild);
+
+let packagedVerifier = await loadVerified('desktop/scripts/verify-packaged-api.mjs');
+packagedVerifier = replaceOnce(packagedVerifier,
+  "for (const name of ['main.mjs', 'api-process.mjs', 'prepare-api-runtime.mjs', 'media-key-store.mjs', 'startup-navigation.mjs', 'preload.cjs', 'update-service.mjs', 'update-launcher.mjs']) {",
+  "for (const name of ['main.mjs', 'model-settings-guard.mjs', 'api-process.mjs', 'prepare-api-runtime.mjs', 'media-key-store.mjs', 'startup-navigation.mjs', 'preload.cjs', 'update-service.mjs', 'update-launcher.mjs']) {",
+  'packaged verifier checks the new main-process guard');
+const oldReady = "  await page.getByText(\`独立 API 版 · \${version}\`, { exact: true }).waitFor();";
+const newReady = oldReady + "\n" +
+"  const providerKeyIsolation = await page.evaluate(async () => {\n" +
+"    const bridge = window.douyinDesktop;\n" +
+"    const refused = await bridge.saveSettings({ apiKey: '', baseUrl: 'https://openrouter.ai/api/v1', model: 'deepseek/deepseek-v4.1-flash', remember: false }).then(() => '', error => String(error?.message || error));\n" +
+"    const before = await bridge.getSettings();\n" +
+"    const switched = await bridge.saveSettings({ apiKey: 'synthetic-openrouter-check-only', baseUrl: 'https://openrouter.ai/api/v1', model: 'deepseek/deepseek-v4.1-flash', remember: false });\n" +
+"    const after = await bridge.getSettings();\n" +
+"    await bridge.clearApiKey();\n" +
+"    const cleared = await bridge.getSettings();\n" +
+"    const visible = JSON.stringify({ before, switched, after, cleared });\n" +
+"    return { refused, beforeConfigured: before.configured, beforeBaseUrl: before.baseUrl, switchedBaseUrl: switched.baseUrl, switchedModel: switched.model, afterConfigured: after.configured, cleared: !cleared.configured, noKeyLeak: !visible.includes('synthetic-packaged-check-only') && !visible.includes('synthetic-openrouter-check-only') };\n" +
+"  });\n" +
+"  assert.match(providerKeyIsolation.refused, /旧密钥不会自动转移/);\n" +
+"  assert.equal(providerKeyIsolation.beforeConfigured, true);\n" +
+"  assert.equal(providerKeyIsolation.beforeBaseUrl, 'https://api.deepseek.com');\n" +
+"  assert.equal(providerKeyIsolation.switchedBaseUrl, 'https://openrouter.ai/api/v1');\n" +
+"  assert.equal(providerKeyIsolation.switchedModel, 'deepseek/deepseek-v4.1-flash');\n" +
+"  assert.equal(providerKeyIsolation.afterConfigured, true);\n" +
+"  assert.equal(providerKeyIsolation.cleared, true);\n" +
+"  assert.equal(providerKeyIsolation.noKeyLeak, true);";
+packagedVerifier = replaceOnce(packagedVerifier, oldReady, newReady, 'packaged EXE proves cross-provider key isolation');
+packagedVerifier = replaceOnce(packagedVerifier,
+  "renderer: { loaded: true, privateKeyIpc: true, apiKeyBlurAutoSaved:true, syntheticKeyCleared: true,",
+  "renderer: { loaded: true, privateKeyIpc: true, apiKeyBlurAutoSaved:true, syntheticKeyCleared: true, providerKeyIsolation: true,",
+  'packaged verification receipt records provider key isolation');
+await write('desktop/scripts/verify-packaged-api.mjs', packagedVerifier);
 await write('desktop/src/model-settings-guard.mjs', "export function resolveApiConfigForSave({ current, input, normalize }) {\n  if (!current || !input || typeof input !== 'object' || Array.isArray(input) || typeof normalize !== 'function') {\n    throw new Error('模型设置输入无效。');\n  }\n  const baseUrl = typeof input.baseUrl === 'string' && input.baseUrl.trim() ? input.baseUrl : current.baseUrl;\n  const model = typeof input.model === 'string' && input.model.trim() ? input.model : current.model;\n  const probe = normalize({ apiKey: current.apiKey, baseUrl, model, keySource: '软件 API 设置' });\n  const endpointChanged = probe.baseUrl !== current.baseUrl;\n  const suppliedKey = typeof input.apiKey === 'string' ? input.apiKey.trim() : '';\n  if (endpointChanged && !suppliedKey) {\n    throw new Error('切换 API 服务商后必须重新输入新服务商的 API Key；旧密钥不会自动转移。');\n  }\n  const next = normalize({\n    apiKey: suppliedKey || current.apiKey,\n    baseUrl,\n    model,\n    keySource: '软件 API 设置',\n  });\n  return { next, endpointChanged };\n}\n");
 await write('desktop/tests/model-settings-guard.test.mjs', "import test from 'node:test';\nimport assert from 'node:assert/strict';\nimport { normalizeApiConfig } from '../../api-agent.mjs';\nimport { resolveApiConfigForSave } from '../src/model-settings-guard.mjs';\n\nconst current = normalizeApiConfig({\n  apiKey: 'synthetic-deepseek-old-key',\n  baseUrl: 'https://api.deepseek.com',\n  model: 'deepseek-flash',\n});\n\ntest('same provider with blank key safely retains its existing credential', () => {\n  const { next, endpointChanged } = resolveApiConfigForSave({\n    current,\n    input: { apiKey: '', baseUrl: current.baseUrl, model: 'deepseek-flash' },\n    normalize: normalizeApiConfig,\n  });\n  assert.equal(endpointChanged, false);\n  assert.equal(next.apiKey, 'synthetic-deepseek-old-key');\n});\n\ntest('normalized equivalent endpoint does not trigger an unnecessary key replacement', () => {\n  const { next, endpointChanged } = resolveApiConfigForSave({\n    current,\n    input: { apiKey: '', baseUrl: 'https://api.deepseek.com/', model: 'deepseek-flash' },\n    normalize: normalizeApiConfig,\n  });\n  assert.equal(endpointChanged, false);\n  assert.equal(next.apiKey, 'synthetic-deepseek-old-key');\n});\n\ntest('changing provider without a new key fails closed and never reuses the old key', () => {\n  assert.throws(() => resolveApiConfigForSave({\n    current,\n    input: { apiKey: '', baseUrl: 'https://openrouter.ai/api/v1', model: 'deepseek/deepseek-v4.1-flash' },\n    normalize: normalizeApiConfig,\n  }), /旧密钥不会自动转移/);\n});\n\ntest('changing provider with its own new key replaces the old credential', () => {\n  const { next, endpointChanged } = resolveApiConfigForSave({\n    current,\n    input: {\n      apiKey: 'synthetic-openrouter-new-key',\n      baseUrl: 'https://openrouter.ai/api/v1',\n      model: 'deepseek/deepseek-v4.1-flash',\n    },\n    normalize: normalizeApiConfig,\n  });\n  assert.equal(endpointChanged, true);\n  assert.equal(next.apiKey, 'synthetic-openrouter-new-key');\n  assert.notEqual(next.apiKey, current.apiKey);\n  assert.equal(next.baseUrl, 'https://openrouter.ai/api/v1');\n});\n\ntest('changing model within the same provider retains the existing key', () => {\n  const { next, endpointChanged } = resolveApiConfigForSave({\n    current,\n    input: { apiKey: '', baseUrl: current.baseUrl, model: 'deepseek-flash' },\n    normalize: normalizeApiConfig,\n  });\n  assert.equal(endpointChanged, false);\n  assert.equal(next.apiKey, current.apiKey);\n});\n");
 
@@ -186,7 +220,7 @@ for (const relative of ['api-agent.mjs', 'chat-agent.mjs', 'spark-agent.mjs', 'p
 const desktopBuildCheck = await read('desktop/scripts/build-api-desktop.mjs');
 if (!desktopBuildCheck.includes("'model-settings-guard.mjs'")) throw new Error('DESKTOP_BUNDLE_OMITS_MODEL_SETTINGS_GUARD');
 const modified = {};
-for (const relative of ['api-agent.mjs', 'chat-agent.mjs', 'spark-agent.mjs', 'public-comment-agent.mjs', 'desktop/src/main.mjs', 'desktop/src/model-settings-guard.mjs', 'desktop/scripts/build-api-desktop.mjs', 'desktop/tests/model-settings-guard.test.mjs', 'desktop/ui-api/src/main.jsx', 'desktop/ui-api/tests/browser.test.mjs', 'desktop/README.md', 'desktop/tests/api-worker.test.mjs']) {
+for (const relative of ['api-agent.mjs', 'chat-agent.mjs', 'spark-agent.mjs', 'public-comment-agent.mjs', 'desktop/src/main.mjs', 'desktop/src/model-settings-guard.mjs', 'desktop/scripts/build-api-desktop.mjs', 'desktop/scripts/verify-packaged-api.mjs', 'desktop/tests/model-settings-guard.test.mjs', 'desktop/ui-api/src/main.jsx', 'desktop/ui-api/tests/browser.test.mjs', 'desktop/README.md', 'desktop/tests/api-worker.test.mjs']) {
   modified[relative] = sha256(await read(relative));
 }
 const receipt = {
@@ -204,6 +238,7 @@ const receipt = {
   modelCallPathsPatched: ['ApiAgent.decideWatch', 'ApiAgent.runTask', 'ChatAgent.reply', 'SparkAgent.greet', 'PublicCommentAgent.generate'],
   desktopRuntimeStagingVerified: true,
   desktopMainBundleFilesVerified: true,
+  desktopPackagedVerifierIncludesKeyGuard: true,
   liveApiRequests: 0,
   apiKeysUsed: false,
   exeBuilt: false,
