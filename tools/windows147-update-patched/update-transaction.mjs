@@ -162,7 +162,8 @@ export async function recoverUpdateTransaction(updatesDirectory, { shortcut } = 
     hashFile(transaction.shortcut),
     hashFile(transaction.backupShortcut),
     hashFile(transaction.stagedShortcut),
-    hashFile(transaction.targetExe)
+    hashFile(transaction.targetExe),
+    hashFile(transaction.temporaryShortcut)
   ]);
   if (targetHash !== transaction.targetExeSha256) {
     return { status: 'blocked', reason: 'UPDATE_TARGET_IDENTITY_CHANGED' };
@@ -177,6 +178,7 @@ export async function recoverUpdateTransaction(updatesDirectory, { shortcut } = 
     }
     if (backupHash) await fs.rm(transaction.backupShortcut);
     if (stagedHash === transaction.newShortcutSha256) await fs.rm(transaction.stagedShortcut);
+    if (temporaryHash === transaction.newShortcutSha256) await fs.rm(transaction.temporaryShortcut);
     await fs.rm(transactionFile);
     return { status: 'committed-cleanup' };
   }
@@ -198,6 +200,7 @@ export async function recoverUpdateTransaction(updatesDirectory, { shortcut } = 
     return { status: 'blocked', reason: 'RESTORED_SHORTCUT_HASH_MISMATCH' };
   }
   if (stagedHash === transaction.newShortcutSha256) await fs.rm(transaction.stagedShortcut);
+  if (temporaryHash === transaction.newShortcutSha256) await fs.rm(transaction.temporaryShortcut);
   await fs.rm(transactionFile);
   return { status: 'rolled-back' };
 }
