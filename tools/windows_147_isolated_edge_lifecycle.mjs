@@ -61,9 +61,10 @@ export function verifyProcessSnapshot({ processes, hostPid, profile, listenerPid
     throw new Error('Isolated-profile MS Edge process is not a descendant of recorded browser host');
   const family = list.filter(p => /msedge\.exe$/i.test(String(p.Name)) &&
     hasHostAncestor(Number(p.ProcessId), hostPid, list));
-  if (family.some(p => typeof p.CommandLine !== 'string' ||
-    /(?:^|\s)--(?:no-sandbox|disable-setuid-sandbox)(?:\s|=|$)/i.test(p.CommandLine)))
-    throw new Error('Unsafe or unreadable MS Edge child process command line');
+  const unreadable = family.filter(p => typeof p.CommandLine !== 'string');
+  if (unreadable.length) throw Object.assign(new Error('Unreadable MS Edge child process command line (PIDs: ' + unreadable.map(p => Number(p.ProcessId)).join(',') + ')'), { code: 'EDGE_CHILD_COMMAND_LINE_UNREADABLE' });
+  const unsafe = family.filter(p => /(?:^|\s)--(?:no-sandbox|disable-setuid-sandbox)(?:\s|=|$)/i.test(p.CommandLine));
+  if (unsafe.length) throw Object.assign(new Error('Unsafe MS Edge sandbox-disabling command line (PIDs: ' + unsafe.map(p => Number(p.ProcessId)).join(',') + ')'), { code: 'EDGE_UNSAFE_SANDBOX_FLAG' });
   if (!listenerPids.length || listenerPids.some(pid => !family.some(p => Number(p.ProcessId) === pid)))
     throw new Error('CDP port listener PID is not a descendant MS Edge process');
   if (!portAddresses.length || portAddresses.some(a => !['127.0.0.1', '::1'].includes(a)))
@@ -112,8 +113,9 @@ export function selfTest() {
   assert.throws(()=>verifyProcessSnapshot({...good,portAddresses:['0.0.0.0']}),/loopback/);
   assert.throws(()=>verifyProcessSnapshot({...good,processes:list.map(p=>p.ProcessId===200?{...p,ParentProcessId:300}:p)}),/descendant/);
   assert.throws(()=>verifyProcessSnapshot({...good,processes:list.map(p=>p.ProcessId===201?{...p,CommandLine:p.CommandLine+' --no-sandbox'}:p)}),/Unsafe/);
+  assert.throws(()=>verifyProcessSnapshot({...good,processes:list.map(p=>p.ProcessId===201?{...p,CommandLine:null}:p)}),error=>error?.code==='EDGE_CHILD_COMMAND_LINE_UNREADABLE');
   assert.throws(()=>verifyProcessSnapshot({...good,profile:'C:\\another'}),/No MS Edge/);
-  console.log('PASS Windows process ownership/port binding and native USERPROFILE/APPDATA/LOCALAPPDATA preservation regression assertions');
+  console.log('PASS Windows process ownership, loopback binding, native profile preservation and unreadable-commandline fail-closed regression assertions');
 }
 
 async function sha256(file) {
@@ -159,6 +161,7 @@ function summarizeHostProcesses(processes, hostPid, backendPid, profile, control
     edgeWithProfileArg: edge.filter(p => String(p.CommandLine || '').toLowerCase().includes(profile.toLowerCase())).length,
     edgeWithLoopbackArg: edge.filter(p => /--remote-debugging-address=127\.0\.0\.1/i.test(String(p.CommandLine || ''))).length,
     edgeWithNoSandbox: edge.filter(p => /--no-sandbox|--disable-setuid-sandbox/i.test(String(p.CommandLine || ''))).length,
+    edgeUnreadableCommandLineCount: edge.filter(p => typeof p.CommandLine !== 'string').length,
     edgeWithNetworkSandboxArg: edge.filter(p => String(p.CommandLine || '').includes('--enable-features=NetworkServiceSandbox')).length
   };
 }
@@ -635,9 +638,26 @@ async function inspectReadyBrowser(state, backendPid, profile, controlDir) {
   assert.ok(Number.isSafeInteger(state.pid) && state.pid > 0);
   const version = await (await fetch('http://127.0.0.1:' + PORT + '/json/version', { signal: AbortSignal.timeout(5000) })).json();
   assert.match(String(version.Browser), /(?:Edg|Chrome)/);
-  const processes = asRows(ps("Get-CimInstance Win32_Process -Filter \"Name = 'msedge.exe' OR Name = 'node.exe'\" | Select-Object ProcessId,ParentProcessId,Name,CommandLine | ConvertTo-Json -Compress -Depth 4"));
-  const listeners = loopbackListeners(PORT);
-  const hostSummary = summarizeHostProcesses(processes, state.pid, backendPid, profile, controlDir);
+  let processes, listeners, hostSummary, ownership;
+  let unreadableCommandLineRetries = 0;
+  for (let attempt = 0; attempt < 6; attempt++) {
+    processes = asRows(ps("Get-CimInstance Win32_Process -Filter \"Name = 'msedge.exe' OR Name = 'node.exe'\" | Select-Object ProcessId,ParentProcessId,Name,CommandLine | ConvertTo-Json -Compress -Depth 4"));
+    listeners = loopbackListeners(PORT);
+    hostSummary = summarizeHostProcesses(processes, state.pid, backendPid, profile, controlDir);
+    try {
+      ownership = verifyProcessSnapshot({
+        processes, hostPid: state.pid, profile,
+        listenerPids: listeners.map(item => Number(item.OwningProcess)),
+        portAddresses: listeners.map(item => item.LocalAddress)
+      });
+      break;
+    } catch (error) {
+      if (error?.code !== 'EDGE_CHILD_COMMAND_LINE_UNREADABLE' || attempt === 5) throw error;
+      unreadableCommandLineRetries++;
+      await delay(150);
+    }
+  }
+  if (!ownership) throw new Error('Edge process ownership snapshot did not stabilize within the bounded retry window.');
   assert.equal(hostSummary.hostFound, true, 'Browser host PID is not present in the process snapshot');
   assert.equal(hostSummary.hostIsNode, true, 'Browser host is not the expected Node process');
   assert.equal(hostSummary.hostCommandHasBrowserHost, true, 'Browser host command line does not identify browser-host.mjs');
@@ -646,14 +666,9 @@ async function inspectReadyBrowser(state, backendPid, profile, controlDir) {
   assert.equal(hostSummary.hostParentIsBackend, true, 'Browser host is not a child of the expected API backend');
   assert.ok(hostSummary.edgeWithPortArg > 0, 'Edge command line does not include the expected CDP port');
   assert.ok(hostSummary.edgeWithLoopbackArg > 0, 'Edge command line does not include the loopback-only CDP address');
-  const ownership = verifyProcessSnapshot({
-    processes, hostPid: state.pid, profile,
-    listenerPids: listeners.map(item => Number(item.OwningProcess)),
-    portAddresses: listeners.map(item => item.LocalAddress)
-  });
   assert.equal(hostSummary.edgeWithNoSandbox, 0, 'A sandbox-disabling Edge argument was detected');
   assert.ok(hostSummary.edgeWithNetworkSandboxArg > 0, 'Network Service sandbox launch flag was not passed to Edge');
-  return { state, browserVersion: version.Browser, hostSummary, ownership };
+  return { state, browserVersion: version.Browser, hostSummary, ownership, unreadableCommandLineRetries };
 }
 
 async function readColdStartDiagnostics(userData, candidatePid, exeFile, redactionPaths) {
