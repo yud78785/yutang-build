@@ -164,12 +164,19 @@ func runGuard() error {
 	if _, err := fmt.Fprint(os.Stdout, handshake); err != nil {
 		return fmt.Errorf("write readiness handshake: %w", err)
 	}
-	state, _, callErr = procWaitForSingleObject.Call(owner, infinite)
-	if state != waitObject0 {
-		if state == waitFailed {
-			return win32Error("WaitForSingleObject(owner, INFINITE)", callErr)
+	for {
+		// Close the job when either the desktop owner exits or its guarded worker exits.
+		// This prevents a crashed API worker from leaving its Edge descendants alive.
+		state, _, callErr = procWaitForSingleObject.Call(owner, 500)
+		if state == waitObject0 { break }
+		if state == waitFailed { return win32Error("WaitForSingleObject(owner, 500)", callErr) }
+		if state != waitTimeout { return fmt.Errorf("unexpected owner wait state: 0x%08x", uint32(state)) }
+		if request.targetPID != ownerPID {
+			state, _, callErr = procWaitForSingleObject.Call(target, 0)
+			if state == waitObject0 { break }
+			if state == waitFailed { return win32Error("WaitForSingleObject(target, 0)", callErr) }
+			if state != waitTimeout { return fmt.Errorf("unexpected worker wait state: 0x%08x", uint32(state)) }
 		}
-		return fmt.Errorf("unexpected owner exit wait state: 0x%08x", uint32(state))
 	}
 
 	// Closing the only job handle activates KILL_ON_JOB_CLOSE. For the desktop
