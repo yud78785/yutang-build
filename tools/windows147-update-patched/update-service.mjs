@@ -14,7 +14,7 @@ const MAX_MANIFEST_BYTES = 64 * 1024;
 const MAX_SIGNATURE_BYTES = 4096;
 
 export function parseVersion(value) {
-  const match = /^v?(\d+)\.(\d+)\.(\d+)$/.exec(value || '');
+  const match = /^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.exec(value || '');
   if (!match || match.slice(1).some(item => !Number.isSafeInteger(Number(item)))) return null;
   return match.slice(1).map(Number);
 }
