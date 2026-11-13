@@ -443,8 +443,9 @@ async function run(exeFile) {
     assert.equal(sandbox.networkServiceProcessOwned, true, 'Network Service process lineage not verified');
     const lpac = runAccessCheck(sandbox.networkServicePid, sandbox.networkServiceAppContainerSid);
     assert.equal(lpac.isAppContainer, true);
-    assert.equal(lpac.packageSidAccess, true, 'LPAC AccessCheck positive control failed');
-    assert.notEqual(lpac.classification, 'unknown', 'LPAC AccessCheck classification was ambiguous');
+    assert.ok(lpac.canonicalGrantedAccess === 2 || lpac.canonicalGrantedAccess === 3,
+      'Chromium-style LPAC AccessCheck returned an unexpected access mask');
+    assert.notEqual(lpac.classification, 'unknown', 'Chromium-style LPAC AccessCheck classification was ambiguous');
     report.sandbox = {
       rendererSandboxVerified: sandbox.rendererSandboxVerified,
       rendererProcessCount: sandbox.rendererProcessCount,
