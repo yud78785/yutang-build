@@ -84,6 +84,57 @@ export async function applyUpdateTrustPatch(upstream, repositoryRoot = REPOSITOR
       createHash('sha256').update(verifier).digest('hex') !== verifierExpectedSha256) {
     throw new Error('UPDATE_TRUST_PATCH_VERIFIER_SOURCE_SHA_MISMATCH');
   }
+  const spawnAnchor = "const child = spawn(executable, ['--remote-debugging-port=0', '--remote-debugging-address=127.0.0.1'], { env, windowsHide: true, stdio: 'ignore' });";
+  const spawnReplacement = [
+    "const child = spawn(executable, ['--remote-debugging-port=0', '--remote-debugging-address=127.0.0.1'], { env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });",
+    "let childStdout = '', childStderr = '';",
+    "child.stdout.on('data', chunk => { childStdout = (childStdout + chunk.toString('utf8')).slice(-12000); });",
+    "child.stderr.on('data', chunk => { childStderr = (childStderr + chunk.toString('utf8')).slice(-12000); });"
+  ].join('\\n');
+  verifier = replaceExactlyOnce(verifier, spawnAnchor, spawnReplacement, 'packaged-startup-output-capture');
+
+  const readJsonAnchor = "const readJson = async file => JSON.parse(await fs.readFile(file, 'utf8'));";
+  const diagnosticsCode = [
+    "const redactDiagnostic = value => String(value || '').replace(/\\\\bBearer\\\\s+[^\\\\s,;\\\\\"']+/gi, 'Bearer [redacted]').replace(/\\\\bsk-[\\\\w-]+/g, '[redacted]').slice(-12000);",
+    "async function collectStartupDiagnostics() {",
+    "  const readText = async file => { try { return await fs.readFile(file, 'utf8'); } catch (error) { if (error.code === 'ENOENT') return ''; throw error; } };",
+    "  const timeline = []; const startupErrors = [];",
+    "  try { const names = (await fs.readdir(path.join(userData, 'startup-diagnostics'))).filter(name => name.endsWith('.jsonl')).sort().slice(-5); for (const name of names) timeline.push({ file: name, content: redactDiagnostic(await readText(path.join(userData, 'startup-diagnostics', name))) }); } catch {}",
+    "  try { const names = (await fs.readdir(path.join(userData, 'startup-errors'))).filter(name => name.endsWith('.txt')).sort().slice(-5); for (const name of names) startupErrors.push({ file: name, content: redactDiagnostic(await readText(path.join(userData, 'startup-errors', name))) }); } catch {}",
+    "  return { exitCode: child.exitCode, signalCode: child.signalCode, startupError: redactDiagnostic(await readText(path.join(userData, 'startup-error.txt'))), startupErrors, timeline, stdout: redactDiagnostic(childStdout), stderr: redactDiagnostic(childStderr) };",
+    "}",
+    "async function failWithStartupDiagnostics(message, cause) {",
+    "  const report = { message, cause: redactDiagnostic(cause?.message || cause || ''), ...(await collectStartupDiagnostics()) };",
+    "  await fs.writeFile(path.join(releaseDirectory, 'startup-failure-diagnostics.json'), JSON.stringify(report, null, 2) + '\\\\n');",
+    "  console.error('PACKAGED_STARTUP_DIAGNOSTICS ' + JSON.stringify(report));",
+    "  throw new Error(message + (report.startupError ? ': ' + report.startupError : report.cause ? ': ' + report.cause : ''));",
+    "}",
+    readJsonAnchor
+  ].join('\\n');
+  verifier = replaceExactlyOnce(verifier, readJsonAnchor, diagnosticsCode, 'packaged-startup-diagnostics-reader');
+
+  const oldUntil = [
+    "async function until(action, milliseconds = 60_000) {",
+    "  const end = Date.now() + milliseconds;",
+    "  let last;",
+    "  do { try { const value = await action(); if (value) return value; } catch (error) { last = error; } await delay(200); } while (Date.now() < end);",
+    "  throw last || new Error('独立便携包检查超时。');",
+    "}"
+  ].join('\\n');
+  const newUntil = [
+    "async function until(action, milliseconds = 60_000) {",
+    "  const end = Date.now() + milliseconds;",
+    "  let last;",
+    "  do {",
+    "    if (child.exitCode !== null || child.signalCode !== null) return failWithStartupDiagnostics('便携 EXE 在桌面就绪前退出。', 'exit=' + child.exitCode + ' signal=' + child.signalCode);",
+    "    try { const value = await action(); if (value) return value; } catch (error) { last = error; }",
+    "    await delay(200);",
+    "  } while (Date.now() < end);",
+    "  return failWithStartupDiagnostics('独立便携包检查超时。', last);",
+    "}"
+  ].join('\\n');
+  verifier = replaceExactlyOnce(verifier, oldUntil, newUntil, 'packaged-startup-diagnostics-until');
+
   const packagedReadmeAnchor = "assert.equal(packaged.version, version); assert.equal(manifest.productVersion, version);";
   const packagedReadmeCheck = [
     "assert.equal(packaged.version, version); assert.equal(manifest.productVersion, version);",
