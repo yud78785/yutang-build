@@ -9,9 +9,7 @@ const REPOSITORY_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)
 const UPSTREAM_COMMIT = '9c49833078f4b4d18b9211ef86d024e7f2e15739';
 const EXPECTED_BLOBS = {
   'desktop/src/update-service.mjs': '92709845a54a961eb58cc76e1697dce917c6252e',
-  'desktop/src/update-launcher.mjs': '1d98056c709de8d4ddcc4322cfb82b1204dc8538',
-  'desktop/README.md': '8cddcbad0e0309a10ea646f9673add4b3b710524',
-  'desktop/scripts/verify-packaged-api.mjs': 'f6bc5bc28a54abaeddf188c94d4caef71fa943fb'
+  'desktop/src/update-launcher.mjs': '1d98056c709de8d4ddcc4322cfb82b1204dc8538'
 };
 
 function gitBlobSha1(value) {
@@ -55,8 +53,22 @@ export async function applyUpdateTrustPatch(upstream, repositoryRoot = REPOSITOR
   await write(path.join(upstream, 'desktop/src/update-service.mjs'), serviceTemplate);
   await write(path.join(upstream, 'desktop/src/update-launcher.mjs'), launcherTemplate);
 
+  const openrouterReceipt = JSON.parse(await read(path.join(upstream, 'openrouter-desktop-patch-receipt.json')));
+  const dynamicReceipt = JSON.parse(await read(path.join(upstream, 'windows-security-147-dynamic-patch-receipt.json')));
+  if (openrouterReceipt.status !== 'PATCH_APPLIED_TO_PINNED_UPSTREAM_SOURCE_ONLY' ||
+      openrouterReceipt.upstreamCommit !== UPSTREAM_COMMIT ||
+      dynamicReceipt.status !== 'PASS_EXACT_SOURCE_SECURITY_PATCH' ||
+      dynamicReceipt.upstreamCommit !== UPSTREAM_COMMIT) {
+    throw new Error('UPDATE_TRUST_PATCH_PREVIOUS_SOURCE_RECEIPTS_INVALID');
+  }
+
   const readmePath = path.join(upstream, 'desktop/README.md');
   let readme = await read(readmePath);
+  const readmeExpectedSha256 = openrouterReceipt.modifiedSourceSha256?.['desktop/README.md'];
+  if (!/^[a-f0-9]{64}$/.test(String(readmeExpectedSha256 || '')) ||
+      createHash('sha256').update(readme).digest('hex') !== readmeExpectedSha256) {
+    throw new Error('UPDATE_TRUST_PATCH_README_SOURCE_SHA_MISMATCH');
+  }
   const oldReleaseParagraph = '固定下载入口为 [1.4.7 Release](https://github.com/LockyBee/dsh-douyin-agent/releases/tag/v1.4.7)，以页面实际附件为准，文件名 `Dafeiyu-Douyin-API-1.4.7-win-x64.exe`。先正常退出旧版再运行新版，保留记忆、登录目录及本机设置。便携包未签名，可用同名 `.sha256` 文件核对完整性。软件内“检查更新”只接受 GitHub 的正式 Release，不安装草稿或预发布包；检查成功不等于已完成下载和替换。';
   const newReleaseParagraph = '当前 1.4.7 是 YuTang 的未签名验收候选，不是正式发行版；请勿把 GitHub Actions 的候选 Artifact 当作公开下载包。正式发布前会在 YuTang 的 Release 页面提供经过双平台验收并签名的 EXE。当前自动更新处于安全关闭状态：尚未配置可信的 Authenticode 发布者身份与 Ed25519 更新清单公钥，软件不会下载或安装更新。已安装版本、记忆、登录目录及本机设置不受此状态影响。';
   readme = replaceExactlyOnce(readme, oldReleaseParagraph, newReleaseParagraph, 'desktop-readme-update-channel');
@@ -64,6 +76,11 @@ export async function applyUpdateTrustPatch(upstream, repositoryRoot = REPOSITOR
 
   const verifierPath = path.join(upstream, 'desktop/scripts/verify-packaged-api.mjs');
   let verifier = await read(verifierPath);
+  const verifierExpectedSha256 = dynamicReceipt.dynamicPatchedSourceSha256?.['desktop/scripts/verify-packaged-api.mjs'];
+  if (!/^[a-f0-9]{64}$/.test(String(verifierExpectedSha256 || '')) ||
+      createHash('sha256').update(verifier).digest('hex') !== verifierExpectedSha256) {
+    throw new Error('UPDATE_TRUST_PATCH_VERIFIER_SOURCE_SHA_MISMATCH');
+  }
   const packagedReadmeAnchor = "assert.equal(packaged.version, version); assert.equal(manifest.productVersion, version);";
   const packagedReadmeCheck = [
     "assert.equal(packaged.version, version); assert.equal(manifest.productVersion, version);",
