@@ -188,6 +188,10 @@ async function closeBrowser(port) {
   } finally { try { socket.close(); } catch {} }
 }
 function runAccessCheck(pid, packageSid) {
+  // Mirrors Chromium's upstream CheckLpacToken() AccessCheck test:
+  // WORLD grants both probe bits; ALL_APPLICATION_PACKAGES grants bit 1;
+  // ALL_RESTRICTED_APPLICATION_PACKAGES grants bit 2. MAXIMUM_ALLOWED
+  // returns 3 for ordinary AppContainer and 2 for LPAC.
   const csharp = [
     'using System;',
     'using System.ComponentModel;',
@@ -202,19 +206,6 @@ function runAccessCheck(pid, packageSid) {
     '  [DllImport("advapi32.dll", CharSet=CharSet.Unicode, SetLastError=true)] public static extern bool ConvertStringSecurityDescriptorToSecurityDescriptor(string sddl, uint revision, out IntPtr descriptor, out uint size);',
     '  [DllImport("advapi32.dll", SetLastError=true)] public static extern bool AccessCheck(IntPtr descriptor, IntPtr clientToken, uint desiredAccess, ref GENERIC_MAPPING mapping, IntPtr privileges, ref uint privilegeLength, out uint grantedAccess, [MarshalAs(UnmanagedType.Bool)] out bool accessStatus);',
     '  [DllImport("kernel32.dll", SetLastError=true)] public static extern IntPtr LocalFree(IntPtr memory);',
-    '  static bool Check(IntPtr token, string sid) {',
-    '    IntPtr descriptor = IntPtr.Zero, privileges = IntPtr.Zero;',
-    '    uint descriptorSize = 0, granted = 0, privilegeLength = 4096;',
-    '    bool access = false;',
-    '    try {',
-    '      string sddl = "D:(A;;0x00000001;;;" + sid + ")";',
-    '      if (!ConvertStringSecurityDescriptorToSecurityDescriptor(sddl, 1, out descriptor, out descriptorSize)) throw new Win32Exception(Marshal.GetLastWin32Error(), "SDDL conversion failed");',
-    '      privileges = Marshal.AllocHGlobal((int)privilegeLength);',
-    '      GENERIC_MAPPING mapping = new GENERIC_MAPPING();',
-    '      if (!AccessCheck(descriptor, token, 0x00000001, ref mapping, privileges, ref privilegeLength, out granted, out access)) throw new Win32Exception(Marshal.GetLastWin32Error(), "AccessCheck call failed");',
-    '      return access && (granted & 0x00000001) != 0;',
-    '    } finally { if (privileges != IntPtr.Zero) Marshal.FreeHGlobal(privileges); if (descriptor != IntPtr.Zero) LocalFree(descriptor); }',
-    '  }',
     '  public static object Read(int pid, string packageSid) {',
     '    IntPtr process = OpenProcess(0x1000, false, pid);',
     '    if (process == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error(), "OpenProcess failed");',
@@ -226,11 +217,20 @@ function runAccessCheck(pid, packageSid) {
     '      bool isAppContainer = Marshal.ReadInt32(appBuffer) != 0;',
     '      if (!isAppContainer) throw new InvalidOperationException("Network Service token is not an AppContainer");',
     '      if (!DuplicateToken(token, 2, out impersonation)) throw new Win32Exception(Marshal.GetLastWin32Error(), "DuplicateToken failed");',
-    '      bool packageSidAccess = Check(impersonation, packageSid);',
-    '      bool allApplicationPackagesAccess = Check(impersonation, "S-1-15-2-1");',
-    '      bool allRestrictedApplicationPackagesAccess = Check(impersonation, "S-1-15-2-2");',
-    '      string classification = packageSidAccess && allApplicationPackagesAccess && !allRestrictedApplicationPackagesAccess ? "ordinary-AppContainer" : packageSidAccess && !allApplicationPackagesAccess && allRestrictedApplicationPackagesAccess ? "LPAC-semantics-confirmed" : "unknown";',
-    '      return new { processId = pid, isAppContainer = isAppContainer, packageSidAccess = packageSidAccess, allApplicationPackagesAccess = allApplicationPackagesAccess, allRestrictedApplicationPackagesAccess = allRestrictedApplicationPackagesAccess, classification = classification, method = "AccessCheck with package-SID positive control and ALL_APPLICATION_PACKAGES / ALL_RESTRICTED_APPLICATION_PACKAGES ACEs" };',
+    '      IntPtr descriptor = IntPtr.Zero, privileges = IntPtr.Zero;',
+    '      try {',
+    '        string sddl = "O:SYG:SYD:(A;;0x00000003;;;WD)(A;;0x00000001;;;S-1-15-2-1)(A;;0x00000002;;;S-1-15-2-2)";',
+    '        uint descriptorSize = 0;',
+    '        if (!ConvertStringSecurityDescriptorToSecurityDescriptor(sddl, 1, out descriptor, out descriptorSize)) throw new Win32Exception(Marshal.GetLastWin32Error(), "SDDL conversion failed");',
+    '        uint granted = 0, privilegeLength = 4096;',
+    '        privileges = Marshal.AllocHGlobal((int)privilegeLength);',
+    '        bool access = false;',
+    '        GENERIC_MAPPING mapping = new GENERIC_MAPPING();',
+    '        if (!AccessCheck(descriptor, impersonation, 0x02000000, ref mapping, privileges, ref privilegeLength, out granted, out access)) { int code = Marshal.GetLastWin32Error(); throw new Win32Exception(code, "Chromium-style AccessCheck failed; Win32Error=" + code); }',
+    '        if (!access) throw new InvalidOperationException("Chromium-style AccessCheck returned accessStatus=false");',
+    '        string classification = granted == 2 ? "LPAC-semantics-confirmed" : granted == 3 ? "ordinary-AppContainer" : "unknown";',
+    '        return new { processId = pid, isAppContainer = isAppContainer, packageSid = packageSid, canonicalGrantedAccess = granted, classification = classification, method = "Chromium upstream CheckLpacToken AccessCheck with WORLD, ALL_APPLICATION_PACKAGES and ALL_RESTRICTED_APPLICATION_PACKAGES ACEs" };',
+    '      } finally { if (privileges != IntPtr.Zero) Marshal.FreeHGlobal(privileges); if (descriptor != IntPtr.Zero) LocalFree(descriptor); }',
     '    } finally { if (appBuffer != IntPtr.Zero) Marshal.FreeHGlobal(appBuffer); if (impersonation != IntPtr.Zero) CloseHandle(impersonation); if (token != IntPtr.Zero) CloseHandle(token); CloseHandle(process); }',
     '  }',
     '}'
