@@ -176,7 +176,7 @@ async function probeHttps(port) {
           }, sessionId);
           if (typeof result.result?.value === 'string') snapshot = JSON.parse(result.result.value);
           lastEvalError = null;
-          return snapshot?.readyState === 'complete' && /Example Domain/.test(snapshot?.text || '') && responseInfo;
+          return snapshot?.readyState === 'complete' && snapshot?.title === 'Example Domain' && /This domain is for use in documentation examples/.test(snapshot?.text || '') && responseInfo;
         } catch (error) {
           lastEvalError = String(error?.message || error).slice(0, 240);
           return null;
@@ -207,21 +207,26 @@ async function probeHttps(port) {
     assert.equal(new URL(snapshot.href).origin, 'https://example.com', 'Final page origin changed');
     assert.equal(responseInfo.status, 200, 'Public HTTPS probe did not return HTTP 200');
     assert.ok(responseInfo.remoteIPAddress, 'Edge did not report the resolved remote IP');
-    assert.ok(responseInfo.securityDetails?.protocol && /^TLS/i.test(responseInfo.securityDetails.protocol),
-      'Edge did not report a TLS security session');
+    const securityProtocol = String(responseInfo.securityDetails?.protocol || '');
+    const httpProtocol = String(responseInfo.protocol || '');
+    assert.ok(/^TLS/i.test(securityProtocol) || /^QUIC$/i.test(securityProtocol),
+      'Edge did not report TLS or QUIC secure transport');
+    assert.ok(/^(?:h2|h3|http\/1\.1)$/i.test(httpProtocol),
+      'Edge did not report a supported HTTP protocol');
     const body = await cdpCommand(socket, nextId++, 'Network.getResponseBody', { requestId: responseInfo.requestId }, sessionId);
     const bodyText = body.base64Encoded ? Buffer.from(body.body, 'base64').toString('utf8') : String(body.body || '');
-    assert.match(bodyText, /Example Domain/, 'HTTPS response body did not contain the expected page content');
+    assert.match(bodyText, /This domain is for use in documentation examples/, 'HTTPS response body did not contain the expected page content');
     return {
       url: TARGET,
       dnsRemoteIp: String(responseInfo.remoteIPAddress),
       httpStatus: responseInfo.status,
       mimeType: String(responseInfo.mimeType || ''),
-      tlsProtocol: String(responseInfo.securityDetails.protocol),
+      securityProtocol,
+      httpProtocol,
       tlsIssuer: String(responseInfo.securityDetails.issuer || '').slice(0, 160),
       title: String(snapshot.title || ''),
-      pageContentVerified: /Example Domain/.test(snapshot.text || ''),
-      responseBodyVerified: /Example Domain/.test(bodyText),
+      pageContentVerified: snapshot.title === 'Example Domain' && /This domain is for use in documentation examples/.test(snapshot.text || ''),
+      responseBodyVerified: /This domain is for use in documentation examples/.test(bodyText),
       requestEvents: requests.length,
       responseEvents: responses.length,
       loadEventCount
