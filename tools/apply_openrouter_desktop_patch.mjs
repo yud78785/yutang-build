@@ -5,6 +5,7 @@ import { execFileSync } from 'node:child_process';
 
 const BASE_COMMIT = '9c49833078f4b4d18b9211ef86d024e7f2e15739';
 const EXPECTED = {
+  'browser-host.mjs': '8b3524ecc9df5744ee0886aab76b89a6a186e972',
   'api-agent.mjs': 'e7c3f37ad39b29a461ecef1356c86d4de6822ff1',
   'chat-agent.mjs': 'a5c1769d9534d536a09a97fb881116784063744c',
   'spark-agent.mjs': 'a57f1910277f2292de25e634fb3eb1682e027465',
@@ -41,6 +42,26 @@ async function loadVerified(relative) {
   if (actual !== EXPECTED[relative]) throw new Error('UPSTREAM_SOURCE_SHA_MISMATCH: ' + relative + ' expected ' + EXPECTED[relative] + ' got ' + actual);
   return value;
 }
+
+let browserHost = await loadVerified('browser-host.mjs');
+browserHost = replaceOnce(browserHost,
+  "channel: 'msedge', headless: false, viewport: null, ignoreDefaultArgs: ['--mute-audio'],",
+  "channel: 'msedge', headless: false, viewport: null, chromiumSandbox: true, timeout: 20_000, ignoreDefaultArgs: ['--mute-audio'],",
+  'exact 1.4.7 production Edge Chromium sandbox + bounded startup');
+browserHost = replaceOnce(browserHost,
+  "args: [\`--remote-debugging-port=\${port}\`, '--remote-debugging-address=127.0.0.1', '--autoplay-policy=no-user-gesture-required'],",
+  "args: [\`--remote-debugging-port=\${port}\`, '--remote-debugging-address=127.0.0.1', '--autoplay-policy=no-user-gesture-required', '--enable-features=NetworkServiceSandbox'],",
+  'exact 1.4.7 production Edge Network Service sandbox');
+const launchStart = browserHost.indexOf('chromiumImpl.launchPersistentContext(profile, {');
+if (launchStart < 0 || browserHost.indexOf('chromiumImpl.launchPersistentContext(profile, {', launchStart + 1) !== -1) {
+  throw new Error('PINNED_EDGE_LAUNCH_COUNT_INVALID');
+}
+const launchOptions = browserHost.slice(launchStart, launchStart + 800);
+for (const required of ['chromiumSandbox: true', 'timeout: 20_000', '--enable-features=NetworkServiceSandbox']) {
+  if (!launchOptions.includes(required)) throw new Error('MISSING_REQUIRED_EDGE_HARDENING: ' + required);
+}
+if (/--(?:no-sandbox|disable-setuid-sandbox)/u.test(launchOptions)) throw new Error('SANDBOX_DISABLING_FLAGS_FORBIDDEN');
+await write('browser-host.mjs', browserHost);
 
 let api = await loadVerified('api-agent.mjs');
 api = replaceOnce(api,
@@ -294,6 +315,9 @@ const receipt = {
     provider: { allow_fallbacks: true, sort: 'price', max_price: { prompt: 0.15, completion: 0.60 }, data_collection: 'deny', zdr: true, require_parameters: true },
   },
   modelCallPathsPatched: ['ApiAgent.decideWatch', 'ApiAgent.runTask', 'ChatAgent.reply', 'SparkAgent.greet', 'PublicCommentAgent.generate'],
+  productionEdgeSandboxSourcePatched: true,
+  productionEdgeStartupTimeoutMs: 20000,
+  productionEdgeNetworkSandboxFlag: true,
   desktopRuntimeStagingVerified: true,
   desktopMainBundleFilesVerified: true,
   desktopPackagedVerifierIncludesKeyGuard: true,
