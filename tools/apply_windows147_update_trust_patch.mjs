@@ -90,12 +90,12 @@ export async function applyUpdateTrustPatch(upstream, repositoryRoot = REPOSITOR
     "let childStdout = '', childStderr = '';",
     "child.stdout.on('data', chunk => { childStdout = (childStdout + chunk.toString('utf8')).slice(-12000); });",
     "child.stderr.on('data', chunk => { childStderr = (childStderr + chunk.toString('utf8')).slice(-12000); });"
-  ].join('\\n');
+  ].join('\n');
   verifier = replaceExactlyOnce(verifier, spawnAnchor, spawnReplacement, 'packaged-startup-output-capture');
 
   const readJsonAnchor = "const readJson = async file => JSON.parse(await fs.readFile(file, 'utf8'));";
   const diagnosticsCode = [
-    "const redactDiagnostic = value => String(value || '').replace(/\\\\bBearer\\\\s+[^\\\\s,;\\\\\"']+/gi, 'Bearer [redacted]').replace(/\\\\bsk-[\\\\w-]+/g, '[redacted]').slice(-12000);",
+    "const redactDiagnostic = value => String(value || '').replace(/\\bBearer\\s+\\S+/gi, 'Bearer [redacted]').replace(/\\bsk-[\\w-]+/g, '[redacted]').slice(-12000);",
     "async function collectStartupDiagnostics() {",
     "  const readText = async file => { try { return await fs.readFile(file, 'utf8'); } catch (error) { if (error.code === 'ENOENT') return ''; throw error; } };",
     "  const timeline = []; const startupErrors = [];",
@@ -105,12 +105,12 @@ export async function applyUpdateTrustPatch(upstream, repositoryRoot = REPOSITOR
     "}",
     "async function failWithStartupDiagnostics(message, cause) {",
     "  const report = { message, cause: redactDiagnostic(cause?.message || cause || ''), ...(await collectStartupDiagnostics()) };",
-    "  await fs.writeFile(path.join(releaseDirectory, 'startup-failure-diagnostics.json'), JSON.stringify(report, null, 2) + '\\\\n');",
+    "  await fs.writeFile(path.join(releaseDirectory, 'startup-failure-diagnostics.json'), JSON.stringify(report, null, 2) + '\\n');",
     "  console.error('PACKAGED_STARTUP_DIAGNOSTICS ' + JSON.stringify(report));",
     "  throw new Error(message + (report.startupError ? ': ' + report.startupError : report.cause ? ': ' + report.cause : ''));",
     "}",
     readJsonAnchor
-  ].join('\\n');
+  ].join('\n');
   verifier = replaceExactlyOnce(verifier, readJsonAnchor, diagnosticsCode, 'packaged-startup-diagnostics-reader');
 
   const oldUntil = [
@@ -120,7 +120,7 @@ export async function applyUpdateTrustPatch(upstream, repositoryRoot = REPOSITOR
     "  do { try { const value = await action(); if (value) return value; } catch (error) { last = error; } await delay(200); } while (Date.now() < end);",
     "  throw last || new Error('独立便携包检查超时。');",
     "}"
-  ].join('\\n');
+  ].join('\n');
   const newUntil = [
     "async function until(action, milliseconds = 60_000) {",
     "  const end = Date.now() + milliseconds;",
@@ -132,7 +132,7 @@ export async function applyUpdateTrustPatch(upstream, repositoryRoot = REPOSITOR
     "  } while (Date.now() < end);",
     "  return failWithStartupDiagnostics('独立便携包检查超时。', last);",
     "}"
-  ].join('\\n');
+  ].join('\n');
   verifier = replaceExactlyOnce(verifier, oldUntil, newUntil, 'packaged-startup-diagnostics-until');
 
   const packagedReadmeAnchor = "assert.equal(packaged.version, version); assert.equal(manifest.productVersion, version);";
