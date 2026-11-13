@@ -122,8 +122,8 @@ jobs:
             node --check (Join-Path 'upstream' $file)
             if ($LASTEXITCODE -ne 0) { throw ('PATCHED_SOURCE_SYNTAX_FAILURE: ' + $file) }
           }
-          $host = Get-Content 'upstream/browser-host.mjs' -Raw
-          if ($host -match '--no-sandbox' -or $host -notmatch 'chromiumSandbox: true' -or $host -notmatch '--enable-features=NetworkServiceSandbox') { throw 'EDGE_SANDBOX_PATCH_ASSERTION_FAILED' }
+          $browserHostText = Get-Content 'upstream/browser-host.mjs' -Raw
+          if ($browserHostText -match '--no-sandbox' -or $browserHostText -notmatch 'chromiumSandbox: true' -or $browserHostText -notmatch '--enable-features=NetworkServiceSandbox') { throw 'EDGE_SANDBOX_PATCH_ASSERTION_FAILED' }
           Write-Host 'PASS_EXACT_147_SOURCE_PATCH_AND_SANDBOX_STATIC_ASSERTIONS'
 
       - name: Build and test Windows Job Object helper
