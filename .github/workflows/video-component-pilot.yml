@@ -1,0 +1,137 @@
+name: YuTang Watch Skill Real AV Pilot - NOT Windows acceptance
+
+on:
+  push:
+    branches:
+      - experiment/video-component-pilot-20261113
+    paths:
+      - .github/workflows/video-component-pilot.yml
+      - tools/run_watch_skill_pilot.py
+      - tools/verify_watch_skill_pilot.py
+
+concurrency:
+  group: yutang-watch-skill-pilot-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  real-av-cloud-pilot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - name: Safety gate - public repo, correct branch, disposable Linux only
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "yud78785/yutang-build"
+          test "$GITHUB_REF" = "refs/heads/experiment/video-component-pilot-20261113"
+          test "$GITHUB_EVENT_NAME" = "push"
+          test "$RUNNER_OS" = "Linux"
+          echo "READ_ONLY_PUBLIC_MEDIA_AND_SOURCE: no user PC, Windows, login, API keys, shell MCP, or release"
+
+      - name: Checkout experiment only - no persisted Git credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Verify pinned upstream and inspect local tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tools/run_watch_skill_pilot.py tools/verify_watch_skill_pilot.py tools/verify_watch_skill_mcp.py
+          git clone --filter=blob:none --no-checkout https://github.com/oxbshw/watch-skill.git third_party/watch-skill
+          git -C third_party/watch-skill checkout --detach f1317c8fe64744a606c31867b05fbbe3144268c6
+          test "$(git -C third_party/watch-skill rev-parse HEAD)" = "f1317c8fe64744a606c31867b05fbbe3144268c6"
+          echo "Pinned checkout SHA: $(git -C third_party/watch-skill rev-parse HEAD)"
+          head -n 1 third_party/watch-skill/LICENSE
+          grep -q 'MIT License' third_party/watch-skill/LICENSE
+          echo "Checking ffmpeg and ffprobe availability"
+          if ! command -v ffmpeg >/dev/null 2>&1 || ! command -v ffprobe >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq ffmpeg
+          fi
+          command -v ffmpeg
+          command -v ffprobe
+          echo "Pinned Watch Skill source, license and ffmpeg verified"
+
+      - name: Install isolated AV subset plus restricted in-memory MCP client - no browser/full upstream MCP
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p work
+          python3 -m venv .venv
+          .venv/bin/python -m pip install --disable-pip-version-check --no-cache-dir "./third_party/watch-skill[perceive,whisper]" "faster-whisper==1.2.1" "av==18.1.0" "fastmcp==3.4.5"
+          .venv/bin/python -m pip freeze > work/dependency-freeze.txt
+          .venv/bin/python -c "import av, fastmcp; from importlib.metadata import version; assert av.__version__ == '18.1.0'; assert version('fastmcp') == '3.4.5'; print('PINNED_FASTMCP', version('fastmcp'))"
+          .venv/bin/python -c "import av, watch_skill, cv2, scenedetect, faster_whisper; assert av.__version__ == '18.1.0', av.__version__; print('PINNED_PYAV', av.__version__)"
+
+      - name: Download one genuinely narrated W3C attribution-required original clip and independent reference
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location --retry 2 --connect-timeout 15 --max-time 160 --max-filesize 55000000 -o work/w3c-video.mp4 https://media.w3.org/wai/evaluation-intros/conformance-evaluation.mp4
+          curl --fail --silent --show-error --location --retry 2 --connect-timeout 15 --max-time 45 --max-filesize 200000 -o work/w3c-reference.vtt https://media.w3.org/wai/evaluation-intros/conformance-evaluation-cc.vtt
+          test "$(stat -c %s work/w3c-video.mp4)" -gt 1000000
+          test "$(stat -c %s work/w3c-reference.vtt)" -gt 500
+          ffprobe -v error -show_entries stream=codec_type -show_entries format=duration -of json work/w3c-video.mp4 > work/ffprobe.json
+          printf 'ec419be88b5d6cf2354a366caae8012a979438decef0154a6087a9813c662dbb  work/w3c-video.mp4\n13f4260d81fe67debd47d0b0f22870a96650f83e9c83dc0050d9957b9e86ac9f  work/w3c-reference.vtt\n' | sha256sum -c
+          echo "W3C WAI original: https://www.w3.org/WAI/about/using-wai-material/ (attribution required, no CC BY 4.0 claim)"
+
+      - name: Snapshot public local ASR weights and record exact revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          .venv/bin/python - <<'PY'
+          from pathlib import Path
+          from huggingface_hub import snapshot_download
+          repo_id = "Systran/faster-whisper-tiny.en"
+          revision = "0d3d19a32d3338f10357c0889762bd8d64bbdeba"  # previously observed immutable upstream model revision
+          assert len(revision) == 40 and all(c in "0123456789abcdef" for c in revision), revision
+          dest = Path("work/model").resolve()
+          snapshot_download(repo_id=repo_id, revision=revision, local_dir=str(dest),
+                            allow_patterns=["*.bin", "*.json", "*.txt", "vocabulary.*"],
+                            max_workers=2)
+          assert (dest / "model.bin").is_file(), "CTranslate2 model missing"
+          Path("work/model-revision.txt").write_text(revision + "\n", encoding="utf-8")
+          print("Pinned for this run:", repo_id, revision)
+          PY
+          printf '1a5afae06a4db91c975c9a9d78be5cc110ee4ea022ad57d55492e4550e936b2a  work/model/model.bin\n' | sha256sum -c
+
+      - name: Genuine local Watch Skill run, then independent acceptance check
+        shell: bash
+        env:
+          WATCHSKILL_OFFLINE: "1"
+          HF_HUB_OFFLINE: "1"
+          WATCHSKILL_CLOUD_STT_ENABLED: "0"
+          WATCHSKILL_LOCAL_WHISPER_ENABLED: "true"
+          WATCHSKILL_WHISPER_DEVICE: "cpu"
+        run: |
+          set -euo pipefail
+          .venv/bin/python - <<'PY'
+          import av
+          from faster_whisper.audio import decode_audio
+          assert av.__version__ == "18.1.0", av.__version__
+          audio = decode_audio("work/w3c-video.mp4")
+          assert len(audio) >= 16000, "Real original W3C video audio decoding returned no samples"
+          print("REAL_AV_DECODE_PASSED", av.__version__, len(audio))
+          PY
+          .venv/bin/python tools/run_watch_skill_pilot.py
+          .venv/bin/python tools/verify_watch_skill_pilot.py
+          .venv/bin/python -m tools.verify_watch_skill_mcp
+
+      - name: Keep metadata and verdict only (no media, cookies, tokens or frames)
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: YuTang-Real-WatchSkill-Component-Pilot-NOT-EXE
+          path: |
+            work/pilot-manifest.json
+            work/pilot-verdict.json
+            work/watch-skill-mcp-verdict.json
+            work/model-revision.txt
+            work/dependency-freeze.txt
+            work/ffprobe.json
+          if-no-files-found: warn
+          retention-days: 7

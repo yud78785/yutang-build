@@ -1,0 +1,109 @@
+name: YuTang actual MCP image -> Qwen vision inference - NOT video semantics
+
+on:
+  push:
+    branches:
+      - experiment/video-component-pilot-20261113
+    paths:
+      - .github/workflows/mcp-to-qwen-vision.yml
+      - tools/run_mcp_to_qwen_vision.py
+
+concurrency:
+  group: yutang-mcp-to-qwen-vision-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  mcp-image-to-open-vision-model:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Enforce isolated public runner and exact experiment branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "yud78785/yutang-build"
+          test "$GITHUB_REF" = "refs/heads/experiment/video-component-pilot-20261113"
+          test "$GITHUB_EVENT_NAME" = "push"
+          test "$RUNNER_OS" = "Linux"
+          echo "No user PC, no Windows EXE, no browser login, no model API keys, no paid inference"
+
+      - name: Checkout pinned MCP adapter source without persisted credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Download immutable original Windows JPEG evidence artifact
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p work/source
+          curl -fsSL --retry 2 --connect-timeout 15 --max-time 45 \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/yud78785/yutang-build/actions/artifacts/13951609541/zip" \
+            -o work/original-Windows-frames.zip
+          printf '5b2f2432a25ef6e2581be64eb58c352652d39b245d1a0036682e39e7acac3849  work/original-Windows-frames.zip\n' | sha256sum -c
+          unzip -q work/original-Windows-frames.zip -d work/source
+          test "$(find work/source -maxdepth 1 -type f | wc -l)" -eq 4
+          echo "Original run 43233257378 / artifact 13951609541 / video ID 7577614489533680959"
+
+      - name: Install restricted MCP client only
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m venv .venv
+          .venv/bin/python -m pip install --no-cache-dir "fastmcp==3.4.5"
+          .venv/bin/python -m py_compile tools/readonly_video_mcp.py tools/run_mcp_to_qwen_vision.py
+
+      - name: Download and verify pinned official llama.cpp CPU runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p tools/llama
+          curl -fL --retry 2 --retry-delay 2 --connect-timeout 20 --max-time 120 \
+            -o work/llama-bin.tar.gz \
+            https://github.com/ggml-org/llama.cpp/releases/download/b12248/llama-b12248-bin-ubuntu-x64.tar.gz
+          printf '6b3a530b44f6b0a4ae4872d3b3c8d1edc2ac6bba7d8bd211329a4ba644c0dc65  work/llama-bin.tar.gz\n' | sha256sum -c
+          tar -xzf work/llama-bin.tar.gz -C tools/llama
+          find tools/llama -type f -name llama-mtmd-cli -print -quit | grep -q .
+
+      - name: Download and verify pinned official Qwen3-VL-2B weights
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p work/model
+          REV=52d6c8ffea26cc873ac5ad116f8631268d7eb503
+          curl -fL --retry 2 --retry-delay 2 --connect-timeout 20 --max-time 240 \
+            -o work/model/Qwen3VL-2B-Instruct-Q4_K_M.gguf \
+            "https://huggingface.co/Qwen/Qwen3-VL-2B-Instruct-GGUF/resolve/$REV/Qwen3VL-2B-Instruct-Q4_K_M.gguf"
+          printf '089d75c52f4b7ffc56ba998ffc50aae89fcafc755f9e7208aacca281dca6c2ae  work/model/Qwen3VL-2B-Instruct-Q4_K_M.gguf\n' | sha256sum -c
+          curl -fL --retry 2 --retry-delay 2 --connect-timeout 20 --max-time 240 \
+            -o work/model/mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf \
+            "https://huggingface.co/Qwen/Qwen3-VL-2B-Instruct-GGUF/resolve/$REV/mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf"
+          printf 'f9a68fabba69c3b81e153367b2c7521030b0fa8bb0de400c9599c8e6725f9c82  work/model/mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf\n' | sha256sum -c
+
+      - name: Retrieve original JPEG through MCP, then pass those exact bytes to Qwen
+        shell: bash
+        run: |
+          set -euo pipefail
+          .venv/bin/python -m tools.run_mcp_to_qwen_vision
+          test -s work/mcp-image/frame-3.jpg
+          test -s work/qwen-frame-3.log
+          echo "MCP_IMAGE_TO_QWEN_PROCESS_COMPLETED; HUMAN SEMANTIC REVIEW REQUIRED"
+
+      - name: Save inference output and exact byte provenance only
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: YuTang-MCP-to-Qwen-Real-Image-Inference-NOT-VIDEO-SEMANTICS
+          path: |
+            work/qwen-frame-3.log
+            work/mcp-to-qwen-manifest.json
+          if-no-files-found: ignore
+          retention-days: 7
