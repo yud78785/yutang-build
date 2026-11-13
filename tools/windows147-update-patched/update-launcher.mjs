@@ -77,11 +77,19 @@ async function waitForChildHealth(child, { healthFile, nonce, version, sha256, t
 }
 
 async function waitForStableChild(child, milliseconds, pollMs, delayImpl) {
+  const check = () => {
+    if (child.signalCode !== null || (child.exitCode !== null && child.exitCode !== 0)) {
+      throw new Error('新版在快捷方式提交后的稳定观察期内异常退出。');
+    }
+    return child.exitCode === 0 && child.signalCode === null;
+  };
+  if (check()) return;
   const deadline = Date.now() + milliseconds;
   while (Date.now() < deadline) {
-    if (child.exitCode !== null || child.signalCode !== null) throw new Error('新版在稳定观察期内退出。');
     await delayImpl(Math.min(pollMs, Math.max(1, deadline - Date.now())));
+    if (check()) return;
   }
+  check();
 }
 
 async function stopChild(child, delayImpl = delay) {
@@ -195,8 +203,9 @@ export async function runUpdateLauncher({
     const health = await waitForChildHealth(child, {
       healthFile, nonce, version, sha256, timeoutMs: healthTimeoutMs, pollMs, delayImpl
     });
-    await waitForStableChild(child, stabilityMs, pollMs, delayImpl);
     rollbackShortcut = await commitShortcut(stagedShortcut, shortcut, nonce);
+    // Keep the old shortcut backup until the new process survives the post-switch observation window.
+    await waitForStableChild(child, stabilityMs, pollMs, delayImpl);
     await rollbackShortcut.finalize();
     rollbackShortcut = null;
     child.unref();
