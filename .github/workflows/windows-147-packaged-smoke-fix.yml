@@ -429,6 +429,7 @@ jobs:
             upstream/desktop/release-api/Dafeiyu-Douyin-API-1.4.7-win-x64.exe
             upstream/desktop/release-api/Dafeiyu-Douyin-API-1.4.7-win-x64.exe.sha256
             upstream/desktop/release-api/verification-1.4.7.json
+            upstream/desktop/release-api/startup-failure-diagnostics.json
             upstream/desktop/release-api/windows-candidate-receipt.json
             upstream/openrouter-desktop-patch-receipt.json
             upstream/windows-security-147-static-patch-receipt.json
