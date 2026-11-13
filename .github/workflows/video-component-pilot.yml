@@ -41,9 +41,16 @@ jobs:
           git clone --filter=blob:none --no-checkout https://github.com/oxbshw/watch-skill.git third_party/watch-skill
           git -C third_party/watch-skill checkout --detach f1317c8fe64744a606c31867b05fbbe3144268c6
           test "$(git -C third_party/watch-skill rev-parse HEAD)" = "f1317c8fe64744a606c31867b05fbbe3144268c6"
+          echo "Pinned checkout SHA: $(git -C third_party/watch-skill rev-parse HEAD)"
+          head -n 1 third_party/watch-skill/LICENSE
           grep -q 'MIT License' third_party/watch-skill/LICENSE
-          test -x "$(command -v ffmpeg)"
-          test -x "$(command -v ffprobe)"
+          echo "Checking ffmpeg and ffprobe availability"
+          if ! command -v ffmpeg >/dev/null 2>&1 || ! command -v ffprobe >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq ffmpeg
+          fi
+          command -v ffmpeg
+          command -v ffprobe
           echo "Pinned Watch Skill source, license and ffmpeg verified"
 
       - name: Install isolated audio-video processing subset - no browser or full MCP
