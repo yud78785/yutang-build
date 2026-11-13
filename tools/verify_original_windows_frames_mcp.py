@@ -61,7 +61,7 @@ def materialize_actual_original(root: Path):
         frames_dir.mkdir(parents=True, exist_ok=True)
         for n, expected in enumerate(FRAME_SHA256, 1):
             raw = z.read(f"frame-{n}.jpg")
-            assert 1000 < len(raw) < 200000 and raw[:2] == b"\\xff\\xd8", "Not genuine bounded JPEG"
+            assert 1000 < len(raw) < 200000 and raw[:2] == b"\xff\xd8", "Not genuine bounded JPEG"
             assert sha(raw) == expected, f"Original frame {n} SHA-256 mismatch"
             (frames_dir / f"frame-{n}.jpg").write_bytes(raw)
 
