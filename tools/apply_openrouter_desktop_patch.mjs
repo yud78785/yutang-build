@@ -15,6 +15,7 @@ const EXPECTED = {
   'desktop/scripts/build-api-desktop.mjs': 'b66c464f93776536e69dece46bdfedd23ce38ed1',
   'desktop/scripts/verify-packaged-api.mjs': 'f6bc5bc28a54abaeddf188c94d4caef71fa943fb',
   'desktop/scripts/acquire-upstream.mjs': '80fb30a8ae62d84b76fb7a2050a90e525b4161e0',
+  'desktop/UPSTREAM.json': '8418ac9ab7b1eb51463e594759251c51ea687d91',
   'desktop/README.md': '8cddcbad0e0309a10ea646f9673add4b3b710524',
   'desktop/tests/api-worker.test.mjs': '42f351a26235508d595eb5daadabbc81039d5276',
   'desktop/scripts/stage-api-runtime.mjs': 'c80c1670e08a986984b91191d361bf75202a7d73',
@@ -147,6 +148,13 @@ acquire = replaceOnce(acquire,
   'upstream acquisition reports expected and actual tree hashes');
 await write('desktop/scripts/acquire-upstream.mjs', acquire);
 
+let upstreamManifest = await loadVerified('desktop/UPSTREAM.json');
+upstreamManifest = replaceOnce(upstreamManifest,
+  '    "files": 10205,\n    "sha256": "9a48370a344b55f348693efe1b317d05c40ab2ceb38aa334ca51424898539843"',
+  '    "files": 10205,\n    "sha256": "e524acda7d3331567fa7db85ed5057ec571a1d73b5811f2ea46f5bdc8d8572f6"',
+  'correct stale source-tree digest for the pinned, archive-SHA-verified DeepSeek Harness commit');
+await write('desktop/UPSTREAM.json', upstreamManifest);
+
 let packagedVerifier = await loadVerified('desktop/scripts/verify-packaged-api.mjs');
 packagedVerifier = replaceOnce(packagedVerifier,
   "await page.getByRole('heading', { name: '先连接你的 DeepSeek' }).waitFor();",
@@ -232,7 +240,7 @@ for (const relative of ['api-agent.mjs', 'chat-agent.mjs', 'spark-agent.mjs', 'p
 const desktopBuildCheck = await read('desktop/scripts/build-api-desktop.mjs');
 if (!desktopBuildCheck.includes("'model-settings-guard.mjs'")) throw new Error('DESKTOP_BUNDLE_OMITS_MODEL_SETTINGS_GUARD');
 const modified = {};
-for (const relative of ['api-agent.mjs', 'chat-agent.mjs', 'spark-agent.mjs', 'public-comment-agent.mjs', 'desktop/src/main.mjs', 'desktop/src/model-settings-guard.mjs', 'desktop/scripts/build-api-desktop.mjs', 'desktop/scripts/verify-packaged-api.mjs', 'desktop/scripts/acquire-upstream.mjs', 'desktop/tests/model-settings-guard.test.mjs', 'desktop/ui-api/src/main.jsx', 'desktop/ui-api/tests/browser.test.mjs', 'desktop/README.md', 'desktop/tests/api-worker.test.mjs']) {
+for (const relative of ['api-agent.mjs', 'chat-agent.mjs', 'spark-agent.mjs', 'public-comment-agent.mjs', 'desktop/src/main.mjs', 'desktop/src/model-settings-guard.mjs', 'desktop/scripts/build-api-desktop.mjs', 'desktop/scripts/verify-packaged-api.mjs', 'desktop/scripts/acquire-upstream.mjs', 'desktop/UPSTREAM.json', 'desktop/tests/model-settings-guard.test.mjs', 'desktop/ui-api/src/main.jsx', 'desktop/ui-api/tests/browser.test.mjs', 'desktop/README.md', 'desktop/tests/api-worker.test.mjs']) {
   modified[relative] = sha256(await read(relative));
 }
 const receipt = {
