@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { execFileSync } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
-import { pathToFileURL } from 'node:url';
+import { pathToFileURL } from 'node:url';\nimport { beginUpdateTransaction, setUpdateTransactionPhase } from './update-transaction.mjs';
 
 export const UPDATE_PUBLISHER_THUMBPRINT = '';
 
@@ -210,10 +210,10 @@ export async function runUpdateLauncher({
     const health = await waitForChildHealth(child, {
       healthFile, nonce, version, sha256, timeoutMs: healthTimeoutMs, pollMs, delayImpl
     });
-    rollbackShortcut = await commitShortcut(stagedShortcut, shortcut, nonce);
+    const backupShortcut = path.join(path.dirname(shortcut), '.' + path.basename(shortcut) + '.' + nonce + '.bak.lnk');\n    transaction = await beginUpdateTransaction({ updatesDirectory, shortcut, stagedShortcut, backupShortcut, targetExe: file, targetExeSha256: sha256 });\n    await setUpdateTransactionPhase(transaction, 'switching');\n    rollbackShortcut = await commitShortcut(stagedShortcut, shortcut, nonce);\n    await setUpdateTransactionPhase(transaction, 'switched');
     // Keep the old shortcut backup until the new process survives the post-switch observation window.
     await waitForStableChild(child, stabilityMs, pollMs, delayImpl);
-    await rollbackShortcut.finalize();
+    await setUpdateTransactionPhase(transaction, 'committed');\n    await rollbackShortcut.finalize();
     rollbackShortcut = null;
     child.unref();
     await fs.rm(healthFile, { force: true }).catch(() => {});
