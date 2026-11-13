@@ -126,7 +126,7 @@ export async function applyUpdateTrustPatch(upstream, repositoryRoot = REPOSITOR
     "  const end = Date.now() + milliseconds;",
     "  let last;",
     "  do {",
-    "    if (child.exitCode !== null || child.signalCode !== null) return failWithStartupDiagnostics('便携 EXE 在桌面就绪前退出。', 'exit=' + child.exitCode + ' signal=' + child.signalCode);",
+    "    if (!ready && (child.exitCode !== null || child.signalCode !== null)) return failWithStartupDiagnostics('便携 EXE 在桌面就绪前退出。', 'exit=' + child.exitCode + ' signal=' + child.signalCode);",
     "    try { const value = await action(); if (value) return value; } catch (error) { last = error; }",
     "    await delay(200);",
     "  } while (Date.now() < end);",
