@@ -110,20 +110,52 @@ async function cdpCommand(socket, id, method, params = {}, sessionId = null) {
 }
 async function probeHttps(port) {
   const { socket } = await cdpConnect(port);
-  let targetId = null, sessionId = null, nextId = 1, responseInfo = null, loadingFailure = null;
+  let targetId = null, sessionId = null, nextId = 1, responseInfo = null, navigation = null;
+  let snapshot = null, lastEvalError = null, loadEventCount = 0;
+  const requests = [], responses = [], loadingFailures = [], frameNavigations = [];
   const onMessage = event => {
     let message;
     try { message = JSON.parse(String(event.data)); } catch { return; }
     if (message.sessionId !== sessionId) return;
-    if (message.method === 'Network.responseReceived' &&
-        message.params?.type === 'Document' &&
-        new URL(message.params.response?.url || 'about:blank').hostname === 'example.com') {
-      responseInfo = { ...message.params.response, requestId: message.params.requestId };
+    if (message.method === 'Network.requestWillBeSent' &&
+        /https:\/\/example\.com\//i.test(String(message.params?.request?.url || ''))) {
+      requests.push({
+        url: String(message.params.request.url).slice(0, 300),
+        type: String(message.params.type || ''),
+        requestId: String(message.params.requestId || '').slice(0, 100)
+      });
     }
-    if (message.method === 'Network.loadingFailed') loadingFailure = {
-      errorText: String(message.params?.errorText || '').slice(0, 160),
-      blockedReason: String(message.params?.blockedReason || '').slice(0, 80)
-    };
+    if (message.method === 'Network.responseReceived' &&
+        /https:\/\/example\.com\//i.test(String(message.params?.response?.url || ''))) {
+      const item = {
+        url: String(message.params.response.url).slice(0, 300),
+        type: String(message.params.type || ''),
+        status: Number(message.params.response.status) || 0,
+        remoteIPAddress: String(message.params.response.remoteIPAddress || ''),
+        protocol: String(message.params.response.protocol || ''),
+        securityProtocol: String(message.params.response.securityDetails?.protocol || ''),
+        requestId: String(message.params.requestId || '').slice(0, 100)
+      };
+      responses.push(item);
+      if (message.params.type === 'Document') {
+        responseInfo = { ...message.params.response, requestId: message.params.requestId };
+      }
+    }
+    if (message.method === 'Network.loadingFailed') {
+      loadingFailures.push({
+        errorText: String(message.params?.errorText || '').slice(0, 160),
+        blockedReason: String(message.params?.blockedReason || '').slice(0, 80),
+        canceled: Boolean(message.params?.canceled),
+        requestId: String(message.params?.requestId || '').slice(0, 100)
+      });
+    }
+    if (message.method === 'Page.frameNavigated') {
+      frameNavigations.push({
+        url: String(message.params?.frame?.url || '').slice(0, 300),
+        mimeType: String(message.params?.frame?.mimeType || '').slice(0, 100)
+      });
+    }
+    if (message.method === 'Page.loadEventFired') loadEventCount++;
   };
   try {
     const target = await cdpCommand(socket, nextId++, 'Target.createTarget', { url: 'about:blank' });
@@ -133,19 +165,45 @@ async function probeHttps(port) {
     socket.addEventListener('message', onMessage);
     await cdpCommand(socket, nextId++, 'Network.enable', {}, sessionId);
     await cdpCommand(socket, nextId++, 'Page.enable', {}, sessionId);
-    const navigation = await cdpCommand(socket, nextId++, 'Page.navigate', { url: TARGET }, sessionId);
+    navigation = await cdpCommand(socket, nextId++, 'Page.navigate', { url: TARGET }, sessionId);
     assert.equal(navigation.errorText || '', '', 'Edge could not navigate to the public HTTPS probe');
-    let snapshot = null;
-    await until(async () => {
-      try {
-        const result = await cdpCommand(socket, nextId++, 'Runtime.evaluate', {
-          expression: 'JSON.stringify({href:location.href,title:document.title,readyState:document.readyState,text:document.body?document.body.innerText:""})',
-          returnByValue: true, awaitPromise: true
-        }, sessionId);
-        if (typeof result.result?.value === 'string') snapshot = JSON.parse(result.result.value);
-        return snapshot?.readyState === 'complete' && /Example Domain/.test(snapshot?.text || '') && responseInfo;
-      } catch { return null; }
-    }, 30000, 'Edge HTTPS navigation, TLS response and Example Domain content');
+    try {
+      await until(async () => {
+        try {
+          const result = await cdpCommand(socket, nextId++, 'Runtime.evaluate', {
+            expression: 'JSON.stringify({href:location.href,title:document.title,readyState:document.readyState,text:document.body?document.body.innerText:""})',
+            returnByValue: true, awaitPromise: true
+          }, sessionId);
+          if (typeof result.result?.value === 'string') snapshot = JSON.parse(result.result.value);
+          lastEvalError = null;
+          return snapshot?.readyState === 'complete' && /Example Domain/.test(snapshot?.text || '') && responseInfo;
+        } catch (error) {
+          lastEvalError = String(error?.message || error).slice(0, 240);
+          return null;
+        }
+      }, 30000, 'Edge HTTPS navigation, TLS response and Example Domain content');
+    } catch (error) {
+      let targetInfo = null, frameTree = null;
+      try { targetInfo = await cdpCommand(socket, nextId++, 'Target.getTargetInfo', { targetId }); } catch {}
+      try { frameTree = await cdpCommand(socket, nextId++, 'Page.getFrameTree', {}, sessionId); } catch {}
+      error.message += ' | EDGE_HTTPS_DIAGNOSTICS=' + JSON.stringify({
+        navigation: {
+          frameId: String(navigation?.frameId || ''),
+          loaderId: String(navigation?.loaderId || ''),
+          errorText: String(navigation?.errorText || '')
+        },
+        targetUrl: String(targetInfo?.targetInfo?.url || ''),
+        frameUrl: String(frameTree?.frameTree?.frame?.url || ''),
+        snapshot,
+        lastEvalError,
+        requests: requests.slice(-8),
+        responses: responses.slice(-8),
+        loadingFailures: loadingFailures.slice(-8),
+        frameNavigations: frameNavigations.slice(-8),
+        loadEventCount
+      });
+      throw error;
+    }
     assert.equal(new URL(snapshot.href).origin, 'https://example.com', 'Final page origin changed');
     assert.equal(responseInfo.status, 200, 'Public HTTPS probe did not return HTTP 200');
     assert.ok(responseInfo.remoteIPAddress, 'Edge did not report the resolved remote IP');
@@ -163,11 +221,11 @@ async function probeHttps(port) {
       tlsIssuer: String(responseInfo.securityDetails.issuer || '').slice(0, 160),
       title: String(snapshot.title || ''),
       pageContentVerified: /Example Domain/.test(snapshot.text || ''),
-      responseBodyVerified: /Example Domain/.test(bodyText)
+      responseBodyVerified: /Example Domain/.test(bodyText),
+      requestEvents: requests.length,
+      responseEvents: responses.length,
+      loadEventCount
     };
-  } catch (error) {
-    if (loadingFailure) error.message += ' | Network.loadingFailed=' + JSON.stringify(loadingFailure);
-    throw error;
   } finally {
     socket.removeEventListener('message', onMessage);
     if (targetId) {
@@ -364,7 +422,8 @@ async function run(exeFile) {
         const pid = Number(cursor.ProcessId);
         chain.push({ pid, parentPid: Number(cursor.ParentProcessId) || null, name: String(cursor.Name || '').slice(0, 100) });
         const name = String(cursor.Name || '');
-        if (pid !== backendPid && (name.includes('大肥鱼') || /dafeiyu.*\.exe$/i.test(name)) &&
+        if (pid !== backendPid && pid !== candidateChild.pid &&
+            (name.includes('大肥鱼') || /dafeiyu.*assistant\.exe$/i.test(name)) &&
             hasHostAncestor(pid, candidateChild.pid, currentRows)) {
           desktop = cursor;
           break;
