@@ -11,7 +11,7 @@ PIN = "f1317c8fe64744a606c31867b05fbbe3144268c6"
 ATTRIBUTION = (
     "Copyright W3C Web Accessibility Initiative, "
     "https://www.w3.org/WAI/test-evaluate/ ; W3C WAI attribution-required use "
-    "https://creativecommons.org/licenses/by/4.0/"
+    "https://www.w3.org/WAI/about/using-wai-material/"
 )
 
 

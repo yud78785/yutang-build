@@ -10,6 +10,10 @@ import subprocess
 from pathlib import Path
 
 PIN = "f1317c8fe64744a606c31867b05fbbe3144268c6"
+EXPECTED_VIDEO_SHA256 = "ec419be88b5d6cf2354a366caae8012a979438decef0154a6087a9813c662dbb"
+EXPECTED_VTT_SHA256 = "13f4260d81fe67debd47d0b0f22870a96650f83e9c83dc0050d9957b9e86ac9f"
+EXPECTED_MODEL_REVISION = "0d3d19a32d3338f10357c0889762bd8d64bbdeba"
+EXPECTED_MODEL_SHA256 = "1a5afae06a4db91c975c9a9d78be5cc110ee4ea022ad57d55492e4550e936b2a"
 MIN_FRAMES = 3
 MIN_DISTINCT_FRAME_HASHES = 3
 MIN_NONTRIVIAL_WORDS = 12
@@ -58,6 +62,11 @@ def verify() -> dict:
     require(m.get("candidate_exe_tested") is False, "FALSE_WINDOWS_EXE_CLAIM")
     require(m.get("autonomous_browser_actions") is False, "UNAUTHORIZED_AUTONOMY_CLAIM")
     require(m.get("cloud_model_calls") is False, "UNAUTHORIZED_CLOUD_MODEL_CLAIM")
+    require(m.get("source_video_sha256") == EXPECTED_VIDEO_SHA256, "UNPINNED_SOURCE_VIDEO")
+    require(m.get("independent_reference_vtt_sha256") == EXPECTED_VTT_SHA256, "UNPINNED_REFERENCE_VTT")
+    require(m.get("model_revision") == EXPECTED_MODEL_REVISION, "UNPINNED_MODEL_REVISION")
+    require(m.get("model_weight_sha256") == EXPECTED_MODEL_SHA256, "UNPINNED_MODEL_BYTES")
+    require("https://www.w3.org/WAI/about/using-wai-material/" in m.get("media_license_attribution", ""), "INCORRECT_MEDIA_ATTRIBUTION")
     for path, field in (
         (root / "w3c-video.mp4", "source_video_sha256"),
         (root / "w3c-reference.vtt", "independent_reference_vtt_sha256"),
@@ -105,6 +114,10 @@ def verify() -> dict:
     require(recall >= MIN_REFERENCE_WORD_RECALL, "ASR_NOT_GROUNDED_IN_REFERENCE_CAPTIONS")
 
     verdict = {
+        "source_video_pinned_sha256": EXPECTED_VIDEO_SHA256,
+        "reference_vtt_pinned_sha256": EXPECTED_VTT_SHA256,
+        "model_weight_pinned_sha256": EXPECTED_MODEL_SHA256,
+        "asr_dependency_pin": "faster-whisper==1.2.1; av==18.1.0",
         "verdict": "PASS_REAL_AV_COMPONENT_ONLY" if not problems else "FAIL_COMPONENT_PILOT",
         "failures": problems,
         "watch_skill_git_sha": PIN,

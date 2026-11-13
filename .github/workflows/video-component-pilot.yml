@@ -8,7 +8,10 @@ on:
       - .github/workflows/video-component-pilot.yml
       - tools/run_watch_skill_pilot.py
       - tools/verify_watch_skill_pilot.py
-      - docs/watch-skill-pilot.md
+
+concurrency:
+  group: yutang-watch-skill-pilot-${{ github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -59,9 +62,9 @@ jobs:
           set -euo pipefail
           mkdir -p work
           python3 -m venv .venv
-          .venv/bin/python -m pip install --disable-pip-version-check --no-cache-dir "./third_party/watch-skill[perceive,whisper]"
+          .venv/bin/python -m pip install --disable-pip-version-check --no-cache-dir "./third_party/watch-skill[perceive,whisper]" "faster-whisper==1.2.1" "av==18.1.0"
           .venv/bin/python -m pip freeze > work/dependency-freeze.txt
-          .venv/bin/python -c "import watch_skill, cv2, scenedetect, faster_whisper; print('Watch Skill perception + ASR installed')"
+          .venv/bin/python -c "import av, watch_skill, cv2, scenedetect, faster_whisper; assert av.__version__ == '18.1.0', av.__version__; print('PINNED_PYAV', av.__version__)"
 
       - name: Download one genuinely narrated W3C attribution-required original clip and independent reference
         shell: bash
@@ -72,8 +75,8 @@ jobs:
           test "$(stat -c %s work/w3c-video.mp4)" -gt 1000000
           test "$(stat -c %s work/w3c-reference.vtt)" -gt 500
           ffprobe -v error -show_entries stream=codec_type -show_entries format=duration -of json work/w3c-video.mp4 > work/ffprobe.json
-          sha256sum work/w3c-video.mp4 work/w3c-reference.vtt
-          echo "W3C WAI source https://www.w3.org/WAI/test-evaluate/ ; CC BY 4.0"
+          printf 'ec419be88b5d6cf2354a366caae8012a979438decef0154a6087a9813c662dbb  work/w3c-video.mp4\n13f4260d81fe67debd47d0b0f22870a96650f83e9c83dc0050d9957b9e86ac9f  work/w3c-reference.vtt\n' | sha256sum -c
+          echo "W3C WAI original: https://www.w3.org/WAI/about/using-wai-material/ (attribution required, no CC BY 4.0 claim)"
 
       - name: Snapshot public local ASR weights and record exact revision
         shell: bash
@@ -81,9 +84,9 @@ jobs:
           set -euo pipefail
           .venv/bin/python - <<'PY'
           from pathlib import Path
-          from huggingface_hub import HfApi, snapshot_download
+          from huggingface_hub import snapshot_download
           repo_id = "Systran/faster-whisper-tiny.en"
-          revision = HfApi().model_info(repo_id=repo_id).sha
+          revision = "0d3d19a32d3338f10357c0889762bd8d64bbdeba"  # previously observed immutable upstream model revision
           assert len(revision) == 40 and all(c in "0123456789abcdef" for c in revision), revision
           dest = Path("work/model").resolve()
           snapshot_download(repo_id=repo_id, revision=revision, local_dir=str(dest),
@@ -93,7 +96,7 @@ jobs:
           Path("work/model-revision.txt").write_text(revision + "\n", encoding="utf-8")
           print("Pinned for this run:", repo_id, revision)
           PY
-          sha256sum work/model/model.bin
+          printf '1a5afae06a4db91c975c9a9d78be5cc110ee4ea022ad57d55492e4550e936b2a  work/model/model.bin\n' | sha256sum -c
 
       - name: Genuine local Watch Skill run, then independent acceptance check
         shell: bash
@@ -105,6 +108,14 @@ jobs:
           WATCHSKILL_WHISPER_DEVICE: "cpu"
         run: |
           set -euo pipefail
+          .venv/bin/python - <<'PY'
+          import av
+          from faster_whisper.audio import decode_audio
+          assert av.__version__ == "18.1.0", av.__version__
+          audio = decode_audio("work/w3c-video.mp4")
+          assert len(audio) >= 16000, "Real original W3C video audio decoding returned no samples"
+          print("REAL_AV_DECODE_PASSED", av.__version__, len(audio))
+          PY
           .venv/bin/python tools/run_watch_skill_pilot.py
           .venv/bin/python tools/verify_watch_skill_pilot.py
 

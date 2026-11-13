@@ -32,3 +32,12 @@ An independent Python verifier recomputes original video/caption/model hashes, e
 - No release, merging into main, personal keys, account access, local PC install, or repeat paid Windows Actions.
 
 Next after this pilot genuinely passes: build a narrow read-only MCP adapter for timeline, transcript range and timestamped frame lookup; do NOT expose Watch Skill's full MCP server because two upstream loop tools can execute shell commands.
+
+
+## 2026-11-13 correction: real ASR dependency failure and exact-data pin
+- Prior exact PR #9 experiment `ae63935abbc6dca53ad641f3224733fe1dc2d5d0`, Actions `43337204258`, failed: `TypeError: open() got an unexpected keyword argument 'metadata_errors'`.
+- Proven runtime: `faster-whisper==1.2.1` / `av==19.0.2`, where newer PyAV removed an argument that the released transcription library still uses. The upstream open issue is SYSTRAN/faster-whisper#1589. The experiment now *requests* `av==18.1.0` and checks a real original MP4 decode before actual ASR; this is a corrective candidate and NOT passed until its exact CI run succeeds.
+- Source video SHA-256 `ec419be88b5d6cf2354a366caae8012a979438decef0154a6087a9813c662dbb`, W3C reference VTT SHA-256 `13f4260d81fe67debd47d0b0f22870a96650f83e9c83dc0050d9957b9e86ac9f` previously witnessed in runner logs and now pre-pinned, not trusted based on a self-reported manifest.
+- Speech model source revision `0d3d19a32d3338f10357c0889762bd8d64bbdeba`, model.bin SHA-256 `1a5afae06a4db91c975c9a9d78be5cc110ee4ea022ad57d55492e4550e936b2a` previously verified and now pre-pinned.
+- Removes docs-only push triggers and uses concurrency cancel-in-progress to avoid repeated expensive processing. No rerun of original Windows EXE.
+- Upstream Watch Skill source pin `f1317c8fe64744a606c31867b05fbbe3144268c6` and separate independent verifier are unchanged. This version does not yet pin every transitive dependency by wheel hash, which remains a future supply-chain hardening gate.
