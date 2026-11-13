@@ -59,9 +59,12 @@ async function readTransaction(file) {
 export async function beginUpdateTransaction({
   updatesDirectory, shortcut, stagedShortcut, backupShortcut, targetExe, targetExeSha256
 }) {
+  if (![updatesDirectory, shortcut, stagedShortcut, backupShortcut, targetExe].every(item => typeof item === 'string' && path.isAbsolute(item))) {
+    throw new Error('UPDATE_TRANSACTION_PATHS_MUST_BE_ABSOLUTE');
+  }
   const directory = path.resolve(updatesDirectory);
   const paths = [shortcut, stagedShortcut, backupShortcut, targetExe].map(item => path.resolve(item));
-  if (!path.isAbsolute(updatesDirectory) || paths.some(item => !path.isAbsolute(item)) ||
+  if (
       path.resolve(path.dirname(stagedShortcut)) !== directory ||
       path.resolve(path.dirname(backupShortcut)) !== path.resolve(path.dirname(shortcut)) ||
       !/^[a-f0-9]{64}$/.test(targetExeSha256 || '')) {
@@ -74,8 +77,11 @@ export async function beginUpdateTransaction({
     throw new Error('UPDATE_TRANSACTION_PRECONDITION_FAILED');
   }
   const transactionFile = path.join(directory, 'update-transaction.json');
-  if (await fs.access(transactionFile).then(() => true, () => false)) {
+  try {
+    await fs.lstat(transactionFile);
     throw new Error('UPDATE_TRANSACTION_ALREADY_ACTIVE');
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
   }
   const transaction = {
     schema: 'yutang.update-transaction.v1',
