@@ -167,7 +167,7 @@ acquire = replaceOnce(acquire,
   "  const stat = await lstat(wronglyDecoded);\n" +
   "  if (!stat.isFile() || stat.isSymbolicLink() || stat.size !== 15) throw new Error('INVALID_WINDOWS_TAR_FILENAME_FIX_SOURCE');\n" +
   "  const data = await readFile(wronglyDecoded);\n" +
-  "  const actualGitBlob = createHash('sha1').update('blob ' + data.length + '\\\\0').update(data).digest('hex');\n" +
+  "  const actualGitBlob = createHash('sha1').update('blob ' + data.length + '\\0').update(data).digest('hex');\n" +
   "  if (actualGitBlob !== 'e0f8e3262354fe6d5b5fa046c8c180b58653870b') throw new Error('WINDOWS_TAR_FILENAME_BLOB_MISMATCH');\n" +
   "  await rename(wronglyDecoded, canonical);\n" +
   "  return { status: 'single-git-blob-verified-filename-normalized' };\n" +
