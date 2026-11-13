@@ -267,3 +267,189 @@ Edge 版本为 `156.0.4314.58`。Renderer 证据为 AppContainer + Lockdown + Un
 4. 在具备真实发布信任配置后，再做真实 Windows 2022 / 2025 更新下载、签名拒绝、成功升级、启动失败回滚与用户数据保留端到端验收。
 
 在这些阻塞解除前，两个 Artifact 只作为已验收的**未签名候选**保留，不发布、不向用户电脑推送、不启用自动更新。
+
+
+## 11. 2026-11-14 单一候选与正式签名准备（新实验分支）
+
+本轮没有修改已验收候选 EXE，也没有运行新的 Windows Actions 工作流。
+
+### 11.1 单一候选问题已定位
+
+Run `43495140768` 的两个独立 runner 构建了不同 EXE：
+
+- Windows 2022：`57a40e8c743e68b7502f7ababc04dd689f21f1bffda1b1f3efe2abab606e69d7`，Artifact `14071038566`。
+- Windows 2025：`4acebd4d914133d14806ffab71c464aa9f6d80e39d968bf009ded0da6075f519`，Artifact `14072426069`。
+
+两份产物各自的 Windows 实测都通过，但 SHA 不同，不能作为同一个发行资产的双平台验收证据。
+
+### 11.2 唯一候选预检工作流已准备，尚未运行
+
+新工作流：
+
+`.github/workflows/windows-147-same-candidate-cross-platform-preflight.yml`
+
+固定候选：Windows 2025 的 1.4.7 EXE，来源 Run `43495140768`、Artifact `14072426069`、构建提交 `5713e2db0a583439be31020062e07a84297105b3`、SHA-256 `4acebd4d914133d14806ffab71c464aa9f6d80e39d968bf009ded0da6075f519`。
+
+该工作流只下载此 EXE，在 Windows 2022 上重新实测 Edge 沙盒、CDP、两次重启及三种强制退出。它先通过 GitHub API 核对来源工作流、Windows 2025 job、Artifact ID 和候选回执，再核对每个实测回执绑定同一个 SHA。它不重新构建、不签名、不创建 Release。
+
+- 工作流文件 blob：`c8a73cfa1257e087651c2c5630da8843368fdddf`
+- 触发方式：仅 `workflow_dispatch`。
+- 状态：已提交到独立分支，**未运行、未消耗新的 Actions 额度**。
+- 交叉验收通过前，不能宣称“同一个 EXE 已在两台 Windows 通过”。
+
+### 11.3 签名服务选择边界已核实
+
+新增操作手册：`docs/windows-147-release-signing-runbook-20261114.md`。
+
+Microsoft 当前公开的 Azure Artifact Signing Public Trust 地区规则是：组织发行主体限于列明地区（包括美国、加拿大、欧盟、英国等）；个人开发者目前仅美国和加拿大。塞尔维亚不在 Public Trust 列表中。若 YuTang 的发行主体是塞尔维亚个人或塞尔维亚注册公司，不能假设可用 Azure Public Trust；应评估受信任 CA 的 OV Code Signing Certificate。若发行主体是符合条件的欧盟/英国等地区注册组织，可评估 Azure 组织身份验证路线。
+
+Azure Artifact Signing 的 GitHub Actions 集成支持 Windows 2022 / 2025，并可使用 Entra OIDC 联邦登录与 `Artifact Signing Certificate Profile Signer` 权限。无论选哪条路线，都必须由真实发行主体完成身份验证；不向 ChatGPT 发送身份证件、私钥或证书密码。
+
+### 11.4 当前结论
+
+- 双平台独立构建的旧候选：各自验收通过，但不能合并成一个发行文件。
+- Windows 2025 唯一候选：已在 Windows 2025 通过；Windows 2022 同 SHA 交叉实测待执行。
+- 正式发行主体类型/司法辖区：尚未确认。
+- Authenticode 证书/服务、Publisher thumbprint、Ed25519 manifest key：尚未配置。
+- 自动更新：继续 fail closed。
+- 正式 Release：未创建。
+
+下一步先完成单一 EXE 的 Windows 2022 交叉实测，再根据真实发行主体的类型与司法辖区选择 Azure Artifact Signing 或 OV 证书。完成真实签名身份配置前，不生成伪造签名、不启用更新、不发布。
+
+
+## 12. 2026-11-14 同一候选 EXE 双平台交叉验收完成；LPAC 决策
+
+### 12.1 同一个二进制文件在两个 Windows 版本通过
+
+- Windows 2025 来源构建：Run `43495140768`，job `132126155604`，提交 `5713e2db0a583439be31020062e07a84297105b3`。
+- Windows 2025 来源 Artifact：`14072426069`。
+- Windows 2025 构建镜像：`win25-vs2026`，镜像版本 `20261103.298.1`。
+- Windows 2022 同文件交叉验收：Run `43507572122`，job `132169112615`。
+- Windows 2022 测试镜像：`win22`，镜像版本 `20261101.353.1`。
+- 跨平台回执 Artifact：`14077333069`，名称 `YuTang-1.4.7-Same-Candidate-Windows-2022-Cross-Test-NOT-RELEASE`。
+- 最终交叉验收状态：`PASS_SAME_CANDIDATE_WINDOWS_2022_CROSS_TEST`。
+- 唯一 EXE：`Dafeiyu-Douyin-API-1.4.7-win-x64.exe`。
+- 大小：`125,299,013 bytes`。
+- 唯一 SHA-256：`4acebd4d914133d14806ffab71c464aa9f6d80e39d968bf009ded0da6075f519`。
+- Authenticode：`NotSigned`。
+- Release：`false`。
+
+交叉验收先核对原始 Run 成功、Windows 2025 job 成功、Artifact ID/所属 Run/来源提交/原始 receipt/verification，再下载唯一 Artifact，在 Windows 2022 重新计算 SHA-256 并对同一文件运行 Edge 生命周期测试。没有在 Windows 2022 重新构建 EXE。
+
+### 12.2 Windows 2022 对同一 EXE 的实际运行
+
+同一 SHA 的四份 Edge 生命周期回执（正常、强杀 browser-host、强杀 Job Object guard、强杀 Electron 主进程）全部通过：
+
+- 每份回执均绑定 SHA `4acebd4d914133d14806ffab71c464aa9f6d80e39d968bf009ded0da6075f519`。
+- Edge 版本：`156.0.4314.58`。
+- 每种运行均启动 3 次、关闭 3 次，包含 2 次重启。
+- Renderer 共 3 个，均为 Lockdown + Untrusted + Lowbox/AppContainer。
+- CDP 只绑定 loopback；未发现 `--no-sandbox`。
+- Network Service 属于该应用自己的 Edge 进程树，使用独立 profile。
+- 三种强制退出分别为 `kill-host-only`、`kill-jobguard-only`、`kill-electron-main-only`。
+- 三种强制退出的 tracked processes、profile processes、CDP listeners 均为 0。
+- 无关 Edge 进程在关闭与重启过程中保持存活。
+- 四份回执的 `cleanupVerified=true`。
+- 临时 Edge 出站防火墙规则已执行清理；本轮仅在临时 GitHub-hosted runner 生效。
+
+本轮外网被明确阻断，因而没有进行 Douyin 视频播放；测试中的 `ERR_NETWORK_ACCESS_DENIED` 是预期隔离结果，不是浏览器启动失败。没有登录真实账号、没有调用真实模型、没有使用真实密钥。
+
+### 12.3 AppContainer、Low Integrity 与 LPAC 的实际区别
+
+本次**当前候选 EXE**在 Windows 2022 与 Windows 2025 均有直接的 Windows Token 证据：
+
+- Network Service 的 AppContainer SID 与其 Windows 进程令牌一致。
+- `IsAppContainer=true`。
+- `TokenIntegrityLevel` RID = `4096`，即 Low Integrity。
+- 回执字段：`networkServiceWindowsTokenVerified=true`、`networkServiceLowIntegrityVerified=true`、`networkServiceTokenIntegrityLevel=Low`。
+
+同时必须保留 UI 与 token 的区别：`edge://sandbox` 页面显示 Network Service 的 Sandbox 类型为 `Network`、Lockdown 为 `None`、Integrity 列为 `Default`；Windows 进程令牌 API 的直接检查则确认 Low Integrity。我们只声称已经证明 AppContainer + Low Integrity，不把 UI 字段误写为完整 Lockdown。
+
+### 12.4 LPAC 现有证据与决策
+
+既有 LPAC 语义专项 Run `43488935750`（独立实验分支）在 Windows 2022 与 Windows 2025 对更早的 1.4.7 候选进行了 Chromium 上游 `CheckLpacToken` 风格的 AccessCheck：
+
+| 平台 | 旧候选 SHA-256 | AccessCheck | 结果 | 公网 HTTPS |
+|---|---|---:|---|---|
+| Windows 2022 | `f153896ecb7687d35f8f1b0b66ead1470fe91f611fcb2bf515f4e90c57b5f043` | 3 | ordinary-AppContainer | HTTP 200 / h3 / QUIC |
+| Windows 2025 | `c2cd51f7449a3ddc4413b4e06d1ea30ae9bbb070e11b7aee540788b9d3f71ef0` | 3 | ordinary-AppContainer | HTTP 200 / h2 / TLS 1.3 |
+
+该旧专项明确不是当前新候选的 SHA 验收。它所用的 `browser-host.mjs` SHA-256 为 `cc1c995f352aa803608b3d1902f43977bde1d1aab7ca08080274d3e66ca47909`；当前新候选构建回执也记录相同 `browser-host.mjs` SHA，Edge 版本同为 `156.0.4314.58`。但本次新候选的交叉工作流没有再次运行 LPAC AccessCheck，也没有对新候选放开公网 HTTPS。
+
+**工程决策：当前不升级 LPAC。** 理由：
+
+1. 当前新候选已经在两台 Windows 上证明 Network Service 运行于 AppContainer 且 Windows token 为 Low Integrity；Renderer 是 Untrusted + Lockdown。
+2. 旧专项对相同 browser-host 代码与相同 Edge 版本证明当前模式是 ordinary AppContainer，而非 LPAC，并证明该模式下真实 HTTPS 可用。
+3. LPAC 会进一步限制 Network Service 可访问的系统资源；在没有业务需求、没有新候选联网兼容性实测之前，仅为了获得更严格的标签而改动浏览器权限边界，可能损害 DNS、证书、代理、HTTP/2/HTTP/3 或网站访问能力。
+4. LPAC 不是当前启动与进程生命周期验收的发布阻塞项。
+
+因此保持当前 AppContainer + Low Integrity，不对当前候选的 browser-host 做 LPAC 修改。若未来确有更高隔离需求，另开实验分支，对同一个固定 EXE 和 Edge 版本先做 LPAC AccessCheck，再做 DNS、TLS、HTTP/2、HTTP/3、代理和真实目标网站兼容性测试；全部通过前不得合入候选。
+
+### 12.5 最新验收状态与剩余阻塞
+
+**已通过：**
+- Windows 2025 原始候选 EXE 构建、隔离启动与 Edge 生命周期实测。
+- 同一 Windows 2025 EXE 在 Windows 2022 的下载、哈希复核、真实 Edge 沙盒与生命周期交叉验收。
+- 两平台同一 SHA-256 绑定。
+- AppContainer + Low Integrity 直接 token 验证。
+- 正常关闭、两次重启、三种强制退出零残留。
+
+**仍未通过/未执行：**
+- 当前候选的 LPAC AccessCheck 专项复测：未执行；按当前安全需求不作为阻塞。
+- 当前新候选公网 HTTPS / Douyin 播放：本轮外网阻断，未执行。
+- Authenticode 正式签名：未签名。
+- Ed25519 正式清单公钥/私钥配置：未配置。
+- 真实在线更新、安装、健康确认与失败回滚端到端：未执行。
+- 正式 Release：未创建。
+
+最终状态：同一 1.4.7 EXE 的 Windows 2022 + Windows 2025 启动与 Edge 生命周期交叉验收通过；仍为未签名、未发布候选。继续保持 `main` 不变、无合并、无正式发布、无用户电脑操作。
+
+
+## 13. 2026-11-14 更新器二阶段切换与回滚补强（Windows 实测待执行）
+
+### 13.1 对上一轮健康回执疑虑的更正
+
+上一条交接曾提出“`startupReady=true` 可能早于 UI 完成加载”。进一步核对固定上游 `desktop/src/main.mjs` 和 `desktop/src/startup-navigation.mjs` 后，确认这一疑虑不成立：
+
+1. `await backend.start(current)` 先完成本机 API 启动。
+2. `await navigateStartup(...)` 等待本机 HTML 返回 200，执行 `window.loadURL()`，再执行 `checkRenderer()`。
+3. `checkRenderer()` 要求 DOM 非 loading、`#root` 有子元素，且 preload 暴露的 `getSettings` / `saveSettings` API 存在。
+4. `await startup.success()` 完成后，再检查 backend child 仍连接且未退出。
+5. 最后才执行 `startupReady = true`，更新健康回执在该锚点之后生成。
+
+因此，原健康回执时序已在逻辑上晚于 UI root / preload API / backend readiness。此前“健康回执早于 UI ready”的判断撤回。本分支在补丁执行器中新增固定源码顺序断言 `UPDATE_HEALTH_SIGNAL_NOT_AFTER_BACKEND_AND_RENDERER_READINESS`，防止未来上游变更使此顺序失效。
+
+### 13.2 真正发现的回滚窗口缺口
+
+原更新启动器在新版健康回执后先等待 30 秒，再切换桌面快捷方式；切换成功后立即删除旧快捷方式备份。这样能发现切换前的崩溃，但无法恢复切换后、备份删除后立即发生的新版异常退出。
+
+本分支修改为：
+
+1. 等待旧版进程退出。
+2. 重新核对新版 EXE SHA-256 与 Authenticode 发布者身份。
+3. 启动新版并等待与 PID、nonce、版本、SHA-256、backend PID 绑定的健康回执。
+4. 健康回执通过后才切换桌面快捷方式，同时保留旧快捷方式备份。
+5. 切换后继续观察 30 秒；新版非零退出或被信号终止时，恢复旧快捷方式。
+6. 若新版正常以 exit code 0 退出（例如用户主动关闭），视为正常，不回滚。
+7. 观察期完成后才删除旧快捷方式备份。
+8. 若恢复旧快捷方式本身失败，不再静默吞掉异常；抛出 AggregateError 并指出保留的备份路径。
+
+### 13.3 新增回归测试
+
+更新器测试从 15 项扩展为 17 项，新增：
+
+- 新版在快捷方式已经切换后的观察期内崩溃：必须恢复旧快捷方式，且清理临时健康文件/暂存快捷方式。
+- 新版在观察期内以 exit code 0 正常退出：保留新版快捷方式，不错误回滚。
+
+原有签名拒绝、清单伪造、SHA 篡改、下载失败和健康回执失败测试保留。
+
+### 13.4 本分支与验收状态
+
+- 分支：`experiment/windows-147-update-rollback-20261114`
+- 本节记录时最新提交：`28d5b63b5567c3bb8caf48e1901d200c017ab79a`
+- 该分支基于已通过的单一候选双平台交叉验收之后的更新信任源码。
+- `main` 未修改。
+- 没有新的 Windows Actions 运行；新增 17 项测试、补丁器顺序断言和新版 EXE 均**尚未在 Windows 2022/2025 重新验收**。
+- 先前同一候选 `4acebd4d...` 的双平台通过证据仍然有效，但不能替代本次更新器源码改动后的新候选验收。
+
+下一步需要在授权的 Windows 2025 构建 + Windows 2022 同文件交叉测试中，验证 17 项更新器测试、补丁器、真实打包 EXE 和 Edge 生命周期。签名密钥仍为空，更新服务仍 fail closed；本轮不做真实在线升级或正式发布。
