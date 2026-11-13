@@ -16,15 +16,15 @@ permissions:
 
 jobs:
   build-and-smoke:
-    name: \${{ matrix.os }} exact-source portable EXE
-    runs-on: \${{ matrix.os }}
+    name: ${{ matrix.os }} exact-source portable EXE
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
         os: [windows-2022, windows-2025]
     concurrency:
-      group: yutang-openrouter-windows-candidate-\${{ matrix.os }}
+      group: yutang-openrouter-windows-candidate-${{ matrix.os }}
       cancel-in-progress: true
 
     steps:
@@ -186,7 +186,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
-          name: YuTang-OpenRouter-Desktop-1.4.7-\${{ matrix.os }}-CANDIDATE-NOT-RELEASE
+          name: YuTang-OpenRouter-Desktop-1.4.7-${{ matrix.os }}-CANDIDATE-NOT-RELEASE
           path: |
             upstream/desktop/release-api/Dafeiyu-Douyin-API-1.4.7-win-x64.exe
             upstream/desktop/release-api/Dafeiyu-Douyin-API-1.4.7-win-x64.exe.sha256
