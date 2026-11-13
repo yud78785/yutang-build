@@ -93,8 +93,8 @@ export async function applyUpdateTrustPatch(upstream, repositoryRoot = REPOSITOR
   ].join('\n');
   verifier = replaceExactlyOnce(verifier, packagedReadmeAnchor, packagedReadmeCheck, 'packaged-readme-trust-disclosure');
   verifier = replaceExactlyOnce(verifier,
-    "for (const name of ['main.mjs', 'api-process.mjs', 'prepare-api-runtime.mjs', 'media-key-store.mjs', 'startup-navigation.mjs', 'preload.cjs', 'update-service.mjs', 'update-launcher.mjs']) {",
-    "for (const name of ['main.mjs', 'api-process.mjs', 'prepare-api-runtime.mjs', 'media-key-store.mjs', 'startup-navigation.mjs', 'preload.cjs', 'update-service.mjs', 'update-launcher.mjs', 'update-transaction.mjs']) {",
+    "'update-launcher.mjs']) {",
+    "'update-launcher.mjs', 'update-transaction.mjs']) {",
     'packaged-update-transaction-module');
   await write(verifierPath, verifier);
 
