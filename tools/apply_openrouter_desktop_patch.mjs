@@ -212,7 +212,17 @@ const newReady = oldReady + "\n" +
 "  assert.equal(providerKeyIsolation.switchedModel, 'deepseek/deepseek-v4.1-flash');\n" +
 "  assert.equal(providerKeyIsolation.afterConfigured, true);\n" +
 "  assert.equal(providerKeyIsolation.cleared, true);\n" +
-"  assert.equal(providerKeyIsolation.noKeyLeak, true);";
+"  assert.equal(providerKeyIsolation.noKeyLeak, true);\n" +
+"  // Clearing the synthetic key intentionally reopens setup; use the real UI to restore a synthetic key.\n" +
+"  await page.getByRole('dialog').waitFor({ state: 'visible' });\n" +
+"  await page.getByRole('textbox', { name: 'API Key', exact: true }).fill('synthetic-openrouter-restored-only');\n" +
+"  await page.getByRole('textbox', { name: 'API Key', exact: true }).press('Tab');\n" +
+"  await page.getByRole('dialog').waitFor({ state: 'hidden' });\n" +
+"  const postRestoreSettings = await page.evaluate(() => window.douyinDesktop.getSettings());\n" +
+"  assert.equal(postRestoreSettings.configured, true);\n" +
+"  assert.equal(postRestoreSettings.baseUrl, 'https://openrouter.ai/api/v1');\n" +
+"  assert.equal(JSON.stringify(postRestoreSettings).includes('synthetic-openrouter-restored-only'), false);\n" +
+"  console.log('SYNTHETIC_ONLY_API_DIALOG_DISMISSAL_VERIFIED');";
 packagedVerifier = replaceOnce(packagedVerifier, oldReady, newReady, 'packaged EXE proves cross-provider key isolation');
 packagedVerifier = replaceOnce(packagedVerifier,
   "renderer: { loaded: true, privateKeyIpc: true, apiKeyBlurAutoSaved:true, syntheticKeyCleared: true,",
