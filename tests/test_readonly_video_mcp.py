@@ -142,5 +142,34 @@ class ReadonlyVideoTests(unittest.TestCase):
         asyncio.run(check())
 
 
+    def test_browser_frame_provenance_is_not_fake_video_file_hash(self):
+        self.data.pop("source_video_sha256")
+        self.data["schema"] = "yutang.browser-video-capture-samples.v1"
+        self.data["capture_artifact_sha256"] = VID
+        self.data["browser_video_id"] = "7577614489533680959"
+        self.data["video_url"] = "https://www.douyin.com/video/7577614489533680959"
+        self.data["page_origin"] = "https://www.douyin.com"
+        self.data["probe_result_sha256"] = "b" * 64
+        self.data["transcript_source"] = "none"
+        self.data["transcript_segments"] = []
+        self.write()
+        e = self.evidence()
+        self.assertTrue(e.status()["browser_capture_samples_only"])
+        self.assertEqual(e.status()["original_browser_video_id"], "7577614489533680959")
+        self.assertEqual(e.status()["source_identity_kind"],
+                         "ORIGINAL_WINDOWS_VIDEO_CAPTURE_ZIP_SHA256_NOT_VIDEO_BYTES")
+        self.assertEqual(e.transcript()["total_matching"], 0)
+        self.assertEqual(e.frame(1.0)[1], self.images[0])
+        self.data["video_url"] = "https://evil.invalid/video/7577614489533680959"
+        self.write()
+        with self.assertRaisesRegex(EvidenceRefused, "BROWSER_VIDEO_IDENTITY_MISMATCH"):
+            self.evidence()
+        self.data["video_url"] = "https://www.douyin.com/video/7577614489533680959"
+        self.data["transcript_segments"] = [{"start": 0, "end": 1, "text": "invented"}]
+        self.write()
+        with self.assertRaisesRegex(EvidenceRefused, "UNPROVEN_BROWSER_AUDIO_TRANSCRIPTION"):
+            self.evidence()
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 SCHEMA = "yutang.watch-skill-real-av-pilot.v1"
+BROWSER_SCHEMA = "yutang.browser-video-capture-samples.v1"
 SHA = re.compile(r"^[a-f0-9]{64}$")
 MAX_MANIFEST_BYTES = 2_000_000
 MAX_FRAME_BYTES = 3_000_000
@@ -64,8 +65,30 @@ class VideoEvidence:
             data = json.loads(manifest.read_bytes())
         except (ValueError, UnicodeDecodeError) as exc:
             raise EvidenceRefused("INVALID_MANIFEST_JSON") from exc
-        require(isinstance(data, dict) and data.get("schema") == SCHEMA, "WRONG_MANIFEST_SCHEMA")
-        require(data.get("source_video_sha256") == expected_source_sha256,
+        require(isinstance(data, dict) and data.get("schema") in {SCHEMA, BROWSER_SCHEMA},
+                "WRONG_MANIFEST_SCHEMA")
+        is_browser_capture = data["schema"] == BROWSER_SCHEMA
+        if is_browser_capture:
+            identity_key = "capture_artifact_sha256"
+            source_kind = "ORIGINAL_WINDOWS_VIDEO_CAPTURE_ZIP_SHA256_NOT_VIDEO_BYTES"
+            video_id = data.get("browser_video_id")
+            require(isinstance(video_id, str) and bool(re.fullmatch(r"[0-9]{12,24}", video_id)),
+                    "INVALID_ORIGINAL_VIDEO_ID")
+            require(data.get("video_url") == f"https://www.douyin.com/video/{video_id}",
+                    "BROWSER_VIDEO_IDENTITY_MISMATCH")
+            require(data.get("page_origin") == "https://www.douyin.com",
+                    "BROWSER_VIDEO_ORIGIN_MISMATCH")
+            require(isinstance(data.get("probe_result_sha256"), str) and
+                    SHA.fullmatch(data["probe_result_sha256"]) is not None,
+                    "MISSING_ORIGINAL_PROBE_HASH")
+            require(data.get("transcript_source") == "none" and
+                    data.get("transcript_segments") == [],
+                    "UNPROVEN_BROWSER_AUDIO_TRANSCRIPTION")
+        else:
+            identity_key = "source_video_sha256"
+            source_kind = "ACTUAL_LOCAL_MEDIA_BYTES_SHA256"
+            video_id = None
+        require(data.get(identity_key) == expected_source_sha256,
                 "VIDEO_IDENTITY_SHA_MISMATCH")
         require(data.get("candidate_exe_tested") is False and
                 data.get("autonomous_browser_actions") is False and
@@ -112,6 +135,9 @@ class VideoEvidence:
             transcript.append({"start": start, "end": end, "text": text})
         self.root = root
         self.source_sha256 = expected_source_sha256
+        self.source_identity_kind = source_kind
+        self.original_browser_video_id = video_id
+        self.browser_capture_samples_only = is_browser_capture
         self.duration = duration
         self.frames = frames
         self.transcript_segments = transcript
@@ -121,6 +147,10 @@ class VideoEvidence:
     def status(self) -> dict[str, Any]:
         return {
             "source_sha256": self.source_sha256,
+            "source_identity_kind": self.source_identity_kind,
+            "original_browser_video_id": self.original_browser_video_id,
+            "browser_capture_samples_only": self.browser_capture_samples_only,
+            "video_duration_is_metadata_not_playback_proof": self.browser_capture_samples_only,
             "duration_seconds": self.duration,
             "video_frames_sampled": len(self.frames),
             "speech_segments": len(self.transcript_segments),
