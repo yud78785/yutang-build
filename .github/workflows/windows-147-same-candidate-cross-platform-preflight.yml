@@ -1,6 +1,11 @@
 name: YuTang 1.4.7 single-candidate Windows 2022 cross-platform preflight (NOT RELEASE)
 
 on:
+  push:
+    branches:
+      - experiment/windows-147-release-preflight-20261114
+    paths:
+      - .github/workflows/windows-147-same-candidate-cross-platform-preflight.yml
   workflow_dispatch:
 
 permissions:
