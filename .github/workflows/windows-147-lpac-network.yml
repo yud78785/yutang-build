@@ -15,8 +15,8 @@ permissions:
 
 jobs:
   lpac-network:
-    name: \${{ matrix.runner }} exact prior candidate
-    runs-on: \${{ matrix.runner }}
+    name: ${{ matrix.runner }} exact prior candidate
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 35
     strategy:
       fail-fast: false
@@ -45,8 +45,8 @@ jobs:
         with:
           repository: yud78785/yutang-build
           run-id: 43467660911
-          artifact-ids: \${{ matrix.artifact_id }}
-          github-token: \${{ secrets.GITHUB_TOKEN }}
+          artifact-ids: ${{ matrix.artifact_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           path: candidate
 
       - name: Verify exact candidate receipt and executable hash
@@ -59,7 +59,7 @@ jobs:
           $verification = Get-ChildItem candidate -Filter 'verification-1.4.7.json' -File -Recurse
           if (@($receipt).Count -ne 1 -or @($verification).Count -ne 1) { throw 'CANDIDATE_RECEIPT_MISSING_OR_AMBIGUOUS' }
           $sha = (Get-FileHash -LiteralPath $exe[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-          if ($sha -cne '\${{ matrix.expected_sha256 }}') { throw 'CANDIDATE_SHA256_DOES_NOT_MATCH_PREVIOUS_ACCEPTED_ARTIFACT' }
+          if ($sha -cne '${{ matrix.expected_sha256 }}') { throw 'CANDIDATE_SHA256_DOES_NOT_MATCH_PREVIOUS_ACCEPTED_ARTIFACT' }
           $r = Get-Content -LiteralPath $receipt[0].FullName -Raw | ConvertFrom-Json
           $v = Get-Content -LiteralPath $verification[0].FullName -Raw | ConvertFrom-Json
           if ($r.yutangPatchCommit -cne '1c332d55a88c4be2f3bbffda60548ced52b1f061' -or $r.sha256 -cne $sha -or $r.release -ne $false -or $r.signatureStatus -cne 'NotSigned') { throw 'CANDIDATE_RECEIPT_IDENTITY_MISMATCH' }
@@ -99,8 +99,8 @@ jobs:
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
-          name: YuTang-1.4.7-LPAC-Network-\${{ matrix.runner }}-EVIDENCE-NOT-RELEASE
-          path: \${{ runner.temp }}/yutang-lpac-network-result.json
+          name: YuTang-1.4.7-LPAC-Network-${{ matrix.runner }}-EVIDENCE-NOT-RELEASE
+          path: ${{ runner.temp }}/yutang-lpac-network-result.json
           if-no-files-found: warn
           retention-days: 14
           compression-level: 6
