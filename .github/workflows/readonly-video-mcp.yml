@@ -1,0 +1,54 @@
+name: YuTang read-only video MCP adapter test - NOT Windows or real video
+
+on:
+  push:
+    branches:
+      - experiment/video-component-pilot-20261113
+    paths:
+      - .github/workflows/readonly-video-mcp.yml
+      - tools/readonly_video_mcp.py
+      - tests/test_readonly_video_mcp.py
+
+concurrency:
+  group: yutang-readonly-video-mcp-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  readonly-mcp-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - name: Require isolated public Linux branch test
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "yud78785/yutang-build"
+          test "$GITHUB_REF" = "refs/heads/experiment/video-component-pilot-20261113"
+          test "$GITHUB_EVENT_NAME" = "push"
+          test "$RUNNER_OS" = "Linux"
+          echo "Synthetic tests only: no candidate EXE, no media/provider access, no release"
+      - name: Checkout without persisted credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Install standalone FastMCP only in disposable CI
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m venv .venv
+          .venv/bin/python -m pip install --no-cache-dir "fastmcp==3.4.5"
+          .venv/bin/python -m pip freeze | grep -E '^(fastmcp|mcp)=='
+      - name: Run fail-closed query and MCP transport tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          .venv/bin/python -m py_compile tools/readonly_video_mcp.py tests/test_readonly_video_mcp.py
+          .venv/bin/python -m unittest discover -s tests -p test_readonly_video_mcp.py -v
+      - name: Preserve strict non-release classification
+        if: always()
+        shell: bash
+        run: |
+          echo "NOT_REAL_AV_TEST; NOT_WINDOWS_EXE_TEST; NOT_DOUYIN; NOT_MODEL_COMPREHENSION"
