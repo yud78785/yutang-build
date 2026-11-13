@@ -13,7 +13,7 @@ export const REQUIRED_OUTCOME = 'PASS_PUBLIC_VIDEO_CORE_CAPTURE_AND_MODEL_INPUT_
 export const OPENROUTER_VISION_PROFILE = Object.freeze({
   baseUrl: 'https://openrouter.ai/api/v1',
   model: 'deepseek/deepseek-v4.1-flash',
-  maxPrice: Object.freeze({ prompt: 0.022, completion: 0.40 }),
+  maxPrice: Object.freeze({ prompt: 0.30, completion: 1.20 }),
 });
 
 export function resolveVisionProvider(env = process.env) {

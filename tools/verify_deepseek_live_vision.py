@@ -18,7 +18,7 @@ def main() -> None:
         raise SystemExit("ORIGINAL_REVIEW_GATE_EXIT_CODE_CHANGED")
     profiles = {
         "DeepSeek API": ("deepseek", "deepseek-flash", {"prompt": 0.30, "completion": 1.20}),
-        "OpenRouter": ("openrouter", "deepseek/deepseek-v4.1-flash", {"prompt": 0.022, "completion": 0.40}),
+        "OpenRouter": ("openrouter", "deepseek/deepseek-v4.1-flash", {"prompt": 0.30, "completion": 1.20}),
     }
     provider = result.get("provider")
     if provider not in profiles:

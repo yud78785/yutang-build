@@ -78,7 +78,7 @@ test('OpenRouter transport strips DeepSeek-only field and enforces ZDR + price c
   assert.deepEqual(captured.body.reasoning, { effort: 'none' });
   assert.deepEqual(captured.body.provider, {
     sort: 'price',
-    max_price: { prompt: 0.022, completion: 0.40 },
+    max_price: { prompt: 0.30, completion: 1.20 },
     data_collection: 'deny',
     zdr: true,
     require_parameters: true,
