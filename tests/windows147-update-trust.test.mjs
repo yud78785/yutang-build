@@ -8,7 +8,9 @@ import { generateKeyPairSync, sign, createHash } from 'node:crypto';
 import {
   UpdateService,
   UPDATE_REPOSITORY,
-  validateManifest
+  validateManifest,
+  newerVersion,
+  parseVersion
 } from '../tools/windows147-update-patched/update-service.mjs';
 import { runUpdateLauncher } from '../tools/windows147-update-patched/update-launcher.mjs';
 
@@ -17,6 +19,26 @@ const bytes = Buffer.concat([Buffer.from('MZ'), Buffer.alloc(2046, 27)]);
 const sha256 = createHash('sha256').update(bytes).digest('hex');
 const { publicKey, privateKey } = generateKeyPairSync('ed25519');
 const publicKeyPem = publicKey.export({ type: 'spki', format: 'pem' });
+
+test('稳定更新版本使用规范 SemVer，测试版不会被误判为正式版', () => {
+  assert.deepEqual(parseVersion('v1.4.5'), [1, 4, 5]);
+  assert.equal(parseVersion('01.4.5'), null);
+  assert.equal(parseVersion('1.04.5'), null);
+  assert.equal(parseVersion('1.4.05'), null);
+  assert.equal(parseVersion('1.4.5-beta.1'), null);
+  assert.equal(newerVersion('1.4.5', '1.4.5-beta.1+local.001'), true);
+  assert.equal(newerVersion('1.4.5', '1.4.5+local.001'), false);
+  assert.equal(newerVersion('1.4.2-rc.1', '1.4.1'), false);
+  assert.equal(newerVersion('1.4.4', '1.4.5-beta.1'), false);
+  assert.equal(newerVersion('1.4.6', '1.4.5-beta.1'), true);
+  for (const version of ['1.4.5-beta.1', '1.4.5-rc.0', '1.4.5-0', '1.4.5-alpha-beta.2+local.001']) {
+    assert.doesNotThrow(() => new UpdateService({ version, directory: path.resolve(os.tmpdir()) }));
+  }
+  for (const version of ['1.4', '01.4.5-beta.1', '1.04.5-beta.1', '1.4.05-beta.1', '1.4.5-beta.01', '1.4.5-01', '1.4.5-beta..1', '1.4.5-beta.', '1.4.5-', '1.4.5+', '1.4.5+build..1', '1.4.5-beta_1', '1.4.5-beta.1\\n', ' 1.4.5-beta.1', '9007199254740992.4.5-beta.1']) {
+    assert.throws(() => new UpdateService({ version, directory: path.resolve(os.tmpdir()) }), /版本或下载目录无效/);
+    assert.equal(newerVersion('2.0.0', version), false);
+  }
+});
 
 function makeManifest(overrides = {}) {
   return {
