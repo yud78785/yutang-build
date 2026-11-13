@@ -145,3 +145,37 @@ Azure GitHub OIDC 需要由发行主体或其管理员完成：
 **未完成：** 该交叉验收尚未运行；正式发行主体类型/注册地未确认；没有 Authenticode 证书、Publisher thumbprint 或 Ed25519 密钥；没有正式 Release；自动更新仍关闭。
 
 为了选对签名服务，只需确认发行主体的类型和司法辖区，不需要发送法律名称、身份证件、证书、私钥或密码。若不想在聊天中披露，也可以由发行主体自行选择服务商并直接完成验证，再只提供公开的 Publisher thumbprint 与 Ed25519 公钥。
+
+
+## 8. 2026-11-14 验收状态更新：同一 EXE 已通过 Windows 2022 / 2025
+
+签名仍然暂缓，不需要现在购买证书。
+
+唯一候选已确定为 Windows 2025 构建的 EXE，并在 Windows 2022 直接下载同一 Artifact、复核相同 SHA-256 后完成 Edge 生命周期交叉测试：
+
+- 来源构建 Run：`43495140768`
+- 来源 Artifact：`14072426069`
+- Windows 2022 同文件交叉验收 Run：`43507572122`
+- 交叉验收 Artifact：`14077333069`
+- 候选 SHA-256：`4acebd4d914133d14806ffab71c464aa9f6d80e39d968bf009ded0da6075f519`
+- 状态：`PASS_SAME_CANDIDATE_WINDOWS_2022_CROSS_TEST`
+- Authenticode：`NotSigned`
+- Release：`false`
+
+这解决了先前两个平台各自构建出不同 EXE 的问题。现在有一个相同的二进制文件分别在 Windows 2025 和 Windows 2022 通过实测。
+
+### LPAC 决策
+
+当前候选已证明 Network Service 的 Windows token 为 AppContainer + Low Integrity（RID 4096）；Renderer 为 Untrusted + Lockdown。更早的独立 LPAC 语义专项对相同 browser-host 源码和 Edge 版本的 AccessCheck 分类为 `ordinary-AppContainer`，且真实公网 HTTPS 成功。
+
+当前不升级 LPAC：现有 AppContainer + Low Integrity 已满足当前启动与隔离验收目标；没有必要为了更严格的标签冒险破坏 DNS/TLS/HTTP 网络兼容性。LPAC 留作单独实验，不是当前候选阻塞。
+
+### 仍然关闭的项目
+
+- 不购买证书、不注册公司、不提交个人身份材料。
+- 不配置 Authenticode 或 Ed25519 私钥。
+- 不开放自动更新。
+- 不创建正式 Release。
+- 不合并到 `main`。
+
+后续只有在用户决定对外发布时，再恢复签名资格、价格和证书方案评估。当前优先保留已通过的候选，不重复构建或重复运行已经通过的 Edge 生命周期测试。
