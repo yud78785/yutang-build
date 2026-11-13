@@ -243,7 +243,7 @@ test('下载后本地 EXE 被改变时二次校验拒绝启动', async t => {
   assert.equal((await f.updater.download()).status, 'downloaded');
   const verified = await f.updater.verifiedExecutable();
   await fs.writeFile(verified.file, 'tampered');
-  await assert.rejects(f.updater.verifiedExecutable(), /SHA256/);
+  await assert.rejects(f.updater.verifiedExecutable(), /已改变/);
 });
 
 function fakeChild(pid) {
