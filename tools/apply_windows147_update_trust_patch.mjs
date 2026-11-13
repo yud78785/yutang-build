@@ -150,8 +150,11 @@ export async function applyUpdateTrustPatch(upstream, repositoryRoot = REPOSITOR
     authenticodePublisherThumbprintConfigured: false,
     updatesDisabledUntilTrustConfigured: true,
     startupHealthHandshake: true,
+    startupHealthAfterRendererReady: true,
     stagedShortcutUntilHealthy: true,
-    preCommitRollbackWindowMs: 30000,
+    postSwitchRollbackWindowMs: 30000,
+    normalExitDuringObservationAccepted: true,
+    rollbackFailurePreservesBackupPath: true,
     release: false,
     executableBuilt: false,
     windowsTested: false
