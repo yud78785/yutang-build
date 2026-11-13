@@ -203,3 +203,16 @@ Azure GitHub OIDC 需要由发行主体或其管理员完成：
 
 
 README 检查也会进入下一轮打包验证：补丁器更新随包 `README.md` 后，修改 `verify-packaged-api.mjs`，直接从 `app.asar` 读取 README 并断言存在“未签名验收候选”和“自动更新处于安全关闭状态”说明。这样不是只检查源码模板，而是检查最终 EXE 中实际打包的文档。该检查尚待新候选 Windows 构建执行。
+
+
+## 10. 2026-11-14 Windows 更新器候选验收结果
+
+Workflow Run `43513624284` 在隔离实验分支 `experiment/windows-147-update-rollback-20261114` 的 commit `e8e91a29be026403b3095f5fe9e5885b485147a1` 完成，三个 Windows job 均成功：
+
+- Windows 2022 build job `132189835286`：Artifact `14079683370`，EXE SHA-256 `23bda17a387f6a22b7f49b641752b4add07d55a0bf2f09800e74d68aa81644b5`。
+- Windows 2025 build job `132189835693`：Artifact `14079143899`，EXE SHA-256 `87ec2d05137802bb39855272c2292e06b7d48012b467ba8bef32b7b0d128582e`。
+- Windows 2022 同文件交叉验收 job `132195190400`：Artifact `14081041070`，测试 Windows 2025 的同一 SHA `87ec2d05137802bb39855272c2292e06b7d48012b467ba8bef32b7b0d128582e`，结论 `PASS_SAME_WINDOWS_2025_CANDIDATE_WINDOWS_2022_CROSS_TEST`。
+
+每个平台均通过 17 项更新器模板测试、最终 EXE 启动与 README 打包断言、Edge 沙盒、AppContainer + Low Integrity、loopback CDP、正常重启及三种强制退出零残留。跨平台交叉 job 从 Windows 2025 Artifact 下载 EXE，核对源回执和 SHA-256 sidecar 后，在 Windows 2022 直接运行；没有重建 EXE。
+
+正式 Authenticode 签名与 Ed25519 manifest 公钥仍未配置，更新器保持关闭。因此真实在线升级与真实 EXE 崩溃回滚仍未端到端验收，不能对外宣称已通过。三个 Artifact 均为 NOT-RELEASE 候选；`main` 未修改、未合并、未发布。
