@@ -63,7 +63,7 @@ jobs:
           .venv/bin/python -m pip freeze > work/dependency-freeze.txt
           .venv/bin/python -c "import watch_skill, cv2, scenedetect, faster_whisper; print('Watch Skill perception + ASR installed')"
 
-      - name: Download one genuinely narrated CC-BY-4.0 W3C clip and independent reference
+      - name: Download one genuinely narrated W3C attribution-required original clip and independent reference
         shell: bash
         run: |
           set -euo pipefail
