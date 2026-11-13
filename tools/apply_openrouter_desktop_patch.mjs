@@ -19,6 +19,7 @@ const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: '
 if (head !== BASE_COMMIT) throw new Error('UPSTREAM_BASE_COMMIT_MISMATCH: expected ' + BASE_COMMIT + ', got ' + head);
 
 const sha256 = value => createHash('sha256').update(value).digest('hex');
+const gitBlobSha1 = value => createHash('sha1').update('blob ' + Buffer.byteLength(value, 'utf8') + '\0').update(value, 'utf8').digest('hex');
 const read = async relative => fs.readFile(path.join(root, relative), 'utf8');
 const write = async (relative, value) => fs.writeFile(path.join(root, relative), value, 'utf8');
 function replaceOnce(source, before, after, label) {
@@ -30,7 +31,7 @@ function replaceOnce(source, before, after, label) {
 }
 async function loadVerified(relative) {
   const value = await read(relative);
-  const actual = sha256(value);
+  const actual = gitBlobSha1(value);
   if (actual !== EXPECTED[relative]) throw new Error('UPSTREAM_SOURCE_SHA_MISMATCH: ' + relative + ' expected ' + EXPECTED[relative] + ' got ' + actual);
   return value;
 }
@@ -151,7 +152,7 @@ const receipt = {
   status: 'PATCH_APPLIED_TO_PINNED_UPSTREAM_SOURCE_ONLY',
   upstreamRepository: 'LockyBee/dsh-douyin-agent',
   upstreamCommit: BASE_COMMIT,
-  originalSourceSha256: EXPECTED,
+  originalSourceGitBlobSha1: EXPECTED,
   modifiedSourceSha256: modified,
   model: 'deepseek/deepseek-v4.1-flash',
   requestPolicy: {
