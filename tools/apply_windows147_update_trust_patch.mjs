@@ -145,8 +145,11 @@ export async function applyUpdateTrustPatch(upstream, repositoryRoot = REPOSITOR
 
   const mainPath = path.join(upstream, 'desktop/src/main.mjs');
   let main = await read(mainPath);
-  main = replaceExactlyOnce(main, "import { UpdateService } from './update-service.mjs';", "import { UpdateService } from './update-service.mjs';\nimport { recoverUpdateTransaction } from './update-transaction.mjs';", 'update-transaction-import');
-  main = replaceExactlyOnce(main, "    await fs.mkdir(userData, { recursive: true });", "    await fs.mkdir(userData, { recursive: true });\n    const updateRecovery = await recoverUpdateTransaction(path.join(userData, 'updates'), { shortcut: path.join(app.getPath('desktop'), '大肥鱼抖音助手.lnk') });\n    if (updateRecovery.status === 'blocked') throw new Error('更新恢复被安全保护阻止：' + updateRecovery.reason + '。旧版备份已保留，请联系支持人员。');", 'update-transaction-startup-recovery');
+  main = replaceExactlyOnce(main, "import { UpdateService } from './update-service.mjs';", "import { UpdateService } from './update-service.mjs';\nimport { recoverUpdateTransaction, resolveDesktopShortcutPath } from './update-transaction.mjs';", 'update-transaction-import');
+  main = replaceExactlyOnce(main,
+    "    await fs.mkdir(userData, { recursive: true });\n    startup = await createStartupTimeline(userData);\n    startup.record('startup.started');",
+    "    await fs.mkdir(userData, { recursive: true });\n    startup = await createStartupTimeline(userData);\n    startup.record('startup.started');\n    const desktopShortcut = resolveDesktopShortcutPath(app);\n    const updateRecovery = await recoverUpdateTransaction(path.join(userData, 'updates'), { shortcut: desktopShortcut });\n    startup.record('startup.stage', { stage: 'update-recovery-' + updateRecovery.status });\n    if (updateRecovery.status === 'blocked') throw new Error('更新恢复被安全保护阻止：' + updateRecovery.reason + '。旧版备份已保留，请联系支持人员。');",
+    'update-transaction-startup-recovery');
   if (!main.includes("import { randomUUID, createHash } from 'node:crypto';") ||
       !main.includes("import { UpdateService } from './update-service.mjs';")) {
     throw new Error('UPDATE_TRUST_PATCH_MAIN_IMPORTS_CHANGED');
@@ -185,7 +188,8 @@ export async function applyUpdateTrustPatch(upstream, repositoryRoot = REPOSITOR
     "      const nonce=randomUUID(),updateDirectory=path.dirname(file);",
     "      const healthFile=path.join(updateDirectory,'.health-'+nonce+'.json');",
     "      const stagedShortcut=path.join(updateDirectory,'.shortcut-'+nonce+'.lnk');",
-    "      const shortcut=path.join(app.getPath('desktop'),'大肥鱼抖音助手.lnk');",
+    "      const shortcut=desktopShortcut;",
+    "      await fs.mkdir(path.dirname(shortcut),{recursive:true});",
     "      await fs.rm(healthFile,{force:true});await fs.rm(stagedShortcut,{force:true});",
     "      if(!shell.writeShortcutLink(stagedShortcut,'create',{target:file,cwd:path.dirname(file),description:'大肥鱼抖音助手 · 独立 API 版',icon:file,iconIndex:0,appUserModelId:'local.dafeiyu.douyin.api'}))throw new Error('无法创建新版暂存快捷方式，旧版入口未改变。');",
     "      const child=spawn(launcherNode,[launcher,String(process.pid),file,sha256,publisherThumbprint,version,nonce,healthFile,stagedShortcut,shortcut],{detached:true,windowsHide:true,stdio:'ignore',shell:false});",
