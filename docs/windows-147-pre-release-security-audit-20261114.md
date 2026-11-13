@@ -174,3 +174,96 @@ Windows 2022 与 Windows 2025 均需用同一个确切候选 SHA-256 完成：
 正式签名仍有外部阻塞：需要确定 YuTang 的正式发布者身份及可用的 Authenticode 签名方式。没有证书或受信任签名服务之前，只能完成代码、测试与签名门禁设计，不能把当前候选变成可信正式发行版。
 
 本审查没有改变产品源码和候选 EXE。
+
+
+## 10. 2026-11-14 双平台更新信任补丁与新候选验收增补
+
+本节更新原审查时的“下一项工作”状态。已在独立实验分支实现 fail-closed（未配置可信密钥时关闭更新）更新器、签名清单校验、Authenticode 发布者核验、启动健康回执与快捷方式切换保护，并完成新候选的 Windows 2022 / Windows 2025 CI 验收。
+
+### 10.1 最终运行身份
+
+- 工作流：[43495140768](https://github.com/yud78785/yutang-build/actions/runs/43495140768)
+- 最终结论：**success**
+- 分支：`experiment/windows-147-update-trust-20261114`
+- 本轮候选提交：`5713e2db0a583439be31020062e07a84297105b3`
+- 固定上游：`LockyBee/dsh-douyin-agent`，提交 `9c49833078f4b4d18b9211ef86d024e7f2e15739`
+- `main` 未改变，仍为 `4745ed23cbb748cb4b070ed70390703d1261aea0`。
+- 未创建 PR、未合并、未发布正式 Release、未安装到用户电脑。
+
+### 10.2 两个平台各自的候选 EXE 身份
+
+| 平台 | 产品版本 | EXE 大小 | EXE SHA-256 | Artifact ID |
+|---|---:|---:|---|---:|
+| Windows 2022 | 1.4.7 | 125,299,257 bytes | `57a40e8c743e68b7502f7ababc04dd689f21f1bffda1b1f3efe2abab606e69d7` | `14071038566` |
+| Windows 2025 | 1.4.7 | 125,299,013 bytes | `4acebd4d914133d14806ffab71c464aa9f6d80e39d968bf009ded0da6075f519` | `14072426069` |
+
+两个平台产物的 SHA-256 不同，因此各自的 packaged smoke（打包后实测）与 Edge 生命周期记录均按各自候选 SHA 绑定；没有把一个平台的 SHA 或测试结果套到另一个平台。
+
+两个 Artifact 均为 `CANDIDATE-NOT-RELEASE`，每个包含 13 个文件，包含 EXE、摘要、verification、候选回执、更新信任补丁回执与 Edge 生命周期证据。
+
+### 10.3 本轮新候选实测结果
+
+Windows 2022 和 Windows 2025 均通过：
+
+- 固定上游源码与 YuTang 补丁应用。
+- 更新器模板 15 项合成测试。
+- 修改后的上游桌面源码集成回归测试。
+- Job Object Go 测试、vet 与 Windows 编译。
+- UI、独立 API runtime 与 portable EXE 构建。
+- 新候选 EXE 在隔离用户目录中的真实启动与 UI smoke。
+- 新候选 SHA-256 固定，并与后续 Edge 生命周期回执一致。
+- Edge Renderer 沙盒、Network Service AppContainer、Windows 进程令牌、Low Integrity、进程归属及 CDP 回环监听核验。
+- Edge 关闭后两次重启。
+- 三种强制退出：仅杀 browser-host、仅杀 Job Object guard、仅杀 Electron 主进程。
+- 每种强制退出均确认 tracked processes、profile processes、CDP listeners 为 0；独立无关 Edge 进程保持存活。
+- 临时 Edge 出站防火墙规则已执行清理。
+- 严格非发布、无真实 API Key、无真实模型调用、无真实消息发送边界通过。
+
+Edge 版本为 `156.0.4314.58`。Renderer 证据为 AppContainer + Lockdown + Untrusted。Network Service 的 Windows token 证据为 AppContainer SID 匹配且 Low Integrity（RID 4096）；`edge://sandbox` 表格本身显示 Network Service Lockdown 为 None、Integrity 为 Default。因此不能把本轮结果扩大解释为 Network Service LPAC 或完整 Lockdown 已通过。本轮仍未测试真实 Douyin 视频播放，因为测试主动阻断了 Edge 外网；预期的 `ERR_NETWORK_ACCESS_DENIED` 是隔离测试边界，不是启动失败。
+
+### 10.4 更新安全补丁：代码与测试通过，但真实更新仍未开放
+
+两平台候选回执中的更新补丁状态一致：
+
+- `status = PASS_FAIL_CLOSED_UPDATE_TRUST_AND_HEALTH_HANDSHAKE_PATCH`
+- `updateRepository = yud78785/yutang-build`
+- `signedManifestRequired = true`
+- `startupHealthHandshake = true`
+- `stagedShortcutUntilHealthy = true`
+- `preCommitRollbackWindowMs = 30000`
+- `manifestPublicKeyConfigured = false`
+- `authenticodePublisherThumbprintConfigured = false`
+- `updatesDisabledUntilTrustConfigured = true`
+
+两平台确认的更新相关源码 SHA-256：
+
+- `desktop/src/update-service.mjs`：`d40a93f8be2cc2c33b380ec1c20f35ca82c5e3440c4a1e352ad0a405d4bcf800`
+- `desktop/src/update-launcher.mjs`：`6202646db1c9ec62ab157bd1220a8e50c857cab5cfe1bdc55deec9ec029a29e9`
+- `desktop/src/main.mjs`：`a466ba61c0f78da5950c0a55c285496e6ee82b9fea669f8b5abebbee0e4097f6`
+- 更新器测试文件：`75f488d19649326d07128a83800922cb271d95baf9db2e93d70e03f52ca6e131`
+
+测试使用临时 Ed25519 密钥与合成 EXE/进程，验证清单伪造、摘要篡改、错误发布者、下载跳转、健康回执失败及快捷方式保留/切换行为。**这证明代码路径和合成回归测试通过，不证明真实 Authenticode 证书、正式清单签名或 Windows 真实 EXE 升级/回滚端到端已通过。**
+
+最终两个候选 EXE 的 Authenticode 状态均为 `NotSigned`，没有正式发布者证书或清单公钥。当前更新器按设计拒绝检查/安装未建立信任的更新；不能把“更新器已打包”写成“自动更新已可用”。
+
+### 10.5 本轮失败记录与修复
+
+以下失败没有被改写为通过，最终成功运行是新的提交和新的候选：
+
+1. Run `43494644297`：补丁执行器漏导入 `node:url` 的 `pathToFileURL`；修复导入，并增加健康回执路径限制。
+2. Run `43494825397`：补丁器把上游三行更新启动代码错误地按一行匹配；改为按固定上游的三行精确匹配。
+3. Run `43495000935`：15 项模板测试中，程序正确拒绝篡改文件，但断言错误地要求英文 `SHA256` 文本；将断言改为匹配实际中文拒绝信息“已改变”。
+4. Run `43495140768`：最终分支提交 `5713e2db0a583439be31020062e07a84297105b3`，Windows 2022 与 Windows 2025 两个 job 均成功，产物及回执已上传。
+
+### 10.6 当前结论与下一步
+
+**已通过：** 新的 1.4.7 候选 EXE 在 Windows 2022 与 Windows 2025 的构建、隔离启动、Edge 沙盒/生命周期及进程清理验收；更新器的签名清单验证与健康回执/回滚代码的合成测试。
+
+**仍阻塞正式交付：**
+
+1. 确认 YuTang 正式发布者身份并取得受信任的 Authenticode 签名证书/签名服务。
+2. 安全配置客户端固定的 Ed25519 清单公钥和 Authenticode Publisher thumbprint；私钥不能进入仓库、候选 Artifact 或用户 EXE。
+3. 建立仅在双平台验收成功后签发的 YuTang Release 清单与资产流程。
+4. 在具备真实发布信任配置后，再做真实 Windows 2022 / 2025 更新下载、签名拒绝、成功升级、启动失败回滚与用户数据保留端到端验收。
+
+在这些阻塞解除前，两个 Artifact 只作为已验收的**未签名候选**保留，不发布、不向用户电脑推送、不启用自动更新。
