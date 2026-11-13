@@ -195,3 +195,8 @@ Azure GitHub OIDC 需要由发行主体或其管理员完成：
 更新器回归测试由 15 项增至 17 项。以上是源码与合成测试补强；**尚未在 Windows 2022 / 2025 对新 EXE 实测**。需要重新构建候选并做同一 EXE 双平台验收后，才能把这些新增行为计入 Windows 通过项。
 
 数字签名仍暂缓，不购买证书；未配置公钥/Publisher thumbprint 时更新器保持关闭。
+
+
+### 随包文档
+
+下一候选的补丁器会修正桌面包内 `README.md`，不再把上游旧 Release 描述成 YuTang 的下载或自动更新通道。新 README 将明确 1.4.7 是未签名验收候选，GitHub Actions Artifact 不是公开发行包，自动更新因发布信任未配置而关闭。该修改尚待下一次 EXE 的 `app.asar` 实际内容检查。
