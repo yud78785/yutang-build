@@ -68,7 +68,9 @@ export async function applyUpdateTrustPatch(upstream, repositoryRoot = REPOSITOR
     "      await fs.copyFile(node,launcherNode);await fs.copyFile(path.join(appRoot,'app/update-launcher.mjs'),launcher);",
     "      const shortcut=path.join(app.getPath('desktop'),'大肥鱼抖音助手.lnk');",
     "      if(!shell.writeShortcutLink(shortcut,'create',{target:file,cwd:path.dirname(file),description:'大肥鱼抖音助手 · 独立 API 版',icon:file,iconIndex:0,appUserModelId:'local.dafeiyu.douyin.api'}))throw new Error('无法创建新版软件快捷方式，尚未重启。');",
-    "      const child=spawn(launcherNode,[launcher,String(process.pid),file,sha256],{detached:true,windowsHide:true,stdio:'ignore',shell:false});await new Promise((resolve,reject)=>{child.once('spawn',resolve);child.once('error',reject);});child.unref();setTimeout(()=>{void quit();},100);return {status:'restarting',message:'正在退出旧版并打开已核对的新版。桌面快捷方式已指向新版。'};"
+    "      const child=spawn(launcherNode,[launcher,String(process.pid),file,sha256],{detached:true,windowsHide:true,stdio:'ignore',shell:false});",
+    "      await new Promise((resolve,reject)=>{child.once('spawn',resolve);child.once('error',reject);});child.unref();",
+    "      setTimeout(()=>{void quit();},100);return {status:'restarting',message:'正在退出旧版并打开已核对的新版。桌面快捷方式已指向新版。'};"
   ].join('\n');
   const newInstallBlock = [
     "      const {file,sha256,publisherThumbprint,version}=await updater.verifiedExecutable();",
