@@ -3,7 +3,7 @@ name: YuTang 1.4.7 Update Trust Candidate - isolated Windows matrix
 on:
   push:
     branches:
-      - experiment/windows-147-update-trust-20261114
+      - experiment/windows-147-update-rollback-20261114
     paths:
       - .github/workflows/windows-147-packaged-smoke-fix.yml
       - tools/apply_windows147_update_trust_patch.mjs
@@ -432,7 +432,7 @@ jobs:
             upstream/windows-security-147-static-patch-receipt.json
             upstream/windows-security-147-dynamic-patch-receipt.json
             upstream/windows-security-147-test-fixture-receipt.json
-             upstream/windows-update-trust-patch-receipt.json
+            upstream/windows-update-trust-patch-receipt.json
             upstream/desktop/release-api/windows-edge-lifecycle-*.json
           if-no-files-found: warn
           retention-days: 7
@@ -445,3 +445,206 @@ jobs:
           Write-Output 'EXACT 1.4.7 SOURCE PATCH + WINDOWS 2022/2025 REAL EDGE SANDBOX AND JOB OBJECT TESTS.'
           Write-Output 'NO REAL API KEY, NO LIVE MODEL CALL, NO REAL DOUYIN LOGIN OR ACTION; EDGE OUTBOUND BLOCKED.'
           Write-Output 'NO USER PC, NO MAIN BRANCH, NO MERGE, NO GITHUB RELEASE.'
+  cross-test-same-windows-2025-candidate:
+    name: Windows 2022 cross-test of the exact Windows 2025 EXE
+    needs: build-and-smoke
+    runs-on: windows-2022
+    timeout-minutes: 90
+    concurrency:
+      group: yutang-147-same-candidate-cross-test
+      cancel-in-progress: false
+    steps:
+      - name: Checkout isolated experiment branch without persisted credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Verify exact cross-test scope
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:GITHUB_REPOSITORY -cne 'yud78785/yutang-build') { throw 'WRONG_REPOSITORY' }
+          if ($env:GITHUB_REF -cne 'refs/heads/experiment/windows-147-update-rollback-20261114') { throw 'WRONG_FIX_BRANCH' }
+          if ($env:RUNNER_OS -cne 'Windows') { throw 'WINDOWS_RUNNER_REQUIRED' }
+          if ($env:ImageOS -notmatch 'win22') { throw ('WINDOWS_2022_CROSS_RUNNER_REQUIRED: ' + $env:ImageOS) }
+
+      - name: Set up pinned Node.js build runtime
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24.17.0
+
+      - name: Download the Windows 2025 candidate from this exact workflow run
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: YuTang-OpenRouter-Desktop-1.4.7-SecurityHardening-windows-2025-CANDIDATE-NOT-RELEASE
+          path: candidate-artifact
+
+      - name: Verify source receipt and pin the exact downloaded EXE SHA-256
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $artifactRoot = Join-Path $env:GITHUB_WORKSPACE 'candidate-artifact'
+          $exeItems = @(Get-ChildItem -LiteralPath $artifactRoot -Filter 'Dafeiyu-Douyin-API-1.4.7-win-x64.exe' -File -Recurse)
+          $receiptItems = @(Get-ChildItem -LiteralPath $artifactRoot -Filter 'windows-candidate-receipt.json' -File -Recurse)
+          $verificationItems = @(Get-ChildItem -LiteralPath $artifactRoot -Filter 'verification-1.4.7.json' -File -Recurse)
+          $checksumItems = @(Get-ChildItem -LiteralPath $artifactRoot -Filter 'Dafeiyu-Douyin-API-1.4.7-win-x64.exe.sha256' -File -Recurse)
+          if ($exeItems.Count -ne 1 -or $receiptItems.Count -ne 1 -or $verificationItems.Count -ne 1 -or $checksumItems.Count -ne 1) { throw 'WINDOWS_2025_ARTIFACT_CONTENTS_NOT_UNIQUE' }
+          $sourceReceipt = Get-Content -LiteralPath $receiptItems[0].FullName -Raw | ConvertFrom-Json
+          $verification = Get-Content -LiteralPath $verificationItems[0].FullName -Raw | ConvertFrom-Json
+          if ($sourceReceipt.status -cne 'PASS_WINDOWS_PACKAGED_SMOKE_AND_EDGE_SECURITY' -or $sourceReceipt.release -ne $false) { throw 'WINDOWS_2025_SOURCE_RECEIPT_NOT_PASS_CANDIDATE' }
+          if ($sourceReceipt.yutangPatchCommit -cne $env:GITHUB_SHA) { throw 'WINDOWS_2025_SOURCE_RECEIPT_COMMIT_MISMATCH' }
+          if ($sourceReceipt.runnerImage -notmatch 'win25') { throw ('WINDOWS_2025_SOURCE_RUNNER_NOT_PROVEN: ' + $sourceReceipt.runnerImage) }
+          if ($sourceReceipt.signatureStatus -cne 'NotSigned') { throw 'UNEXPECTED_CANDIDATE_SIGNATURE_STATUS' }
+          if ($verification.version -cne '1.4.7' -or $verification.realModelCalled -ne $false -or $verification.realMessageSent -ne $false) { throw 'WINDOWS_2025_PACKAGED_VERIFICATION_BOUNDARY_INVALID' }
+          $exe = $exeItems[0]
+          $sha = (Get-FileHash -LiteralPath $exe.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($sha -cne $sourceReceipt.sha256 -or $sha -cne $verification.sha256) { throw 'WINDOWS_2025_EXE_SHA256_DOES_NOT_MATCH_SOURCE_RECEIPTS' }
+          $checksumText = (Get-Content -LiteralPath $checksumItems[0].FullName -Raw).Trim()
+          if ($checksumText -notmatch ('^' + [regex]::Escape($sha) + '\s+Dafeiyu-Douyin-API-1\.4\.7-win-x64\.exe$')) { throw 'WINDOWS_2025_EXE_CHECKSUM_SIDECAR_MISMATCH' }
+          $candidateDirectory = Join-Path $env:GITHUB_WORKSPACE 'same-candidate'
+          New-Item -ItemType Directory -Force -Path $candidateDirectory | Out-Null
+          $candidateExe = Join-Path $candidateDirectory 'Dafeiyu-Douyin-API-1.4.7-win-x64.exe'
+          Copy-Item -LiteralPath $exe.FullName -Destination $candidateExe
+          if ((Get-FileHash -LiteralPath $candidateExe -Algorithm SHA256).Hash.ToLowerInvariant() -cne $sha) { throw 'COPIED_WINDOWS_2025_CANDIDATE_SHA256_MISMATCH' }
+          Copy-Item -LiteralPath $receiptItems[0].FullName -Destination (Join-Path $candidateDirectory 'windows-2025-source-receipt.json')
+          Copy-Item -LiteralPath $checksumItems[0].FullName -Destination (Join-Path $candidateDirectory 'Dafeiyu-Douyin-API-1.4.7-win-x64.exe.sha256')
+          "YUTANG_CANDIDATE_EXE=$candidateExe" | Out-File -LiteralPath $env:GITHUB_ENV -Append -Encoding utf8
+          "YUTANG_EXPECTED_CANDIDATE_SHA256=$sha" | Out-File -LiteralPath $env:GITHUB_ENV -Append -Encoding utf8
+          "YUTANG_SOURCE_RECEIPT=$($receiptItems[0].FullName)" | Out-File -LiteralPath $env:GITHUB_ENV -Append -Encoding utf8
+          "YUTANG_CROSS_RESULTS=$candidateDirectory" | Out-File -LiteralPath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host ('SAME_WINDOWS_2025_EXE_SHA256=' + $sha)
+          Write-Host 'WINDOWS_2025_ARTIFACT_IDENTITY_AND_SHA256_VERIFIED'
+
+      - name: Block Edge outbound network on this disposable Windows 2022 runner
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $programFilesX86 = [Environment]::GetEnvironmentVariable('ProgramFiles(x86)')
+          $locations = @(
+            (Join-Path $env:ProgramFiles 'Microsoft\Edge\Application\msedge.exe'),
+            (Join-Path $programFilesX86 'Microsoft\Edge\Application\msedge.exe')
+          )
+          $edge = @($locations | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf })
+          if ($edge.Count -ne 1) { throw 'EXPECTED_ONE_INSTALLED_EDGE_EXE' }
+          if ((Get-AuthenticodeSignature -LiteralPath $edge[0]).Status -ne 'Valid') { throw 'EDGE_SIGNATURE_INVALID' }
+          if (Get-NetFirewallRule -DisplayName 'YuTang147EphemeralEdgeEgressBlock' -ErrorAction SilentlyContinue) { throw 'PREEXISTING_FIREWALL_RULE' }
+          New-NetFirewallRule -DisplayName 'YuTang147EphemeralEdgeEgressBlock' -Direction Outbound -Program $edge[0] -RemoteAddress Internet -Action Block -Profile Any -ErrorAction Stop | Out-Null
+          $gate = Get-NetFirewallRule -DisplayName 'YuTang147EphemeralEdgeEgressBlock'
+          if ($gate.Direction -ne 'Outbound' -or $gate.Action -ne 'Block' -or $gate.Enabled -ne 'True') { throw 'EDGE_FIREWALL_NOT_ENFORCED' }
+          $remoteAddresses = @((Get-NetFirewallAddressFilter -AssociatedNetFirewallRule $gate).RemoteAddress)
+          if ($remoteAddresses -notcontains 'Internet' -or $remoteAddresses -contains 'Any') { throw ('EDGE_FIREWALL_SCOPE_NOT_INTERNET_ONLY: ' + ($remoteAddresses -join ',')) }
+          "YUTANG_EDGE_EXE=$($edge[0])" | Out-File -LiteralPath $env:GITHUB_ENV -Append -Encoding utf8
+          'YUTANG_EDGE_FIREWALL_CONFIRMED=yes' | Out-File -LiteralPath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host 'WINDOWS_2022_EDGE_EGRESS_BLOCKED_ON_DISPOSABLE_RUNNER'
+
+      - name: Run exact candidate Edge sandbox and lifecycle tests on Windows 2022
+        shell: pwsh
+        timeout-minutes: 75
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node "$env:GITHUB_WORKSPACE/tools/windows_147_isolated_edge_lifecycle.mjs" --self-test
+          if ($LASTEXITCODE -ne 0) { throw 'WINDOWS_2022_EDGE_LIFECYCLE_SELF_TEST_FAILED' }
+          $env:YUTANG_EDGE_RESULT_PATH = Join-Path $env:YUTANG_CROSS_RESULTS 'windows-2022-same-candidate-normal.json'
+          node "$env:GITHUB_WORKSPACE/tools/windows_147_isolated_edge_lifecycle.mjs" "$env:YUTANG_CANDIDATE_EXE" --stress-restarts=2
+          if ($LASTEXITCODE -ne 0) { throw 'WINDOWS_2022_SAME_CANDIDATE_NORMAL_EDGE_LIFECYCLE_FAILED' }
+          $env:YUTANG_EDGE_RESULT_PATH = Join-Path $env:YUTANG_CROSS_RESULTS 'windows-2022-same-candidate-force-host.json'
+          node "$env:GITHUB_WORKSPACE/tools/windows_147_isolated_edge_lifecycle.mjs" "$env:YUTANG_CANDIDATE_EXE" --force-host
+          if ($LASTEXITCODE -ne 0) { throw 'WINDOWS_2022_SAME_CANDIDATE_FORCE_HOST_FAILED' }
+          $env:YUTANG_EDGE_RESULT_PATH = Join-Path $env:YUTANG_CROSS_RESULTS 'windows-2022-same-candidate-force-guard.json'
+          node "$env:GITHUB_WORKSPACE/tools/windows_147_isolated_edge_lifecycle.mjs" "$env:YUTANG_CANDIDATE_EXE" --force-guard
+          if ($LASTEXITCODE -ne 0) { throw 'WINDOWS_2022_SAME_CANDIDATE_FORCE_GUARD_FAILED' }
+          $env:YUTANG_EDGE_RESULT_PATH = Join-Path $env:YUTANG_CROSS_RESULTS 'windows-2022-same-candidate-force-desktop.json'
+          node "$env:GITHUB_WORKSPACE/tools/windows_147_isolated_edge_lifecycle.mjs" "$env:YUTANG_CANDIDATE_EXE" --force-desktop
+          if ($LASTEXITCODE -ne 0) { throw 'WINDOWS_2022_SAME_CANDIDATE_FORCE_DESKTOP_FAILED' }
+
+      - name: Remove temporary Edge outbound firewall rule
+        if: always()
+        shell: pwsh
+        run: |
+          Get-NetFirewallRule -DisplayName 'YuTang147EphemeralEdgeEgressBlock' -ErrorAction SilentlyContinue | Remove-NetFirewallRule -ErrorAction SilentlyContinue
+          Write-Host 'WINDOWS_2022_EPHEMERAL_EDGE_FIREWALL_RULE_CLEANUP_REQUESTED'
+
+      - name: Verify all Windows 2022 cross-test receipts against the exact Windows 2025 SHA
+        if: always()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not $env:YUTANG_EXPECTED_CANDIDATE_SHA256 -or -not $env:YUTANG_CANDIDATE_EXE) { throw 'WINDOWS_2025_CANDIDATE_WAS_NOT_PINNED' }
+          foreach ($name in @('windows-2022-same-candidate-normal.json','windows-2022-same-candidate-force-host.json','windows-2022-same-candidate-force-guard.json','windows-2022-same-candidate-force-desktop.json')) {
+            $file = Join-Path $env:YUTANG_CROSS_RESULTS $name
+            if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw ('WINDOWS_2022_CROSS_RECEIPT_MISSING: ' + $name) }
+            $result = Get-Content -LiteralPath $file -Raw | ConvertFrom-Json
+            if ($result.candidateSha256 -cne $env:YUTANG_EXPECTED_CANDIDATE_SHA256 -or $result.cleanupVerified -ne $true) { throw ('WINDOWS_2022_CROSS_RECEIPT_SHA_OR_CLEANUP_MISMATCH: ' + $name) }
+          }
+          $normal = Get-Content (Join-Path $env:YUTANG_CROSS_RESULTS 'windows-2022-same-candidate-normal.json') -Raw | ConvertFrom-Json
+          if ($normal.rendererSandbox.rendererSandboxVerified -ne $true -or
+              $normal.rendererSandbox.networkServiceSandboxReported -ne $true -or
+              $normal.rendererSandbox.networkServiceWindowsTokenVerified -ne $true -or
+              $normal.rendererSandbox.networkServiceLowIntegrityVerified -ne $true -or
+              $normal.rendererSandbox.networkServiceTokenIntegrityLevel -cne 'Low' -or
+              $normal.rendererSandbox.networkServiceProcessOwned -ne $true -or
+              $normal.hostSummary.edgeWithNetworkSandboxArg -lt 1 -or
+              $normal.lifecycle.finalCloseVerified -ne $true) { throw 'WINDOWS_2022_SAME_CANDIDATE_SANDBOX_NOT_PROVEN' }
+          foreach ($pair in @(
+            @('windows-2022-same-candidate-force-host.json','kill-host-only'),
+            @('windows-2022-same-candidate-force-guard.json','kill-jobguard-only'),
+            @('windows-2022-same-candidate-force-desktop.json','kill-electron-main-only')
+          )) {
+            $result = Get-Content (Join-Path $env:YUTANG_CROSS_RESULTS $pair[0]) -Raw | ConvertFrom-Json
+            if ($result.forcedExit.mode -cne $pair[1] -or
+                $result.forcedExit.trackedProcessesRemaining -ne 0 -or
+                $result.forcedExit.profileProcessesRemaining -ne 0 -or
+                $result.forcedExit.cdpListenersRemaining -ne 0 -or
+                $result.lifecycle.finalCloseVerified -ne $true) { throw ('WINDOWS_2022_SAME_CANDIDATE_FORCED_EXIT_NOT_PROVEN: ' + $pair[1]) }
+          }
+          $desktop = Get-Content (Join-Path $env:YUTANG_CROSS_RESULTS 'windows-2022-same-candidate-force-desktop.json') -Raw | ConvertFrom-Json
+          if ($desktop.forcedExit.desktopGuardVerified -ne $true -or $desktop.forcedExit.desktopGuardPid -le 0) { throw 'WINDOWS_2022_SAME_CANDIDATE_DESKTOP_GUARD_NOT_PROVEN' }
+          $exeHash = (Get-FileHash -LiteralPath $env:YUTANG_CANDIDATE_EXE -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($exeHash -cne $env:YUTANG_EXPECTED_CANDIDATE_SHA256) { throw 'WINDOWS_2022_CANDIDATE_FILE_CHANGED_DURING_TEST' }
+          $source = Get-Content $env:YUTANG_SOURCE_RECEIPT -Raw | ConvertFrom-Json
+          $crossReceipt = [ordered]@{
+            schema = 'yutang.windows-same-candidate-cross-test.v1'
+            status = 'PASS_SAME_WINDOWS_2025_CANDIDATE_WINDOWS_2022_CROSS_TEST'
+            yutangPatchCommit = $env:GITHUB_SHA
+            sourceCandidateCommit = $source.yutangPatchCommit
+            sourceRunnerImage = $source.runnerImage
+            crossRunnerImage = $env:ImageOS
+            crossRunnerImageVersion = $env:ImageVersion
+            executable = [IO.Path]::GetFileName($env:YUTANG_CANDIDATE_EXE)
+            bytes = (Get-Item $env:YUTANG_CANDIDATE_EXE).Length
+            sha256 = $exeHash
+            sourceCandidateReceiptVerified = $true
+            sameBinaryAsWindows2025 = $true
+            rendererSandbox = $normal.rendererSandbox
+            normalLifecycle = $normal.lifecycle
+            forcedExit = @{
+              host = Get-Content (Join-Path $env:YUTANG_CROSS_RESULTS 'windows-2022-same-candidate-force-host.json') -Raw | ConvertFrom-Json
+              guard = Get-Content (Join-Path $env:YUTANG_CROSS_RESULTS 'windows-2022-same-candidate-force-guard.json') -Raw | ConvertFrom-Json
+              desktop = $desktop
+            }
+            cleanupVerified = $true
+            release = $false
+          }
+          $crossReceipt | ConvertTo-Json -Depth 24 | Set-Content (Join-Path $env:YUTANG_CROSS_RESULTS 'windows-2022-same-candidate-cross-receipt.json') -Encoding utf8
+          Write-Output ($crossReceipt | ConvertTo-Json -Depth 24)
+
+      - name: Strict cross-test non-release and no-live-action boundary
+        if: always()
+        shell: pwsh
+        run: |
+          Write-Output 'WINDOWS 2022 TESTED THE EXACT WINDOWS 2025 EXE SHA-256; NO REBUILD IN CROSS-TEST JOB.'
+          Write-Output 'NO REAL API KEY, NO LIVE MODEL CALL, NO REAL DOUYIN LOGIN OR ACTION.'
+          Write-Output 'NO USER PC, NO MAIN BRANCH, NO MERGE, NO GITHUB RELEASE.'
+
+      - name: Upload same-candidate Windows 2022 cross-test receipts (not a release)
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: YuTang-1.4.7-Same-Windows-2025-Candidate-Windows-2022-Cross-Test-NOT-RELEASE
+          path: |
+            same-candidate/windows-2025-source-receipt.json
+            same-candidate/Dafeiyu-Douyin-API-1.4.7-win-x64.exe.sha256
+            same-candidate/windows-2022-same-candidate-*.json
+          if-no-files-found: warn
+          retention-days: 7
+          compression-level: 0
