@@ -48,6 +48,20 @@ def main() -> None:
     )
     if result.perception is None:
         raise RuntimeError("Upstream perception did not produce a result")
+    if not result.transcript.segments:
+        # Upstream transcribe ladder fails softly by design; this *acceptance*
+        # experiment needs the exact underlying error rather than frames-only green.
+        from watch_skill.transcribe.local import transcribe_local
+        from watch_skill.transcribe.audio import extract_audio
+        debug_audio = extracted_root / "transcription-diagnostic.mp3"
+        extract_audio(video, debug_audio)
+        direct = transcribe_local(
+            debug_audio, model_size=str(model), word_timestamps=False
+        )
+        raise RuntimeError(
+            "Watch Skill returned no transcript despite direct local ASR "
+            f"returning {len(direct.segments)} segments"
+        )
 
     frames = []
     for frame in result.perception.frames:
