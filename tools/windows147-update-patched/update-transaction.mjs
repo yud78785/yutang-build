@@ -39,7 +39,8 @@ function validateTransaction(value, transactionFile, expectedShortcut) {
       path.resolve(value.transactionFile || '') !== path.resolve(transactionFile) ||
       path.resolve(value.updatesDirectory || '') !== updatesDirectory ||
       path.resolve(value.shortcut || '') !== shortcut ||
-      path.resolve(value.stagedShortcut || '') !== path.join(updatesDirectory, '.shortcut-' + value.nonce + '.lnk') ||\n      path.resolve(value.temporaryShortcut || '') !== path.join(path.dirname(shortcut), '.' + path.basename(shortcut) + '.' + value.nonce + '.tmp.lnk') ||
+      path.resolve(value.stagedShortcut || '') !== path.join(updatesDirectory, '.shortcut-' + value.nonce + '.lnk') ||
+      path.resolve(value.temporaryShortcut || '') !== path.join(path.dirname(shortcut), '.' + path.basename(shortcut) + '.' + value.nonce + '.tmp.lnk') ||
       path.resolve(value.backupShortcut || '') !== path.join(path.dirname(shortcut), '.' + path.basename(shortcut) + '.' + value.nonce + '.bak.lnk') ||
       !path.isAbsolute(value.targetExe || '') ||
       path.dirname(path.resolve(value.targetExe)) !== updatesDirectory ||
@@ -55,6 +56,7 @@ function validateTransaction(value, transactionFile, expectedShortcut) {
     updatesDirectory,
     shortcut,
     stagedShortcut: path.resolve(value.stagedShortcut),
+    temporaryShortcut: path.resolve(value.temporaryShortcut),
     backupShortcut: path.resolve(value.backupShortcut),
     targetExe: path.resolve(value.targetExe)
   };
@@ -86,7 +88,8 @@ export async function beginUpdateTransaction({
   const directory = path.resolve(updatesDirectory);
   const expectedShortcut = path.resolve(shortcut);
   const expectedStaged = path.join(directory, '.shortcut-' + nonce + '.lnk');
-  const expectedBackup = path.join(path.dirname(expectedShortcut), '.' + path.basename(expectedShortcut) + '.' + nonce + '.bak.lnk');\n  const expectedTemporary = path.join(path.dirname(expectedShortcut), '.' + path.basename(expectedShortcut) + '.' + nonce + '.tmp.lnk');
+  const expectedBackup = path.join(path.dirname(expectedShortcut), '.' + path.basename(expectedShortcut) + '.' + nonce + '.bak.lnk');
+  const expectedTemporary = path.join(path.dirname(expectedShortcut), '.' + path.basename(expectedShortcut) + '.' + nonce + '.tmp.lnk');
   const expectedTarget = path.resolve(targetExe);
   if (path.resolve(stagedShortcut) !== expectedStaged ||
       path.resolve(backupShortcut) !== expectedBackup ||
@@ -110,6 +113,7 @@ export async function beginUpdateTransaction({
     updatesDirectory: directory,
     shortcut: expectedShortcut,
     stagedShortcut: expectedStaged,
+    temporaryShortcut: expectedTemporary,
     backupShortcut: expectedBackup,
     targetExe: expectedTarget,
     oldShortcutSha256,
@@ -185,6 +189,7 @@ export async function recoverUpdateTransaction(updatesDirectory, { shortcut } = 
 
   if (currentHash === transaction.oldShortcutSha256 && !backupHash) {
     if (stagedHash === transaction.newShortcutSha256) await fs.rm(transaction.stagedShortcut);
+    if (temporaryHash === transaction.newShortcutSha256) await fs.rm(transaction.temporaryShortcut);
     await fs.rm(transactionFile);
     return { status: 'old-shortcut-preserved' };
   }
