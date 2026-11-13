@@ -40,7 +40,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python3 -m py_compile tools/run_watch_skill_pilot.py tools/verify_watch_skill_pilot.py
+          python3 -m py_compile tools/run_watch_skill_pilot.py tools/verify_watch_skill_pilot.py tools/verify_watch_skill_mcp.py
           git clone --filter=blob:none --no-checkout https://github.com/oxbshw/watch-skill.git third_party/watch-skill
           git -C third_party/watch-skill checkout --detach f1317c8fe64744a606c31867b05fbbe3144268c6
           test "$(git -C third_party/watch-skill rev-parse HEAD)" = "f1317c8fe64744a606c31867b05fbbe3144268c6"
@@ -119,7 +119,7 @@ jobs:
           PY
           .venv/bin/python tools/run_watch_skill_pilot.py
           .venv/bin/python tools/verify_watch_skill_pilot.py
-          .venv/bin/python tools/verify_watch_skill_mcp.py
+          .venv/bin/python -m tools.verify_watch_skill_mcp
 
       - name: Keep metadata and verdict only (no media, cookies, tokens or frames)
         if: always()
