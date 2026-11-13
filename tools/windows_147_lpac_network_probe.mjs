@@ -117,7 +117,7 @@ async function probeHttps(port) {
     if (message.method === 'Network.responseReceived' &&
         message.params?.type === 'Document' &&
         new URL(message.params.response?.url || 'about:blank').hostname === 'example.com') {
-      responseInfo = message.params.response;
+      responseInfo = { ...message.params.response, requestId: message.params.requestId };
     }
     if (message.method === 'Network.loadingFailed') loadingFailure = {
       errorText: String(message.params?.errorText || '').slice(0, 160),
