@@ -1,4 +1,4 @@
-name: YuTang 1.4.7 Update Trust Candidate - manual only
+name: YuTang 1.4.7 Update Trust Candidate - isolated Windows matrix
 
 on:
   push:
