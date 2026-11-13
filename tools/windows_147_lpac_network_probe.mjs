@@ -352,18 +352,40 @@ async function run(exeFile) {
       'Prepared browser-host source differs from the exact candidate receipt');
     assert.equal(await sha256(jobGuardFile), receipt.jobGuardSha256, 'Prepared JobGuard differs from the exact candidate receipt');
     assert.equal(await exists(playwrightRuntimeFile), true, 'Prepared Playwright runtime missing');
-    const rows = processRows();
-    const backend = rows.find(item => Number(item.ProcessId) === backendPid);
-    assert.ok(backend && /node\.exe$/i.test(String(backend.Name || '')), 'Candidate API worker is not a Node process');
+    const ancestry = await until(async () => {
+      const currentRows = processRows();
+      const currentBackend = currentRows.find(item => Number(item.ProcessId) === backendPid);
+      if (!currentBackend || !/node\.exe$/i.test(String(currentBackend.Name || '')) ||
+          !/api-worker\.mjs/i.test(String(currentBackend.CommandLine || ''))) return null;
+      const byPid = new Map(currentRows.map(item => [Number(item.ProcessId), item]));
+      const chain = [];
+      let cursor = currentBackend, desktop = null;
+      for (let depth = 0; cursor && depth < 24; depth++) {
+        const pid = Number(cursor.ProcessId);
+        chain.push({ pid, parentPid: Number(cursor.ParentProcessId) || null, name: String(cursor.Name || '').slice(0, 100) });
+        const name = String(cursor.Name || '');
+        if (pid !== backendPid && (name.includes('大肥鱼') || /dafeiyu.*\.exe$/i.test(name)) &&
+            hasHostAncestor(pid, candidateChild.pid, currentRows)) {
+          desktop = cursor;
+          break;
+        }
+        const parentPid = Number(cursor.ParentProcessId);
+        if (!Number.isSafeInteger(parentPid) || parentPid < 1 || parentPid === pid) break;
+        cursor = byPid.get(parentPid);
+      }
+      if (!desktop || !hasHostAncestor(backendPid, Number(desktop.ProcessId), currentRows)) return null;
+      return { rows: currentRows, backend: currentBackend, desktop, chain };
+    }, 10000, 'candidate desktop main process ancestry');
+    const rows = ancestry.rows;
+    const backend = ancestry.backend;
+    assert.ok(/node\.exe$/i.test(String(backend.Name || '')), 'Candidate API worker is not a Node process');
     assert.match(String(backend.CommandLine || ''), /api-worker\.mjs/i, 'Candidate API worker command identity mismatch');
     const nodeExe = path.resolve(String(backend.ExecutablePath || ''));
     assert.ok(path.isAbsolute(nodeExe) && /node\.exe$/i.test(nodeExe), 'Could not identify the exact candidate Node runtime');
     const nodeVersion = execFileSync(nodeExe, ['-p', 'process.versions.node'], { encoding: 'utf8', timeout: 5000, windowsHide: true }).trim();
     assert.match(nodeVersion, /^2[2-9]\./, 'Candidate Node runtime is below the supported version floor');
-    desktopPid = Number(backend.ParentProcessId);
-    const desktop = rows.find(item => Number(item.ProcessId) === desktopPid);
-    assert.ok(desktop && String(desktop.Name || '').includes('大肥鱼') &&
-      hasHostAncestor(desktopPid, candidateChild.pid, rows), 'Candidate desktop main process ancestry not proven');
+    desktopPid = Number(ancestry.desktop.ProcessId);
+    assert.ok(hasHostAncestor(desktopPid, candidateChild.pid, rows), 'Candidate desktop main process is not owned by the packaged EXE');
     report.runtime = {
       runtimeId,
       browserHostSha256: await sha256(browserHostFile),
