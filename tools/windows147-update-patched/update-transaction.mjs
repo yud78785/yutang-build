@@ -187,7 +187,11 @@ export async function recoverUpdateTransaction(updatesDirectory, { shortcut } = 
     return { status: 'committed-cleanup' };
   }
 
-  if (currentHash === transaction.oldShortcutSha256 && !backupHash) {
+  if (currentHash === transaction.oldShortcutSha256) {
+    if (backupHash && backupHash !== transaction.oldShortcutSha256) {
+      return { status: 'blocked', reason: 'BACKUP_IDENTITY_CHANGED' };
+    }
+    if (backupHash) await fs.rm(transaction.backupShortcut);
     if (stagedHash === transaction.newShortcutSha256) await fs.rm(transaction.stagedShortcut);
     if (temporaryHash === transaction.newShortcutSha256) await fs.rm(transaction.temporaryShortcut);
     await fs.rm(transactionFile);
