@@ -13,7 +13,7 @@ test('desktop settings provide explicit official and OpenRouter presets without 
   assert.match(source, /applyPreset\(baseUrl, model\)/);
   assert.match(source, /OpenRouter 是第三方中转/);
   assert.match(source, /Key 只通过桌面进程保存/);
-  assert.match(source, /endpointChanged[\\s\\S]*apiKey: ''/);
+  assert.match(source, /endpointChanged.*apiKey: ''/);
   assert.match(source, /旧密钥不会自动复用/);
   assert.match(source, /draft.baseUrl === settings.baseUrl/);
 });
