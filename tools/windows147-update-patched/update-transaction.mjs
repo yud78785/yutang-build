@@ -19,6 +19,16 @@ async function hashFile(file) {
   }
 }
 
+async function pathExists(file) {
+  try {
+    await fs.lstat(file);
+    return true;
+  } catch (error) {
+    if (error.code === 'ENOENT') return false;
+    throw error;
+  }
+}
+
 async function atomicReplaceJson(file, value) {
   const directory = path.dirname(file);
   const temporary = path.join(directory, '.' + path.basename(file) + '.' + randomUUID() + '.tmp');
@@ -98,10 +108,15 @@ export async function beginUpdateTransaction({
       !HASH.test(targetExeSha256 || '')) {
     throw new Error('UPDATE_TRANSACTION_ARGUMENTS_INVALID');
   }
-  const [oldShortcutSha256, newShortcutSha256, actualTargetSha256] = await Promise.all([
-    hashFile(expectedShortcut), hashFile(expectedStaged), hashFile(expectedTarget)
+  const [oldShortcutSha256, newShortcutSha256, actualTargetSha256, backupExists, temporaryExists] = await Promise.all([
+    hashFile(expectedShortcut),
+    hashFile(expectedStaged),
+    hashFile(expectedTarget),
+    pathExists(expectedBackup),
+    pathExists(expectedTemporary)
   ]);
-  if (!oldShortcutSha256 || !newShortcutSha256 || actualTargetSha256 !== targetExeSha256) {
+  if (!oldShortcutSha256 || !newShortcutSha256 || actualTargetSha256 !== targetExeSha256 ||
+      backupExists || temporaryExists) {
     throw new Error('UPDATE_TRANSACTION_PRECONDITION_FAILED');
   }
   const transactionFile = path.join(directory, 'update-transaction.json');
