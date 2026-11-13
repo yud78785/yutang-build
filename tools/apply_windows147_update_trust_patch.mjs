@@ -94,6 +94,14 @@ export async function applyUpdateTrustPatch(upstream, repositoryRoot = REPOSITOR
   verifier = replaceExactlyOnce(verifier, packagedReadmeAnchor, packagedReadmeCheck, 'packaged-readme-trust-disclosure');
   await write(verifierPath, verifier);
 
+  const buildScriptPath = path.join(upstream, 'desktop/scripts/build-api-desktop.mjs');
+  let buildScript = await read(buildScriptPath);
+  buildScript = replaceExactlyOnce(buildScript,
+    "'update-service.mjs', 'update-launcher.mjs'",
+    "'update-service.mjs', 'update-launcher.mjs', 'update-transaction.mjs'",
+    'desktop-build-transaction-module');
+  await write(buildScriptPath, buildScript);
+
   const mainPath = path.join(upstream, 'desktop/src/main.mjs');
   let main = await read(mainPath);
   main = replaceExactlyOnce(main, "import { UpdateService } from './update-service.mjs';", "import { UpdateService } from './update-service.mjs';\nimport { recoverUpdateTransaction } from './update-transaction.mjs';", 'update-transaction-import');
@@ -171,13 +179,14 @@ export async function applyUpdateTrustPatch(upstream, repositoryRoot = REPOSITOR
     throw new Error('UPDATE_TRUST_TEST_IMPORT_REWRITE_FAILED');
   }
   await fs.mkdir(path.join(upstream, 'desktop/tests'), { recursive: true });
-  await write(path.join(upstream, 'desktop/tests/update-trust.test.mjs'), upstreamTrustTests);\n  const transactionTests = (await read(path.join(repositoryRoot, 'tests/windows147-update-transaction.test.mjs')))
+  await write(path.join(upstream, 'desktop/tests/update-trust.test.mjs'), upstreamTrustTests);
+  const transactionTests = (await read(path.join(repositoryRoot, 'tests/windows147-update-transaction.test.mjs')))
     .replace("../tools/windows147-update-patched/update-transaction.mjs", "../src/update-transaction.mjs");
   await write(path.join(upstream, 'desktop/tests/update-transaction.test.mjs'), transactionTests);
   await fs.rm(path.join(upstream, 'desktop/tests/update-service.test.mjs'), { force: true });
 
   const modified = {};
-  for (const relative of ['desktop/src/update-service.mjs', 'desktop/src/update-launcher.mjs', 'desktop/src/update-transaction.mjs', 'desktop/src/main.mjs', 'desktop/README.md', 'desktop/scripts/verify-packaged-api.mjs']) {
+  for (const relative of ['desktop/src/update-service.mjs', 'desktop/src/update-launcher.mjs', 'desktop/src/update-transaction.mjs', 'desktop/src/main.mjs', 'desktop/scripts/build-api-desktop.mjs', 'desktop/README.md', 'desktop/scripts/verify-packaged-api.mjs']) {
     modified[relative] = createHash('sha256').update(await fs.readFile(path.join(upstream, relative))).digest('hex');
   }
   const updateTrustTestsSha256 = createHash('sha256').update(await fs.readFile(path.join(upstream, 'desktop/tests/update-trust.test.mjs'))).digest('hex');
