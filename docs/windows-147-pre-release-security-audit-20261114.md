@@ -1,0 +1,176 @@
+# YuTang 1.4.7 Windows 正式交付前安全审查
+
+- 审查日期：2026-11-14
+- 仓库：`yud78785/yutang-build`
+- 本审查只读检查源码、工作流、候选回执与 Windows CI 日志；没有修改候选 EXE、没有操作用户电脑、没有签名或发布。
+- 审查基线：候选构建分支 `experiment/windows-147-security-only-20261113` / `1c332d55a88c4be2f3bbffda60548ced52b1f061`。
+- 候选构建运行：[43467660911](https://github.com/yud78785/yutang-build/actions/runs/43467660911)。
+- 双平台 Edge AppContainer / Low Integrity / HTTPS 专项：[43488935750](https://github.com/yud78785/yutang-build/actions/runs/43488935750)。
+- 本审查文档所在分支：`experiment/windows-147-lpac-network-20261114`。
+
+## 1. 已有证据且不应重复的验收
+
+| 项目 | 证据 | 结论 |
+|---|---|---|
+| Windows 2022 1.4.7 EXE 构建与隔离启动 | Run 43467660911 / Artifact 14060020678 | 通过 |
+| Windows 2025 1.4.7 EXE 构建与隔离启动 | Run 43467660911 / Artifact 14059508987 | 通过 |
+| Edge Renderer AppContainer / Lockdown / Untrusted | Run 43467660911 | 通过 |
+| Network Service AppContainer / Low Integrity | Run 43467660911 | 通过 |
+| Chromium LPAC AccessCheck 语义 | Run 43488935750 | 两平台均为普通 AppContainer，不是 LPAC |
+| Edge 真实公网 HTTPS | Run 43488935750 | 两平台 HTTP 200、TLS 1.3 |
+| 浏览器正常退出、重启和三种强制退出清理 | Run 43467660911 | 通过 |
+| 候选 EXE 哈希和来源回执 | 两个平台候选回执 | 通过 |
+
+候选 EXE SHA-256：
+
+- Windows 2022：`f153896ecb7687d35f8f1b0b66ead1470fe91f611fcb2bf515f4e90c57b5f043`
+- Windows 2025：`c2cd51f7449a3ddc4413b4e06d1ea30ae9bbb070e11b7aee540788b9d3f71ef0`
+
+以上是候选 EXE 的历史实测证据；本审查没有重新构建或替换该 EXE。
+
+## 2. 阻塞一：候选 EXE 未签名
+
+证据：
+
+1. 构建配置 `desktop/electron-builder.json` 的 Windows 配置为 `signExecutable: false`、`forceCodeSigning: false`，目标只有 `portable`。
+2. Windows 候选构建工作流只调用 `Get-AuthenticodeSignature` 读取 EXE 签名状态，并把结果写入 `windows-candidate-receipt.json`；没有签名步骤，也没有要求签名状态必须为 `Valid`。
+3. Windows 2022 和 Windows 2025 候选回执均记录 `signatureStatus: NotSigned`。
+4. 当前候选构建只上传候选 Artifact，不创建正式 GitHub Release。
+
+源码与构建证据：
+
+- [electron-builder.json（固定上游提交）](https://github.com/LockyBee/dsh-douyin-agent/blob/9c49833078f4b4d18b9211ef86d024e7f2e15739/desktop/electron-builder.json)
+- [Windows 1.4.7 构建工作流](https://github.com/yud78785/yutang-build/blob/experiment/windows-147-security-only-20261113/.github/workflows/windows-147-packaged-smoke-fix.yml)
+- [候选构建运行 43467660911](https://github.com/yud78785/yutang-build/actions/runs/43467660911)
+
+**结论：不能把当前 1.4.7 候选作为正式 Windows 发行版。** SHA-256 能证明文件与某个已知摘要相同，但当前摘要和 EXE 一起存放在同一 GitHub Artifact 中，不能单独证明发布者身份，也不能建立 SmartScreen / Authenticode 发布者信任。
+
+## 3. 阻塞二：更新器信任的是上游仓库，而不是 YuTang 安全加固构建
+
+固定上游提交 `9c49833078f4b4d18b9211ef86d024e7f2e15739` 中的 `desktop/src/update-service.mjs`：
+
+- `UPDATE_REPOSITORY='LockyBee/dsh-douyin-agent'`
+- 查询 `/releases/latest`
+- 下载与版本号对应的 EXE 和同一 Release 中的 `.sha256`
+- 对 HTTPS、GitHub 资产 URL、重定向主机、文件大小、MZ 文件头和 SHA-256 做检查
+
+这些检查可以发现损坏、错误主机和内容摘要不一致；但 EXE 与摘要来自同一 Release，二者没有独立签名。若 Release 账号或发布资产被替换，攻击者可以同时替换 EXE 和 `.sha256`。
+
+更重要的是，当前 1.4.7 是从固定上游源码重新构建并额外应用 YuTang 补丁。更新器却直接跟踪 `LockyBee/dsh-douyin-agent` 的未来 Release。未来上游发布更高版本时，更新器可能直接安装没有经过 YuTang 同一套补丁和 Windows 安全验收的上游 EXE。
+
+源码：
+
+- [update-service.mjs](https://github.com/LockyBee/dsh-douyin-agent/blob/9c49833078f4b4d18b9211ef86d024e7f2e15739/desktop/src/update-service.mjs)
+- [YuTang 构建补丁工作流](https://github.com/yud78785/yutang-build/blob/experiment/windows-147-security-only-20261113/.github/workflows/windows-147-packaged-smoke-fix.yml)
+
+**结论：正式更新通道必须改为 YuTang 控制、且与通过验收的补丁提交绑定的发布通道；不能把上游最新 Release 自动等同于 YuTang 安全版本。**
+
+## 4. 阻塞三：更新安装没有新版健康确认和回滚
+
+固定上游提交中的 `desktop/src/main.mjs`：
+
+1. 下载后调用 `verifiedExecutable()` 核对本地文件 SHA-256。
+2. 复制 Node 运行时与 `update-launcher.mjs` 到用户数据目录。
+3. 先把桌面快捷方式改为指向下载的新 EXE。
+4. 启动更新辅助进程，随后旧版退出。
+
+`desktop/src/update-launcher.mjs`：
+
+1. 等待旧 PID 最多 30 秒退出。
+2. 再次计算 EXE SHA-256。
+3. 通过 `spawn()` 启动新 EXE，然后立即 `unref()`。
+4. 没有等待新版报告 UI/API ready，也没有启动失败后的自动恢复路径。
+
+因此，当前实现有下载前后完整性检查，但没有“新版启动成功”的端到端确认。若新 EXE 被创建后立即崩溃，旧版已退出且桌面快捷方式已经指向新版；当前代码没有自动恢复旧版本的证据。
+
+源码：
+
+- [main.mjs](https://github.com/LockyBee/dsh-douyin-agent/blob/9c49833078f4b4d18b9211ef86d024e7f2e15739/desktop/src/main.mjs)
+- [update-launcher.mjs](https://github.com/LockyBee/dsh-douyin-agent/blob/9c49833078f4b4d18b9211ef86d024e7f2e15739/desktop/src/update-launcher.mjs)
+
+## 5. 当前产品交付形态
+
+固定上游 `desktop/electron-builder.json` 的 Windows target 是 `portable`，不是 MSI / NSIS 安装包。升级流程是下载一个新的便携 EXE、创建/改写桌面快捷方式并启动新文件；不是在原安装目录中进行传统安装包覆盖升级。
+
+上游 README 也明确称便携包未签名，并建议用同名 `.sha256` 核对。
+
+因此当前“安装与升级安全”应按便携式 EXE 的下载、校验、启动、快捷方式切换、旧版本保留与回滚来验收，不应误写成 MSI 安装器已经验收。
+
+## 6. 已有更新器测试的覆盖范围与缺口
+
+`desktop/tests/update-service.test.mjs` 已覆盖：
+
+- 版本比较和正式版 / 预发布版区分。
+- 只访问固定仓库。
+- 下载 URL 主机限制。
+- SHA-256 不匹配时拒绝并清理临时文件。
+- EXE MZ 文件头、大小和分块下载。
+- 重复检查 / 下载去重。
+- 下载后文件被改变时拒绝启动。
+
+仍缺少：
+
+- Authenticode 签名有效性与预期发布者身份检查。
+- 由独立可信公钥验证的签名更新清单。
+- 证明发布版本对应 YuTang 已验收的补丁提交。
+- 更新辅助程序的单元/集成测试。
+- 新版启动健康确认、超时与自动回滚测试。
+- 从当前便携版升级到新版、断网/断电/损坏包/新版启动失败的 Windows 2022/2025 实测。
+
+现有候选 EXE 的 packaged smoke 只证明更新 IPC 存在，并不等于真实更新下载、安装切换和回滚已经通过。
+
+## 7. 正式交付必须增加的验收门
+
+### A. 发布者与制品身份
+
+1. 取得正式 Authenticode 代码签名身份；签名私钥不得进入仓库、源码包或候选 Artifact。
+2. 对 YuTang 发布的便携 EXE 及 YuTang 自有辅助 EXE 执行签名，并使用可信时间戳。
+3. Windows 2022 / 2025 必须检查 `Get-AuthenticodeSignature.Status = Valid`，并核对预期 Publisher / 证书指纹；仅记录状态不够。
+4. 生成版本清单，至少绑定版本号、上游提交、YuTang 补丁提交、EXE SHA-256、字节数、Artifact ID、签名者身份和构建运行 ID。
+5. 对清单做独立签名，更新器内置验证公钥；不能只下载同一 Release 中的 EXE 与未签名 `.sha256`。
+
+### B. 更新来源
+
+1. 更新源改为 YuTang 控制的 Release 通道。
+2. 每个可更新版本必须指向一个经过 Windows 2022 / 2025 验收的 YuTang 候选构建及其补丁提交。
+3. 未签名、签名者不匹配、清单签名无效、版本回退或来源不符时，更新器必须拒绝下载后的启动。
+4. 上游新版本只作为待重新构建的源码输入，不能直接当作 YuTang 更新包。
+
+### C. 更新切换与回滚
+
+1. 下载到版本隔离的 staging 目录；下载、签名和清单核验全部通过前，不改桌面快捷方式。
+2. 启动新版后等待明确的健康回执（Electron UI ready、API ready、版本和候选哈希匹配）。
+3. 在健康回执到达前保留旧 EXE 和旧快捷方式。
+4. 新版崩溃、超时、哈希不符或健康回执不符时，恢复旧快捷方式并允许旧版重新启动。
+5. 通过后才把新版设为当前版本；旧版清理应延后且可恢复。
+
+### D. Windows 验收矩阵
+
+Windows 2022 与 Windows 2025 均需用同一个确切候选 SHA-256 完成：
+
+- 有效签名、正确 Publisher：接受。
+- 未签名、无效签名、过期/不可信证书、错误 Publisher：拒绝。
+- EXE 与签名清单任意一个被修改：拒绝。
+- 上游 Release 的 EXE 冒充 YuTang 版本：拒绝。
+- 下载中断、磁盘不足、旧进程超时：旧版可继续启动。
+- 新版首次启动失败：自动回滚到旧版。
+- 新版成功健康回执：快捷方式切换正确，旧版保留策略符合预期。
+- 更新过程中不得删除用户数据、浏览器资料、API Key 或历史记录。
+
+## 8. 当前仓库与发布边界
+
+审查时已核实：
+
+- `main` 仍为 `4745ed23cbb748cb4b070ed70390703d1261aea0`。
+- 1.4.7 候选安全构建仍在独立实验分支 `experiment/windows-147-security-only-20261113`，提交 `1c332d55a88c4be2f3bbffda60548ced52b1f061`。
+- LPAC / HTTPS 专项报告在 `experiment/windows-147-lpac-network-20261114`。
+- 没有正式 GitHub Release；本审查没有创建 Release、合并 PR、修改 main 或安装到用户电脑。
+- 当前没有可用于 Authenticode 签名的已确认发布者证书身份或签名密钥配置；本审查不尝试伪造或生成自签证书冒充正式信任。
+
+## 9. 下一项工作与阻塞
+
+**下一项工作：在独立实验分支实现“YuTang 签名清单验证 + 发布来源固定 + 更新健康回执/回滚”的代码与离线测试。**
+
+正式签名仍有外部阻塞：需要确定 YuTang 的正式发布者身份及可用的 Authenticode 签名方式。没有证书或受信任签名服务之前，只能完成代码、测试与签名门禁设计，不能把当前候选变成可信正式发行版。
+
+本审查没有改变产品源码和候选 EXE。
