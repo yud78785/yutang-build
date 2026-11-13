@@ -1,0 +1,116 @@
+name: YuTang Watch Skill Real AV Pilot - NOT Windows acceptance
+
+on:
+  push:
+    branches:
+      - experiment/video-component-pilot-20261113
+    paths:
+      - .github/workflows/video-component-pilot.yml
+      - tools/run_watch_skill_pilot.py
+      - tools/verify_watch_skill_pilot.py
+      - docs/watch-skill-pilot.md
+
+permissions:
+  contents: read
+
+jobs:
+  real-av-cloud-pilot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - name: Safety gate - public repo, correct branch, disposable Linux only
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = "yud78785/yutang-build"
+          test "$GITHUB_REF" = "refs/heads/experiment/video-component-pilot-20261113"
+          test "$GITHUB_EVENT_NAME" = "push"
+          test "$RUNNER_OS" = "Linux"
+          echo "READ_ONLY_PUBLIC_MEDIA_AND_SOURCE: no user PC, Windows, login, API keys, shell MCP, or release"
+
+      - name: Checkout experiment only - no persisted Git credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Verify pinned upstream and inspect local tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile tools/run_watch_skill_pilot.py tools/verify_watch_skill_pilot.py
+          git clone --filter=blob:none --no-checkout https://github.com/oxbshw/watch-skill.git third_party/watch-skill
+          git -C third_party/watch-skill checkout --detach f1317c8fe64744a606c31867b05fbbe3144268c6
+          test "$(git -C third_party/watch-skill rev-parse HEAD)" = "f1317c8fe64744a606c31867b05fbbe3144268c6"
+          grep -q 'MIT License' third_party/watch-skill/LICENSE
+          test -x "$(command -v ffmpeg)"
+          test -x "$(command -v ffprobe)"
+          echo "Pinned Watch Skill source, license and ffmpeg verified"
+
+      - name: Install isolated audio-video processing subset - no browser or full MCP
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p work
+          python3 -m venv .venv
+          .venv/bin/python -m pip install --disable-pip-version-check --no-cache-dir "./third_party/watch-skill[perceive,whisper]"
+          .venv/bin/python -m pip freeze > work/dependency-freeze.txt
+          .venv/bin/python -c "import watch_skill, cv2, scenedetect, faster_whisper; print('Watch Skill perception + ASR installed')"
+
+      - name: Download one genuinely narrated CC-BY-4.0 W3C clip and independent reference
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location --retry 2 --connect-timeout 15 --max-time 160 --max-filesize 55000000 -o work/w3c-video.mp4 https://media.w3.org/wai/evaluation-intros/conformance-evaluation.mp4
+          curl --fail --silent --show-error --location --retry 2 --connect-timeout 15 --max-time 45 --max-filesize 200000 -o work/w3c-reference.vtt https://media.w3.org/wai/evaluation-intros/conformance-evaluation-cc.vtt
+          test "$(stat -c %s work/w3c-video.mp4)" -gt 1000000
+          test "$(stat -c %s work/w3c-reference.vtt)" -gt 500
+          ffprobe -v error -show_entries stream=codec_type -show_entries format=duration -of json work/w3c-video.mp4 > work/ffprobe.json
+          sha256sum work/w3c-video.mp4 work/w3c-reference.vtt
+          echo "W3C WAI source https://www.w3.org/WAI/test-evaluate/ ; CC BY 4.0"
+
+      - name: Snapshot public local ASR weights and record exact revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          .venv/bin/python - <<'PY'
+          from pathlib import Path
+          from huggingface_hub import HfApi, snapshot_download
+          repo_id = "Systran/faster-whisper-tiny.en"
+          revision = HfApi().model_info(repo_id=repo_id).sha
+          assert len(revision) == 40 and all(c in "0123456789abcdef" for c in revision), revision
+          dest = Path("work/model").resolve()
+          snapshot_download(repo_id=repo_id, revision=revision, local_dir=str(dest),
+                            allow_patterns=["*.bin", "*.json", "*.txt", "vocabulary.*"],
+                            max_workers=2)
+          assert (dest / "model.bin").is_file(), "CTranslate2 model missing"
+          Path("work/model-revision.txt").write_text(revision + "\n", encoding="utf-8")
+          print("Pinned for this run:", repo_id, revision)
+          PY
+          sha256sum work/model/model.bin
+
+      - name: Genuine local Watch Skill run, then independent acceptance check
+        shell: bash
+        env:
+          WATCHSKILL_OFFLINE: "1"
+          HF_HUB_OFFLINE: "1"
+          WATCHSKILL_CLOUD_STT_ENABLED: "0"
+          WATCHSKILL_LOCAL_WHISPER_ENABLED: "true"
+          WATCHSKILL_WHISPER_DEVICE: "cpu"
+        run: |
+          set -euo pipefail
+          .venv/bin/python tools/run_watch_skill_pilot.py
+          .venv/bin/python tools/verify_watch_skill_pilot.py
+
+      - name: Keep metadata and verdict only (no media, cookies, tokens or frames)
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: YuTang-Real-WatchSkill-Component-Pilot-NOT-EXE
+          path: |
+            work/pilot-manifest.json
+            work/pilot-verdict.json
+            work/model-revision.txt
+            work/dependency-freeze.txt
+            work/ffprobe.json
+          if-no-files-found: warn
+          retention-days: 7
