@@ -684,7 +684,9 @@ async function run(exeFile, { forceMode = null, stressRestarts = 2, desktopOnly 
   const base=await fs.mkdtemp(path.join(process.env.RUNNER_TEMP || tmpdir(),'yutang-edge-ci-'));
   const home=process.env.USERPROFILE || process.env.HOME;
   if(typeof home!=='string'||!path.isAbsolute(home))throw new Error('Native Windows USERPROFILE is unavailable; refusing to launch candidate.');
-  const common=path.join(home,'.yutang-observer-isolated');
+  // 1.4.7 changed the dedicated browser root to ~/.dsh/douyin-browser.
+  // Hard-stop on a pre-existing root before launching anything on this disposable CI runner.
+  const common=path.join(home,'.dsh','douyin-browser');
   if(await fs.access(common).then(()=>true,()=>false))throw new Error('Pre-existing browser state found on disposable runner; refusing to overwrite it.');
   const userData=path.join(base,'user-data'),memory=path.join(base,'memory');
   const locationFile=path.join(base,'runtime-location.json');
@@ -732,8 +734,8 @@ async function run(exeFile, { forceMode = null, stressRestarts = 2, desktopOnly 
     if(!ready)throw new Error('Packaged EXE startup unavailable after 85000ms; candidateExit='+JSON.stringify(candidateExit));
     backendPid=ready.backendPid;
     assert.equal(ready.configured,false,'EXE must not be configured with a model key');
-    assert.equal(path.resolve(ready.memoryFolder).toLowerCase(),path.resolve(path.join(home,'.yutang-observer-isolated','memory')).toLowerCase(),'candidate must use new isolated memory');
-    assert.notEqual(path.resolve(ready.memoryFolder).toLowerCase(),path.resolve(memory).toLowerCase(),'candidate must not inherit injected old shared memory');
+    assert.equal(path.resolve(ready.memoryFolder).toLowerCase(),path.resolve(memory).toLowerCase(),'1.4.7 must use the explicitly assigned disposable memory root');
+    assert.notEqual(path.resolve(ready.memoryFolder).toLowerCase(),path.resolve(path.join(common,'memory')).toLowerCase(),'1.4.7 must not fall back to the persistent default memory root');
     assert.match(ready.origin,/^http:\/\/127\.0\.0\.1:\d{4,5}$/);
     report.desktopReady=true;
     report.candidatePid=child.pid;
