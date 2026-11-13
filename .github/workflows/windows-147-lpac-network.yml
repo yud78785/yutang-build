@@ -89,7 +89,7 @@ jobs:
               $result.networkProbePassed -ne $true -or
               $result.sandbox.networkServiceIntegrity -cne 'Low' -or
               $result.https.httpStatus -ne 200 -or
-              $result.https.httpProtocol -notmatch '^(h2|h3|http/1\.1)
+              $result.https.httpProtocol -notmatch '^(h2|h3|http/1\.1)$' -or
               $result.https.securityProtocol -notmatch '^(TLS|QUIC)' -or
               $result.https.pageContentVerified -ne $true -or
               $result.cleanupVerified -ne $true) { throw 'LPAC_NETWORK_RESULT_ASSERTION_FAILED' }
