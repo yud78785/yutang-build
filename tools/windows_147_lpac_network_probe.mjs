@@ -291,11 +291,8 @@ async function run(exeFile) {
   assert.equal(path.basename(exeFile), FILE);
   assert.equal(await sha256(exeFile), EXPECTED_SHA, 'Candidate EXE SHA-256 mismatch');
   assert.equal(await exists(path.join(process.env.RUNNER_TEMP || tmpdir(), 'never-used-placeholder')), false);
-  assert.equal(ps("Get-NetFirewallRule -DisplayName 'YuTang147EphemeralEdgeEgressBlock' -ErrorAction SilentlyContinue | Measure-Object | Select-Object -ExpandProperty Count"), 0,
-    'Unexpected test firewall rule exists; refusing to change firewall policy');
-  const profiles = asRows(ps('Get-NetFirewallProfile | Select-Object Name,Enabled,DefaultOutboundAction | ConvertTo-Json -Compress'));
-  if (profiles.some(item => item.Enabled === true && String(item.DefaultOutboundAction).toLowerCase() === 'block'))
-    throw new Error('Runner outbound firewall default is Block; no firewall policy changes will be made');
+  // No firewall rules or profiles are queried or modified in this live-network probe.
+  // If the disposable runner blocks outbound traffic, the real HTTPS request fails explicitly.
   const base = await fs.mkdtemp(path.join(process.env.RUNNER_TEMP || tmpdir(), 'yutang-lpac-network-'));
   const home = path.resolve(process.env.USERPROFILE || '');
   assert.ok(path.isAbsolute(home), 'Native Windows USERPROFILE is required');
