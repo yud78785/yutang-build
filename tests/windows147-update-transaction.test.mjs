@@ -36,7 +36,7 @@ async function fixture(t) {
     targetExeSha256: hash(await fs.readFile(target)),
     nonce
   });
-  return { updates, shortcut, staged, backup, target, nonce, transaction };
+  return { updates, desktop, shortcut, staged, backup, target, nonce, transaction };
 }
 
 test('更新助手在快捷方式替换前被强杀：旧入口保持且事务可清理', async t => {
@@ -51,7 +51,7 @@ test('更新助手在旧快捷方式已备份但新入口尚未落位时被强�
   const f = await fixture(t);
   await setUpdateTransactionPhase(f.transaction, 'switching');
   await fs.rename(f.shortcut, f.backup);
-  const result = await recoverUpdateTransaction(f.updates);
+  const result = await recoverUpdateTransaction(f.updates, { shortcut: f.shortcut });
   assert.equal(result.status, 'rolled-back');
   assert.equal(await fs.readFile(f.shortcut, 'utf8'), 'old shortcut');
   assert.equal(await fs.access(f.backup).then(() => true, () => false), false);
@@ -63,7 +63,7 @@ test('更新助手在新入口切换后被强杀：自动回滚旧入口', async
   await fs.rename(f.shortcut, f.backup);
   await fs.rename(f.staged, f.shortcut);
   await setUpdateTransactionPhase(f.transaction, 'switched');
-  const result = await recoverUpdateTransaction(f.updates);
+  const result = await recoverUpdateTransaction(f.updates, { shortcut: f.shortcut });
   assert.equal(result.status, 'rolled-back');
   assert.equal(await fs.readFile(f.shortcut, 'utf8'), 'old shortcut');
 });
@@ -75,7 +75,7 @@ test('提交记录已持久化但备份清理前被强杀：下次启动只完�
   await fs.rename(f.staged, f.shortcut);
   await setUpdateTransactionPhase(f.transaction, 'switched');
   await setUpdateTransactionPhase(f.transaction, 'committed');
-  const result = await recoverUpdateTransaction(f.updates);
+  const result = await recoverUpdateTransaction(f.updates, { shortcut: f.shortcut });
   assert.equal(result.status, 'committed-cleanup');
   assert.equal(await fs.readFile(f.shortcut, 'utf8'), 'new shortcut');
   assert.equal(await fs.access(f.backup).then(() => true, () => false), false);
@@ -87,7 +87,7 @@ test('快捷方式被用户改动时不覆盖、不删除备份，明确阻塞',
   await fs.rename(f.shortcut, f.backup);
   await fs.rename(f.staged, f.shortcut);
   await fs.writeFile(f.shortcut, 'user edited shortcut');
-  const result = await recoverUpdateTransaction(f.updates);
+  const result = await recoverUpdateTransaction(f.updates, { shortcut: f.shortcut });
   assert.equal(result.status, 'blocked');
   assert.equal(await fs.readFile(f.shortcut, 'utf8'), 'user edited shortcut');
   assert.equal(await fs.readFile(f.backup, 'utf8'), 'old shortcut');
@@ -99,7 +99,7 @@ test('目标 EXE 身份变化时不执行快捷方式恢复', async t => {
   await fs.rename(f.shortcut, f.backup);
   await fs.rename(f.staged, f.shortcut);
   await fs.writeFile(f.target, 'tampered target');
-  const result = await recoverUpdateTransaction(f.updates);
+  const result = await recoverUpdateTransaction(f.updates, { shortcut: f.shortcut });
   assert.equal(result.status, 'blocked');
   assert.equal(await fs.readFile(f.shortcut, 'utf8'), 'new shortcut');
   assert.equal(await fs.readFile(f.backup, 'utf8'), 'old shortcut');
