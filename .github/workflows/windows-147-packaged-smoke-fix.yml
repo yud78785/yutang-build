@@ -308,11 +308,9 @@ jobs:
           $sha = (Get-FileHash $exe.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
           $verification = Get-Content 'release-api/verification-1.4.7.json' -Raw | ConvertFrom-Json
           $staticSecurity = Get-Content '../windows-security-147-static-patch-receipt.json' -Raw | ConvertFrom-Json
-          $security = Get-Content '../windows-security-147-patch-receipt.json' -Raw | ConvertFrom-Json
           $dynamicSecurity = Get-Content '../windows-security-147-dynamic-patch-receipt.json' -Raw | ConvertFrom-Json
           $testFixtures = Get-Content '../windows-security-147-test-fixture-receipt.json' -Raw | ConvertFrom-Json
           if ($staticSecurity.status -cne 'PASS_PINNED_STATIC_PATCH_BLOBS' -or $staticSecurity.release -ne $false -or $staticSecurity.upstreamCommit -cne $env:UPSTREAM_COMMIT) { throw 'WINDOWS_STATIC_SECURITY_PATCH_RECEIPT_INVALID' }
-          if ($security.status -cne 'PASS_EXACT_SOURCE_SECURITY_PATCH' -or $security.release -ne $false) { throw 'WINDOWS_SECURITY_PATCH_RECEIPT_INVALID' }
           if ($dynamicSecurity.status -cne 'PASS_EXACT_SOURCE_SECURITY_PATCH' -or $dynamicSecurity.release -ne $false) { throw 'WINDOWS_DYNAMIC_SECURITY_PATCH_RECEIPT_INVALID' }
           if ($testFixtures.status -cne 'PASS_PATCHED_WINDOWS_TEST_FIXTURES' -or $testFixtures.release -ne $false -or $testFixtures.jobGuardSha256 -cne $env:YUTANG_JOBGUARD_SHA256) { throw 'WINDOWS_TEST_FIXTURE_RECEIPT_INVALID' }
           $edgeNormal = Get-Content 'release-api/windows-edge-lifecycle-normal.json' -Raw | ConvertFrom-Json
@@ -362,7 +360,6 @@ jobs:
             startup = $verification.startup
             renderer = $verification.renderer
             staticSecurityPatch = $staticSecurity
-            securityPatch = $security
             dynamicSecurityPatch = $dynamicSecurity
             testFixturePatch = $testFixtures
             jobGuardSha256 = $env:YUTANG_JOBGUARD_SHA256
@@ -388,7 +385,6 @@ jobs:
             upstream/desktop/release-api/windows-candidate-receipt.json
             upstream/openrouter-desktop-patch-receipt.json
             upstream/windows-security-147-static-patch-receipt.json
-            upstream/windows-security-147-patch-receipt.json
             upstream/windows-security-147-dynamic-patch-receipt.json
             upstream/windows-security-147-test-fixture-receipt.json
             upstream/desktop/release-api/windows-edge-lifecycle-*.json

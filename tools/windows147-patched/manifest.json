@@ -19,7 +19,7 @@
       "path": "desktop/src/api-process.mjs",
       "patchFile": "api-process.mjs",
       "originalGitBlobSha1": "387c2fe0bff2b6b081951c6ba544b84471f5c477",
-      "patchedGitBlobSha1": "016fac0abde976bc49db3ae20fc0cb6be161c83a"
+      "patchedGitBlobSha1": "3f6b7a210eca640c4b354d48206a6c162888a493"
     },
     {
       "path": "runtime-paths.mjs",

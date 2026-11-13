@@ -56,13 +56,15 @@ export function patchApiProcessTest(source) {
   source = once(source,
     "  assert.equal(f.backend.exitCode, 0); assert.equal(f.backend.pending.size, 0); assert.equal(f.backend.secrets.size, 0);\n",
     "  assert.equal(f.backend.exitCode, 0); assert.equal(f.backend.pending.size, 0); assert.equal(f.backend.secrets.size, 0);\n" +
-    "  assert.equal(f.backend.desktopGuard, null, 'Desktop Job Object helper must be released after normal backend shutdown.');\n",
+    "  assert.equal(f.backend.desktopGuard, null, 'Desktop Job Object helper must be released after normal backend shutdown.');\n" +
+    "  if (process.platform === 'win32') assert.ok(f.backend.desktopGuardExitCode !== null || f.backend.desktopGuardSignal !== null, 'Desktop Job Object helper process exit must be confirmed before fixture cleanup.');\n",
     'assert desktop helper released on normal stop');
 
   source = once(source,
     "  await assert.rejects(f.backend.start({}, { htmlFile: outside }), /资源目录内/);\n",
     "  await assert.rejects(f.backend.start({}, { htmlFile: outside }), /资源目录内/);\n" +
-    "  assert.equal(f.backend.desktopGuard, null, 'Desktop Job Object helper must be released after a rejected backend start.');\n",
+    "  assert.equal(f.backend.desktopGuard, null, 'Desktop Job Object helper must be released after a rejected backend start.');\n" +
+    "  if (process.platform === 'win32') assert.ok(f.backend.desktopGuardExitCode !== null || f.backend.desktopGuardSignal !== null, 'Desktop Job Object helper process exit must be confirmed after rejected start.');\n",
     'assert desktop helper released after rejected start');
 
   return source;

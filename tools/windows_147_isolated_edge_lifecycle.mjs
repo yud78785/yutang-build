@@ -462,10 +462,12 @@ function loopbackListeners(port) {
 async function waitForBrowserGone(hostPid, profile, controlDir, port) {
   return until(async () => {
     const owned = ownedProfileProcesses(profile, controlDir);
+    const guardRows = asRows(ps("Get-CimInstance Win32_Process -Filter \"Name = 'jobguard.exe'\" | Select-Object ProcessId,ParentProcessId,Name | ConvertTo-Json -Compress -Depth 3"));
+    const guards = guardRows.filter(item => Number(item.ParentProcessId) === hostPid);
     const listeners = loopbackListeners(port);
-    if (!owned.length && !listeners.length) return { clean: true, hostPid, edgeAndHostProcesses: 0, listeners: 0 };
+    if (!owned.length && !guards.length && !listeners.length) return { clean: true, hostPid, edgeAndHostProcesses: 0, jobGuardProcesses: 0, listeners: 0 };
     return null;
-  }, 15000, 'browser-host and Edge process cleanup');
+  }, 15000, 'browser-host, Edge and Job Object helper process cleanup');
 }
 
 

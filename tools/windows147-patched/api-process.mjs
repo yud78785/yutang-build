@@ -6,7 +6,7 @@ import fs from 'node:fs/promises';
 export class ApiProcess {
   constructor(node, runtime, { env = process.env, timeoutMs = 30_000 } = {}) {
     Object.assign(this, { node, runtime, env, timeoutMs });
-    this.pending = new Map(); this.secrets = new Set(); this.stderr = ''; this.desktopGuard = null;
+    this.pending = new Map(); this.secrets = new Set(); this.stderr = ''; this.desktopGuard = null; this.desktopGuardExitCode = null; this.desktopGuardSignal = null;
   }
   safe(value) {
     let result = String(value).replace(/Bearer\s+[^\s,;"']+/gi, 'Bearer [凭据已隐藏]');
@@ -105,8 +105,21 @@ export class ApiProcess {
     const wait = milliseconds => new Promise(resolve => { const timer = setTimeout(() => resolve(false), milliseconds); this.exited.then(() => { clearTimeout(timer); resolve(true); }); });
     if (!await wait(1000)) this.child.kill('SIGTERM');
     if (!await wait(5000)) { this.child.kill('SIGKILL'); if (!await wait(2000)) throw new Error('软件后台未能退出。'); }
-    try { if (this.desktopGuard && this.desktopGuard.exitCode===null) this.desktopGuard.kill(); } catch {}
-    this.desktopGuard=null;
+    const guard = this.desktopGuard;
+    if (guard) {
+      const exited = await new Promise(resolve => {
+        if (guard.exitCode !== null || guard.signalCode !== null) return resolve(true);
+        let settled = false;
+        const finish = value => { if (settled) return; settled = true; clearTimeout(timer); resolve(value); };
+        const timer = setTimeout(() => finish(false), 5000);
+        guard.once('exit', () => finish(true));
+        try { guard.kill(); } catch {}
+      });
+      if (!exited) throw new Error('Windows Job Object helper did not exit within the cleanup deadline.');
+      this.desktopGuardExitCode = guard.exitCode;
+      this.desktopGuardSignal = guard.signalCode;
+      this.desktopGuard = null;
+    }
     this.secrets.clear();
   }
 }
