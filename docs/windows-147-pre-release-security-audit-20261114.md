@@ -480,3 +480,72 @@ README 的修改仍需随下一版便携 EXE 构建后，检查 `app.asar` 内�
 随后补丁器精确替换旧 Release 下载说明，并修改 packaged verifier：从最终 `app.asar` 读取 `README.md`，断言其包含“YuTang 的未签名验收候选”和“自动更新处于安全关闭状态”。Windows 工作流会在补丁后对该 verifier 执行 Node 语法检查，并要求补丁回执声明 packaged README 检查已启用。
 
 这修复了“README 源码已改，但最终 EXE 仍可能打包旧说明”的验收盲区。**实际 app.asar 检查仍待下一轮 Windows 构建执行，不能提前计为通过。**
+
+
+## 14. 2026-11-14 三任务 Windows 2022 / 2025 更新器候选验收最终结果
+
+### 14.1 本次工作流与来源
+
+- Workflow Run：`43513624284`
+- Workflow commit：`e8e91a29be026403b3095f5fe9e5885b485147a1`
+- 实验分支：`experiment/windows-147-update-rollback-20261114`
+- Windows 2022 build job：`132189835286`，结论 `success`
+- Windows 2025 build job：`132189835693`，结论 `success`
+- Windows 2022 same-candidate cross-test job：`132195190400`，结论 `success`
+- 整个 workflow：`completed / success`
+
+### 14.2 两个独立 Windows 构建候选
+
+| 构建平台 | Artifact ID | EXE SHA-256 | 验收结论 |
+|---|---:|---|---|
+| Windows 2022 | `14079683370` | `23bda17a387f6a22b7f49b641752b4add07d55a0bf2f09800e74d68aa81644b5` | 通过 |
+| Windows 2025 | `14079143899` | `87ec2d05137802bb39855272c2292e06b7d48012b467ba8bef32b7b0d128582e` | 通过 |
+
+这两个 EXE 是两台机器分别构建的文件，SHA 不同；不得把它们视为同一候选。
+
+### 14.3 同一 Windows 2025 EXE 在 Windows 2022 交叉验收
+
+- Windows 2025 Artifact：`14079143899`
+- 下载后重新计算 SHA-256：`87ec2d05137802bb39855272c2292e06b7d48012b467ba8bef32b7b0d128582e`
+- 与 Windows 2025 的 `windows-candidate-receipt.json`、`verification-1.4.7.json` 及 SHA-256 sidecar 一致。
+- Windows 2022 没有重新构建该文件；直接运行下载的同一个 EXE。
+- Cross-test Artifact：`14081041070`
+- Cross-test 状态：`PASS_SAME_WINDOWS_2025_CANDIDATE_WINDOWS_2022_CROSS_TEST`
+- Cross-test job：`132195190400`，结论 `success`
+
+因此，Windows 2025 SHA `87ec2d05...` 已同时获得 Windows 2025 本机验收和 Windows 2022 同文件交叉验收。
+
+### 14.4 两个平台及同文件交叉测试证据
+
+三个 job 均通过：
+
+- 17 项 YuTang updater trust / health / rollback 模板测试。
+- 固定上游源码、补丁器、更新信任补丁、README 更新通道补丁。
+- 最终便携 EXE 的隔离启动与界面检查。
+- 最终 `app.asar` 内 README 断言，确认写明“YuTang 未签名验收候选”和“自动更新处于安全关闭状态”。
+- Edge Renderer 的 Untrusted + Lockdown + AppContainer 验证。
+- Network Service 的 AppContainer SID 与 Windows 进程令牌直接核验；Integrity RID 4096，即 Low Integrity。
+- CDP 只监听 loopback，Edge 子进程归属和专用 profile 核对。
+- 正常启动、两次重启、正常关闭。
+- 强杀 browser host、Job Object guard、Electron 主进程三种场景。
+- 每个候选回执均绑定自身 EXE SHA；每种强制退出场景的 tracked processes、profile processes、CDP listeners 均为 0；无关 Edge 进程保持存活。
+
+实际 Edge 版本：
+- Windows 2022 独立构建和同文件交叉测试：`157.0.4341.46`
+- Windows 2025 独立构建：`156.0.4314.58`
+
+### 14.5 必须保留的测试边界与剩余阻塞
+
+- Edge 外网被临时防火墙规则阻断；`ERR_NETWORK_ACCESS_DENIED` 是本次隔离策略预期结果。
+- 没有真实 Douyin 登录、视频播放、真实模型请求或真实消息发送。
+- Authenticode：候选仍为 `NotSigned`。
+- Ed25519 manifest 公钥与 Authenticode Publisher thumbprint 未配置；更新器保持 fail closed。
+- 因发布信任未配置，**没有执行真实在线下载、真实安装切换或真实 EXE 崩溃回滚端到端**。本轮通过的是更新器代码的 17 项合成回归测试，以及 packaged EXE 的启动/沙盒/生命周期测试；不能写成在线升级已实测通过。
+- 正式签名与发布仍未完成；本次 Artifact 只作候选留存，不是公开发行包。
+
+### 14.6 仓库边界
+
+- 本次验收来源 commit：`e8e91a29be026403b3095f5fe9e5885b485147a1`
+- 验收时 `main`：`4745ed23cbb748cb4b070ed70390703d1261aea0`
+- `main` 未修改；没有合并、没有 PR 发布、没有 GitHub Release。
+- Windows 2022、Windows 2025 与同一 EXE 跨平台三项均为独立 job 成功结果，不能把任何一个候选 SHA 的结果移植到另一个 SHA。
