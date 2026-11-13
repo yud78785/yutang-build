@@ -146,6 +146,34 @@ acquire = replaceOnce(acquire,
   "throw new Error('源码树哈希不匹配，请保留本地修改并使用干净缓存重新获取');",
   "throw new Error('源码树哈希不匹配: expected files=' + manifest.sourceTree.files + ', sha256=' + manifest.sourceTree.sha256 + '; actual files=' + actual.files + ', sha256=' + actual.sha256 + '。请保留本地修改并使用干净缓存重新获取');",
   'upstream acquisition reports expected and actual tree hashes');
+acquire = replaceOnce(acquire,
+  "    const tree = await verifySource(staging, manifest);\n    await rename(staging, source);",
+  "    // Windows bsdtar 3.8.9 misdecodes one UTF-8 filename in this exact pinned archive.\n" +
+  "    // Do not change content, skip verification, or guess other filenames.\n" +
+  "    await normalizePinnedWindowsArchiveFilename(staging);\n" +
+  "    const tree = await verifySource(staging, manifest);\n    await rename(staging, source);",
+  'normalize one Git-blob-verified tar filename before full source-tree hash');
+acquire = replaceOnce(acquire,
+  "async function verifySource(source, manifest) {",
+  "export async function normalizePinnedWindowsArchiveFilename(staging, platform = process.platform) {\n" +
+  "  if (platform !== 'win32') return { status: 'not-windows' };\n" +
+  "  const parent = path.join(staging, 'snapshots', 'web', 'present', 'workspace.expected');\n" +
+  "  const wronglyDecoded = path.join(parent, 'F»¦µÿÄ.txt');\n" +
+  "  const canonical = path.join(parent, '说明.txt');\n" +
+  "  const wrongExists = await exists(wronglyDecoded);\n" +
+  "  const correctExists = await exists(canonical);\n" +
+  "  if (!wrongExists) return { status: 'no-known-filename-mismatch' };\n" +
+  "  if (correctExists) throw new Error('UNCERTAIN_UPSTREAM_FILENAME_COLLISION');\n" +
+  "  const stat = await lstat(wronglyDecoded);\n" +
+  "  if (!stat.isFile() || stat.isSymbolicLink() || stat.size !== 15) throw new Error('INVALID_WINDOWS_TAR_FILENAME_FIX_SOURCE');\n" +
+  "  const data = await readFile(wronglyDecoded);\n" +
+  "  const actualGitBlob = createHash('sha1').update('blob ' + data.length + '\\\\0').update(data).digest('hex');\n" +
+  "  if (actualGitBlob !== 'e0f8e3262354fe6d5b5fa046c8c180b58653870b') throw new Error('WINDOWS_TAR_FILENAME_BLOB_MISMATCH');\n" +
+  "  await rename(wronglyDecoded, canonical);\n" +
+  "  return { status: 'single-git-blob-verified-filename-normalized' };\n" +
+  "}\n\n" +
+  "async function verifySource(source, manifest) {",
+  'add strict single-file Windows archive filename normalizer');
 await write('desktop/scripts/acquire-upstream.mjs', acquire);
 
 let upstreamManifest = await loadVerified('desktop/UPSTREAM.json');
