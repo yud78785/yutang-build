@@ -354,6 +354,121 @@ test('新版未写健康回执时，旧快捷方式保留且新版进程被终�
   assert.equal(await fs.readFile(stagedShortcut).then(() => true, () => false), false);
 });
 
+test('新版在快捷方式切换后的稳定观察期内崩溃时，恢复旧快捷方式', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'yutang-launcher-post-switch-crash-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const updates = path.join(root, 'updates'), desktop = path.join(root, 'desktop');
+  await fs.mkdir(updates, { recursive: true });
+  await fs.mkdir(desktop, { recursive: true });
+  const file = path.join(updates, 'Dafeiyu-Douyin-API-1.4.8-win-x64.exe');
+  const healthFile = path.join(updates, '.health-post-switch-crash.json');
+  const stagedShortcut = path.join(updates, '.staged-post-switch-crash.lnk');
+  const shortcut = path.join(desktop, '大肥鱼抖音助手.lnk');
+  await fs.writeFile(file, bytes);
+  await fs.writeFile(stagedShortcut, 'new shortcut');
+  await fs.writeFile(shortcut, 'old shortcut');
+  const nonce = '12345678-1234-4234-8234-123456789abf';
+  const child = fakeChild(5557);
+  let switchedBeforeCrash = false;
+  await assert.rejects(runUpdateLauncher({
+    pid: 4444,
+    file,
+    sha256,
+    publisherThumbprint: THUMBPRINT,
+    version: '1.4.8',
+    nonce,
+    healthFile,
+    stagedShortcut,
+    shortcut,
+    expectedPublisherThumbprint: THUMBPRINT,
+    verifyAuthenticodeImpl: async () => ({ status: 'Valid', thumbprint: THUMBPRINT }),
+    waitForOldProcessExitImpl: async () => {},
+    spawnImpl: () => {
+      setImmediate(async () => {
+        await fs.writeFile(healthFile, JSON.stringify({
+          ready: true, nonce, pid: child.pid, version: '1.4.8', sha256, backendPid: 9001
+        }));
+        child.emit('spawn');
+      });
+      return child;
+    },
+    delayImpl: async milliseconds => {
+      assert.equal(await fs.readFile(shortcut, 'utf8'), 'new shortcut');
+      switchedBeforeCrash = true;
+      child.exitCode = 1;
+      child.signalCode = null;
+      child.emit('exit', 1, null);
+      await new Promise(resolve => setTimeout(resolve, milliseconds));
+    },
+    healthTimeoutMs: 1000,
+    stabilityMs: 50,
+    pollMs: 5
+  }), /稳定观察期内异常退出/);
+  assert.equal(switchedBeforeCrash, true);
+  assert.equal(await fs.readFile(shortcut, 'utf8'), 'old shortcut');
+  assert.deepEqual(await fs.readdir(desktop), ['大肥鱼抖音助手.lnk']);
+  assert.equal(await fs.readFile(stagedShortcut).then(() => true, () => false), false);
+  assert.equal(await fs.readFile(healthFile).then(() => true, () => false), false);
+});
+
+test('新版在稳定观察期内正常退出时保留新版快捷方式', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'yutang-launcher-post-switch-normal-exit-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const updates = path.join(root, 'updates'), desktop = path.join(root, 'desktop');
+  await fs.mkdir(updates, { recursive: true });
+  await fs.mkdir(desktop, { recursive: true });
+  const file = path.join(updates, 'Dafeiyu-Douyin-API-1.4.8-win-x64.exe');
+  const healthFile = path.join(updates, '.health-post-switch-normal.json');
+  const stagedShortcut = path.join(updates, '.staged-post-switch-normal.lnk');
+  const shortcut = path.join(desktop, '大肥鱼抖音助手.lnk');
+  await fs.writeFile(file, bytes);
+  await fs.writeFile(stagedShortcut, 'new shortcut');
+  await fs.writeFile(shortcut, 'old shortcut');
+  const nonce = '12345678-1234-4234-8234-123456789ac0';
+  const child = fakeChild(5558);
+  let switchedBeforeExit = false;
+  const result = await runUpdateLauncher({
+    pid: 4444,
+    file,
+    sha256,
+    publisherThumbprint: THUMBPRINT,
+    version: '1.4.8',
+    nonce,
+    healthFile,
+    stagedShortcut,
+    shortcut,
+    expectedPublisherThumbprint: THUMBPRINT,
+    verifyAuthenticodeImpl: async () => ({ status: 'Valid', thumbprint: THUMBPRINT }),
+    waitForOldProcessExitImpl: async () => {},
+    spawnImpl: () => {
+      setImmediate(async () => {
+        await fs.writeFile(healthFile, JSON.stringify({
+          ready: true, nonce, pid: child.pid, version: '1.4.8', sha256, backendPid: 9002
+        }));
+        child.emit('spawn');
+      });
+      return child;
+    },
+    delayImpl: async milliseconds => {
+      assert.equal(await fs.readFile(shortcut, 'utf8'), 'new shortcut');
+      switchedBeforeExit = true;
+      child.exitCode = 0;
+      child.signalCode = null;
+      child.emit('exit', 0, null);
+      await new Promise(resolve => setTimeout(resolve, milliseconds));
+    },
+    healthTimeoutMs: 1000,
+    stabilityMs: 50,
+    pollMs: 5
+  });
+  assert.equal(result.status, 'healthy-update-started');
+  assert.equal(switchedBeforeExit, true);
+  assert.equal(await fs.readFile(shortcut, 'utf8'), 'new shortcut');
+  assert.deepEqual(await fs.readdir(desktop), ['大肥鱼抖音助手.lnk']);
+  assert.equal(await fs.readFile(stagedShortcut).then(() => true, () => false), false);
+  assert.equal(await fs.readFile(healthFile).then(() => true, () => false), false);
+});
+
 test('发布者签名不通过时，更新启动器不会创建新版进程或切换快捷方式', async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'yutang-launcher-signer-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
