@@ -7,7 +7,8 @@ on:
     paths:
       - .github/workflows/windows-147-packaged-smoke-fix.yml
       - tools/apply_windows147_update_trust_patch.mjs
-      - tools/windows147-update-patched/**\n      - tests/windows147-update-transaction.test.mjs
+      - tools/windows147-update-patched/**
+      - tests/windows147-update-transaction.test.mjs
       - tests/windows147-update-trust.test.mjs
       - tests/windows-upstream-filename-fix.test.mjs
       - tools/apply_openrouter_desktop_patch.mjs
