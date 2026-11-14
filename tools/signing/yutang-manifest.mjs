@@ -110,7 +110,7 @@ async function build(options) {
   const bytes = manifestBytes(manifest);
   const signatureText = signManifest(bytes, privatePem);
   requireCondition(Buffer.from(signatureText.trim(), 'base64').length === 64, 'SIGNING_SELF_CHECK_FAILED');
-  verifyManifest({ bytes, signature: signatureText, publicKey: pub, exeName: path.basename(exe),
+  verifyManifest({ bytes, signature: signatureText, publicKey: pub.export({ type: 'spki', format: 'pem' }), exeName: path.basename(exe),
     exeBytes: binary.bytes, tag: manifest.tag, thumbprint: thumb });
   const outDir = path.resolve(options['out-dir']);
   requireCondition(outDir !== path.dirname(exe), 'OUTPUT_DIRECTORY_MUST_DIFFER_FROM_EXE_DIRECTORY');
@@ -147,7 +147,7 @@ async function verifyOnly(options) {
   let manifest;
   try {
     const parsed = JSON.parse(bytes.toString('utf8'));
-    manifest = verifyManifest({ bytes, signature, publicKey,
+    manifest = verifyManifest({ bytes, signature, publicKey: publicKey.export({ type: 'spki', format: 'pem' }),
       exeName: path.basename(exe), exeBytes: binary.bytes,
       tag: parsed.tag, thumbprint: options['publisher-thumbprint'] });
   } catch (error) {
