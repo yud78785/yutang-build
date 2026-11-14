@@ -4,7 +4,7 @@
   "as_of_date": "2026-11-15",
   "repository": "yud78785/yutang-build",
   "experiment_branch": "experiment/yutang-public-comment-readonly-20261115",
-  "source_baseline_commit": "05fab09827765ba1493e4578a3aedb27b3ed4f73",
+  "source_baseline_commit": "924963f01842c6a98f0e9d8d78281924d9825d48",
   "latest_completed_window_ci": {
     "run_id": 43643545361,
     "runner": "windows-2025",
@@ -33,7 +33,7 @@
     },
     "existing_edge_reader": {
       "passed": 23,
-      "blob": "b39372e846fcd1931ecc23d41c04e5b6240329f5",
+      "blob": "f8c8bb5261cc2df742b4a771f92101eff14e2020",
       "path": "tools/douyin-existing-browser-readonly.mjs",
       "tests_path": "tests/douyin-existing-browser-readonly.test.mjs",
       "tests_blob": "35bbdcc356c8982fef8cc90b0a6f1551f386d46c"
@@ -70,7 +70,7 @@
     "concurrent_upstream_operation_lock_held": false,
     "concurrent_operations_race_eliminated": false,
     "concurrent_upstream_operation_lock_required_in_candidate": true,
-    "lock_behavior": "Source candidate now requires upstream acquireBrowserOperationLock('tab-api') before public-comment/AI reading, and awaits release for all outcomes. It creates/removes temporary browser operation lock files ONLY when invoked on a future Windows host, so it no longer claims zero filesystem writes. Cooperative upstream operations are serialized; manual/user activity or other noncooperating browser actors remain outside the lock."
+    "lock_behavior": "Source-only adapter requires the upstream acquireBrowserOperationLock('tab-api') provider; it is acquired after verifying an already connected dedicated browser, and released after the full read. The future Windows runner creates/removes temporary tab-api.lock in upstream browser-control directory. In this chat no Windows host was accessed and no real lockfile was created on the user's machine. This only serializes cooperative upstream code; manual or third-party browser activity can still race."
   },
   "safety_policy_for_next_step": {
     "do_not_modify_main": true,
