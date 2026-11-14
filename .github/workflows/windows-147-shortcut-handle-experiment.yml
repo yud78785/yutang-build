@@ -81,15 +81,13 @@ jobs:
             $newSha = (Get-FileHash -LiteralPath $temporary -Algorithm SHA256).Hash.ToLowerInvariant()
             $output = & $probe --shortcut-commit --owner-pid $PID --shortcut $shortcut --backup $backup --temporary $temporary --old-sha256 $oldSha --new-sha256 $newSha
             $outputText = [string]($output -join "`n")
-            if ($LASTEXITCODE -ne 0 -or $outputText -notmatch '^SHORTCUT_OPERATION_OK --shortcut-commit
-) { throw ('SHORTCUT_CLI_COMMIT_FAILED: ' + $outputText) }
+            if ($LASTEXITCODE -ne 0 -or -not ($outputText -match 'SHORTCUT_OPERATION_OK --shortcut-commit')) { throw ('SHORTCUT_CLI_COMMIT_FAILED: ' + $outputText) }
             if ((Get-FileHash -LiteralPath $shortcut -Algorithm SHA256).Hash.ToLowerInvariant() -cne $newSha) { throw 'SHORTCUT_CLI_COMMIT_HASH_MISMATCH' }
             if ((Get-FileHash -LiteralPath $backup -Algorithm SHA256).Hash.ToLowerInvariant() -cne $oldSha) { throw 'SHORTCUT_CLI_BACKUP_HASH_MISMATCH' }
 
             $output = & $probe --shortcut-restore --owner-pid $PID --shortcut $shortcut --backup $backup --quarantine $quarantine --old-sha256 $oldSha --new-sha256 $newSha
             $outputText = [string]($output -join "`n")
-            if ($LASTEXITCODE -ne 0 -or $outputText -notmatch '^SHORTCUT_OPERATION_OK --shortcut-restore
-) { throw ('SHORTCUT_CLI_RESTORE_FAILED: ' + $outputText) }
+            if ($LASTEXITCODE -ne 0 -or -not ($outputText -match 'SHORTCUT_OPERATION_OK --shortcut-restore')) { throw ('SHORTCUT_CLI_RESTORE_FAILED: ' + $outputText) }
             if ((Get-FileHash -LiteralPath $shortcut -Algorithm SHA256).Hash.ToLowerInvariant() -cne $oldSha) { throw 'SHORTCUT_CLI_RESTORE_HASH_MISMATCH' }
             if ((Test-Path -LiteralPath $backup) -or (Test-Path -LiteralPath $quarantine)) { throw 'SHORTCUT_CLI_RESTORE_LEFT_TEMPORARY_FILES' }
 
@@ -98,8 +96,7 @@ jobs:
             $deleteSha = (Get-FileHash -LiteralPath $deletePath -Algorithm SHA256).Hash.ToLowerInvariant()
             $output = & $probe --shortcut-delete --owner-pid $PID --path $deletePath --sha256 $deleteSha
             $outputText = [string]($output -join "`n")
-            if ($LASTEXITCODE -ne 0 -or $outputText -notmatch '^SHORTCUT_OPERATION_OK --shortcut-delete
-) { throw ('SHORTCUT_CLI_DELETE_FAILED: ' + $outputText) }
+            if ($LASTEXITCODE -ne 0 -or -not ($outputText -match 'SHORTCUT_OPERATION_OK --shortcut-delete')) { throw ('SHORTCUT_CLI_DELETE_FAILED: ' + $outputText) }
             if (Test-Path -LiteralPath $deletePath) { throw 'SHORTCUT_CLI_DELETE_DID_NOT_REMOVE_FILE' }
 
             $protectedPath = Join-Path $probeDir 'wrong-parent.lnk'
