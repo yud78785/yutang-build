@@ -13,7 +13,7 @@ function blocked(reasonCode, videoId) {
     connectionMethod: 'upstream_connectExistingBrowser',
     comments: [], aiSummaryEntryVisible: false, aiSummaryGenerated: false,
     browserLaunchedByThisProbe: false, navigationByThisProbe: false,
-    clickedByThisProbe: false, wroteByThisProbe: false,
+    clickedByThisProbe: false, persistentDataModifiedByThisProbe: false,
   };
 }
 function videoRoute(value, expectedId) {
@@ -62,7 +62,7 @@ function validAiReceipt(receipt, expectedVideoId) {
  */
 export async function inspectExistingDedicatedDouyinVideoReadOnly({
   controller, readPageState, readCommentDom, observeComments, inspectSummary,
-  expectedVideoId, limit = 12, signal,
+  acquireReadLock, expectedVideoId, limit = 12, signal,
 } = {}) {
   if (typeof expectedVideoId !== 'string' || !VIDEO.test(expectedVideoId)) throw new TypeError('INVALID_VIDEO_ID');
   if (!Number.isInteger(limit) || limit < 1 || limit > 20) throw new TypeError('INVALID_LIMIT');
@@ -71,13 +71,40 @@ export async function inspectExistingDedicatedDouyinVideoReadOnly({
       typeof observeComments !== 'function' || typeof inspectSummary !== 'function') {
     throw new TypeError('PINNED_RUNTIME_READERS_REQUIRED');
   }
+  if (typeof acquireReadLock !== 'function')
+    return blocked('UPSTREAM_OPERATION_LOCK_REQUIRED', expectedVideoId);
   if (isAbort(signal)) return blocked('CANCELLED_BEFORE_READ', expectedVideoId);
   let browser;
   try { browser = await controller.connectExistingBrowser({ signal }); }
   catch { return blocked('EXISTING_BROWSER_CONNECTION_FAILED', expectedVideoId); }
   if (isAbort(signal)) return blocked('CANCELLED_AFTER_CONNECTION', expectedVideoId);
   if (!browser) return blocked('DEDICATED_BROWSER_NOT_RUNNING', expectedVideoId);
+  let release;
+  try { release = await acquireReadLock({ signal, controller }); }
+  catch { return blocked('UPSTREAM_OPERATION_LOCK_FAILED', expectedVideoId); }
+  if (typeof release !== 'function') return blocked('UPSTREAM_OPERATION_LOCK_UNVERIFIED', expectedVideoId);
+  let receipt;
+  try {
+    receipt = await inspectConnectedBrowserReadOnly({
+      browser, readPageState, readCommentDom, observeComments, inspectSummary,
+      expectedVideoId, limit, signal,
+    });
+  } catch { receipt = blocked('READ_ONLY_INSPECTION_UNEXPECTED_FAILURE', expectedVideoId); }
+  try { await release(); }
+  catch { return { ...blocked('UPSTREAM_OPERATION_LOCK_RELEASE_FAILED', expectedVideoId),
+    temporaryOperationLockUsed: true, temporaryOperationLockCleanupVerified: false }; }
+  if (!receipt || typeof receipt !== 'object') return blocked('READ_ONLY_RECEIPT_UNAVAILABLE', expectedVideoId);
+  // A temporary upstream tab-api lockfile is created and removed by the
+  // lock provider; the probe itself does not change Douyin or persistent data.
+  return { ...receipt, operationLock: 'upstream_tab_api_acquired_released',
+    temporaryOperationLockUsed: true, temporaryOperationLockCleanupVerified: true,
+    persistentDataModifiedByThisProbe: false };
+}
 
+async function inspectConnectedBrowserReadOnly({
+  browser, readPageState, readCommentDom, observeComments, inspectSummary,
+  expectedVideoId, limit, signal,
+}) {
   let contexts, pages;
   try {
     if (browser.isConnected?.() !== true) return blocked('BROWSER_NOT_CONNECTED', expectedVideoId);
@@ -175,6 +202,6 @@ export async function inspectExistingDedicatedDouyinVideoReadOnly({
     aiSummaryGenerated: false,
     aiSummaryText: null,
     browserLaunchedByThisProbe: false, navigationByThisProbe: false,
-    clickedByThisProbe: false, wroteByThisProbe: false,
+    clickedByThisProbe: false, persistentDataModifiedByThisProbe: false,
   };
 }
