@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import {validatePublicReceipt} from '../tools/windows147-online-public-probe.mjs';
+import {validatePublicReceipt, ownedEdgePids, trackedEdgeSurvivors} from '../tools/windows147-online-public-probe.mjs';
 const SHA='3201d433df727a5d5fddf8e68a0f69ea1654057e04cfad7833fd3ed7dc241a34';
 const s=fs.readFileSync(new URL('../tools/windows147-online-public-probe.mjs', import.meta.url),'utf8');
 const green={status:200,page:{origin:'https://www.douyin.com',ready:'complete',challenged:false,titleLength:8,bodyLength:220,bodyChildren:8,paintBytes:10000},sandbox:{rendererSandboxVerified:true,networkServiceWindowsTokenVerified:true,networkServiceLowIntegrityVerified:true,networkServiceProcessOwned:true},identity:{loopbackOnly:true,listenerMatchesEdge:true},cleaned:true};
@@ -39,4 +39,25 @@ test('success marker is logged only after final process and directory cleanup',(
   assert.match(s,/CANDIDATE_PROCESS_CLEANUP_UNVERIFIED/);
   assert.match(s,/CANDIDATE_DIRECTORY_CLEANUP_UNVERIFIED/);
   assert.doesNotMatch(s,/fs\.rm\(common,\{recursive:true,force:true\}\)\.catch\(\(\)=>\{\}\)/);
+});
+
+test('renderer without profile argument is tracked by verified parent lineage',()=>{
+ const rows=[
+  {ProcessId:10,ParentProcessId:1,Name:'node.exe'},
+  {ProcessId:11,ParentProcessId:10,Name:'msedge.exe',CommandLine:'--user-data-dir=C:\\candidate'},
+  {ProcessId:12,ParentProcessId:11,Name:'msedge.exe',CommandLine:'--type=renderer'},
+  {ProcessId:13,ParentProcessId:12,Name:'msedge.exe',CommandLine:'--type=utility'},
+  {ProcessId:90,ParentProcessId:1,Name:'msedge.exe',CommandLine:'--unrelated'}
+ ];
+ assert.deepEqual(ownedEdgePids(rows,10).sort((a,b)=>a-b),[11,12,13]);
+});
+test('orphaned renderer remains a blocker after its parent disappears',()=>{
+ const tracked=new Set([11,12,13]);
+ const survivors=trackedEdgeSurvivors([
+  {ProcessId:12,ParentProcessId:11,Name:'msedge.exe',CommandLine:'--type=renderer'},
+  {ProcessId:90,ParentProcessId:1,Name:'msedge.exe',CommandLine:'--other'}
+ ],tracked);
+ assert.deepEqual(survivors.map(r=>r.ProcessId),[12]);
+ assert.match(s,/trackedEdgeSurvivors\(procs,trackedEdgePids\)/);
+ assert.match(s,/trackedEdgeProcessCount:trackedEdgePids\.size/);
 });

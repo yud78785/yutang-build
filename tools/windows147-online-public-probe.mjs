@@ -8,7 +8,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
-import { createCandidateEnvironment, inspectRendererSandbox, verifyProcessSnapshot } from './windows_147_isolated_edge_lifecycle.mjs';
+import { createCandidateEnvironment, inspectRendererSandbox, verifyProcessSnapshot, hasHostAncestor } from './windows_147_isolated_edge_lifecycle.mjs';
 
 const NAME = 'Dafeiyu-Douyin-API-1.4.7-win-x64.exe';
 const SHA = '3201d433df727a5d5fddf8e68a0f69ea1654057e04cfad7833fd3ed7dc241a34';
@@ -158,7 +158,15 @@ async function closeDedicatedBrowser() {
     await bounded(closed,12000,'DEDICATED_BROWSER_CLOSE_TIMEOUT');
   } finally {try{ws.close();}catch{}}
 }
-async function waitCleanup({exePid,backendPid,hostPid,profile,controlDir}) {
+export function ownedEdgePids(rows, hostPid) {
+  return rows.filter(p=>/msedge\.exe$/i.test(String(p.Name||'')) &&
+    hasHostAncestor(Number(p.ProcessId), hostPid, rows)).map(p=>Number(p.ProcessId));
+}
+export function trackedEdgeSurvivors(rows, trackedEdgePids) {
+  return rows.filter(p=>/msedge\.exe$/i.test(String(p.Name||'')) &&
+    trackedEdgePids.has(Number(p.ProcessId)));
+}
+async function waitCleanup({exePid,backendPid,hostPid,profile,controlDir,trackedEdgePids=new Set()}) {
   return until(()=>{
     const procs=processes();
     const owned=procs.filter(p=>Number(p.ProcessId)===exePid ||
@@ -167,7 +175,7 @@ async function waitCleanup({exePid,backendPid,hostPid,profile,controlDir}) {
       String(p.CommandLine||'').toLowerCase().includes(controlDir.toLowerCase()) ||
       (/jobguard\.exe$/i.test(String(p.Name||'')) &&
         (Number(p.ParentProcessId)===exePid || Number(p.ParentProcessId)===hostPid)));
-    return !owned.length && listeners().length===0;
+    return !owned.length && trackedEdgeSurvivors(procs,trackedEdgePids).length===0 && listeners().length===0;
   },20000,'CANDIDATE_PROCESSES_OR_CDP_REMAIN');
 }
 export async function run(exe) {
@@ -192,6 +200,7 @@ export async function run(exe) {
   assert.ok(!('GITHUB_TOKEN' in env)&&!('GH_TOKEN' in env),'CI_CREDENTIAL_PROPAGATION');
   const child=spawn(exe,['--remote-debugging-port=0','--remote-debugging-address=127.0.0.1'],{env,windowsHide:true,shell:false,stdio:'ignore'});
   let childError=null,exited=false,hostPid=0,backendPid=0,cleaned=false;
+  const trackedEdgePids=new Set();
   child.once('error',e=>{childError=e;});child.once('exit',()=>{exited=true;});
   try {
     const desktop=await until(async()=>{
@@ -219,20 +228,29 @@ export async function run(exe) {
     assert.equal(path.resolve(state.profile).toLowerCase(),path.resolve(profile).toLowerCase(),'PROFILE_ISOLATION_FAILED');
     assert.equal(state.port,PORT,'CDP_PORT_MISMATCH');
     const sock=listeners();
-    const identity=verifyProcessSnapshot({processes:processes(),hostPid,profile,
+    const initialSnapshot=processes();
+    const identity=verifyProcessSnapshot({processes:initialSnapshot,hostPid,profile,
       listenerPids:sock.map(x=>Number(x.OwningProcess)),portAddresses:sock.map(x=>x.LocalAddress)});
+    for(const pid of ownedEdgePids(initialSnapshot,hostPid)) trackedEdgePids.add(pid);
+    assert.ok(trackedEdgePids.size>0,'CANDIDATE_EDGE_PROCESS_IDS_NOT_CAPTURED');
     const sandbox=await inspectRendererSandbox(PORT,{profile,hostPid});
     const online=await inspectOnlinePage();
+    for(const pid of ownedEdgePids(processes(),hostPid)) trackedEdgePids.add(pid);
     await closeDedicatedBrowser();
-    await until(()=>listeners().length===0 && !processes().some(p=>String(p.CommandLine||'').toLowerCase().includes(profile.toLowerCase())),20000,'BROWSER_NOT_CLEANED');
+    await until(()=>{
+      const rows=processes();
+      return listeners().length===0 &&
+        !rows.some(p=>String(p.CommandLine||'').toLowerCase().includes(profile.toLowerCase())) &&
+        trackedEdgeSurvivors(rows,trackedEdgePids).length===0;
+    },20000,'BROWSER_NOT_CLEANED');
     // Terminate ONLY the process handle spawned from this exact pinned EXE, not another app.
     if(!exited)child.kill();
-    cleaned=await waitCleanup({exePid:child.pid,backendPid,hostPid,profile,controlDir});
+    cleaned=await waitCleanup({exePid:child.pid,backendPid,hostPid,profile,controlDir,trackedEdgePids});
     const status=validatePublicReceipt({status:online.status,page:online.page,sandbox,identity,cleaned});
     const receipt={status,exeSha256:SHA,exeBytes:BYTES,sourceCandidate:'9cc16d7e64d59dc141e9c6687b8dd461934fcc35',
       documentHttpStatus:online.status,renderedPage:true,rendererSandboxVerified:true,
       networkServiceAppContainer:true,networkServiceLowIntegrity:true,cdpLoopbackOnly:true,
-      noResidualCandidateProcesses:true,accountUsed:false,modelKeyUsed:false,videoPlaybackClaimed:false,
+      noResidualCandidateProcesses:true,trackedEdgeProcessCount:trackedEdgePids.size,accountUsed:false,modelKeyUsed:false,videoPlaybackClaimed:false,
       personalComputerAcceptance:false,releaseAuthorized:false};
     return receipt;
   } catch(error) {
@@ -242,7 +260,7 @@ export async function run(exe) {
     if(!exited)try{child.kill();}catch{}
     let cleanupError=null;
     try {
-      await waitCleanup({exePid:child.pid,backendPid,hostPid,profile,controlDir});
+      await waitCleanup({exePid:child.pid,backendPid,hostPid,profile,controlDir,trackedEdgePids});
       cleaned=true;
     } catch { cleanupError=new Error('CANDIDATE_PROCESS_CLEANUP_UNVERIFIED'); }
     if(cleaned) {
