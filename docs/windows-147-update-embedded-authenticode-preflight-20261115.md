@@ -48,3 +48,10 @@ Microsoft sources:
 A real future update-enabled candidate must embed a separately authenticated Ed25519 public key and the actual publisher fingerprint, be signed by a real Code Signing certificate and timestamped, receive a **new SHA-256**, and then pass exact Windows 2022 and Windows 2025 packaged startup, Renderer/Network sandbox, process cleanup, embedded-signature/Windows catalog refusal, manifest signature, download, health, install, and rollback checks. The new EXE **does not inherit** the old EXE's passing acceptance. The current 1.4.7 updater remains fail closed because its trust key and publisher pin are empty. Certum validation and purchase remain uncompleted.
 
 **Administrative boundary:** no certificate purchase/identity submission, no private keys, no personal PC changes, no GitHub Actions run, no `main` merge, no published release, no automatic update activation.
+
+
+## Supplement: exact production verifier functions exercised
+
+Beyond the local isolated fixture, the two functions at the exact source blobs above were extracted from GitHub, compiled with no original module side effects, and run with injected PowerShell outputs. Old service/launcher accepted a response reporting Valid + exact publisher thumbprint + Catalog; the new service/launcher both rejected that response. They accepted only Valid + Authenticode + matching publisher and failed closed for missing SignatureType, unsigned, wrong signer, malformed response, absent publisher pin and non-Windows. **16 of 16 exact-function simulated checks passed.** This is stronger than a manually duplicated fixture, but still does not prove the full module, packaged updater, native Windows trust, or real download/install behavior.
+
+Drive backup for the independent contract ZIP (verified by downloading and rehashing): https://drive.google.com/file/d/1ccZE_2Zdz6zUi75dJaM3VqNAML78hfDd/view?usp=drivesdk . The local ZIP and re-downloaded Drive ZIP both have SHA-256 9edcc451503966516b7d414d80c66ede2dd0278576a2c46eed467f0180093714.

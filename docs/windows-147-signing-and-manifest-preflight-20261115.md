@@ -110,3 +110,14 @@ The actual update-service `tools/windows147-update-patched/update-service.mjs` h
 - **Still blocked:** the expected public-key pin must be independently derived from the **exact future update-enabled, accepted client**, not copied from whatever local key the signer happens to choose. The currently accepted unsigned original EXE (SHA-256 `3201d433df727a5d5fddf8e68a0f69ea1654057e04cfad7833fd3ed7dc241a34`) intentionally has no trust key; signing it without rebuilding cannot enable the updater.
 - This V4 test uses only a synthetic EXE, temporary Ed25519 keys and mock Windows Authenticode/SignTool responses. It has **not** verified native SignTool, the Certum CA, a real signed EXE, the packaged future public key, or real upgrade/rollback. No additional Windows CI was authorized.
 - No certificate purchased; no passport, address, passwords or keys uploaded. No `main` change, merge, published Release, or automatic update activation. The Windows 2025 fifth-run success `43643545361` remains tied exclusively to the old unsigned SHA.
+
+
+## 10. Production updater's embedded-only Authenticode gate — CURRENT NEXT RELEASE SOURCE
+
+- Experimental source commit: 2a62fecd2e14b3279ee9c7566a4eea4021879e95.
+- Real service/launcher source blobs: 910a0fd449bd334687cd24c56a8e563a2de026b6 and 0d1c5606c151964287edd83cc43431eb68a24d0c.
+- Changed future update consumer check to require Windows PowerShell's SignatureType=Authenticode together with Valid and the pinned publisher thumbprint; catalog signatures must not satisfy acceptance. This does NOT require SignTool on end-user computers.
+- Existing update trust test file Git blob: c2b26fa1556c8b5018b42b29e1f6f36fa92787a3 (adds 16 cases; existing tests retained).
+- TWO bounded source-only verifications performed: local Linux Node 22.16.0 isolated verifier harness 16/16; and direct execution of each exact GitHub production verifier function for 16 simulated cases 16/16. The exact-function comparison reproduced that both OLD implementations accepted an otherwise Valid Catalog signature, while the patched implementations rejected it.
+- Isolated harness ZIP SHA-256: 9edcc451503966516b7d414d80c66ede2dd0278576a2c46eed467f0180093714. Uploaded to owner-only Drive https://drive.google.com/file/d/1ccZE_2Zdz6zUi75dJaM3VqNAML78hfDd/view?usp=drivesdk ; Drive download SHA-256 matches original.
+- See docs/windows-147-update-embedded-authenticode-preflight-20261115.md. **Full repository test suite and Windows-native/real signed EXE tests have NOT been executed**, and no new EXE was built. Existing unsigned original EXE acceptance remains bound to SHA-256 3201d433df727a5d5fddf8e68a0f69ea1654057e04cfad7833fd3ed7dc241a34. No new Windows GitHub Actions launched; no main change, signature, or release.
