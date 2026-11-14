@@ -16,6 +16,11 @@ on:
       - tools/jobguard/guard_request.go
       - tools/jobguard/args.go
       - tools/jobguard/go.mod
+      - tools/windows147-update-patched/update-transaction.mjs
+      - tools/windows147-update-patched/update-launcher.mjs
+      - tools/apply_windows147_update_trust_patch.mjs
+      - tests/windows147-update-transaction.test.mjs
+      - tests/windows147-update-trust.test.mjs
   workflow_dispatch:
 
 permissions:
@@ -53,6 +58,11 @@ jobs:
         with:
           go-version: '1.23.2'
 
+      - name: Set up pinned Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24.17.0
+
       - name: Run native Windows shortcut handle tests
         shell: pwsh
         working-directory: tools/jobguard
@@ -68,6 +78,18 @@ jobs:
           $sha = (Get-FileHash -LiteralPath shortcut-handle-probe.exe -Algorithm SHA256).Hash.ToLowerInvariant()
           Write-Host ('SHORTCUT_HANDLE_PROBE_SHA256=' + $sha)
           $probe = (Resolve-Path -LiteralPath 'shortcut-handle-probe.exe').Path
+          $env:YUTANG_JOBGUARD_PATH = $probe
+          $env:YUTANG_JOBGUARD_SHA256 = $sha
+          node --check (Join-Path $env:GITHUB_WORKSPACE 'tools/windows147-update-patched/update-transaction.mjs')
+          if ($LASTEXITCODE -ne 0) { throw 'UPDATE_TRANSACTION_NODE_SYNTAX_FAILED' }
+          node --check (Join-Path $env:GITHUB_WORKSPACE 'tools/windows147-update-patched/update-launcher.mjs')
+          if ($LASTEXITCODE -ne 0) { throw 'UPDATE_LAUNCHER_NODE_SYNTAX_FAILED' }
+          node --check (Join-Path $env:GITHUB_WORKSPACE 'tools/apply_windows147_update_trust_patch.mjs')
+          if ($LASTEXITCODE -ne 0) { throw 'UPDATE_PATCHER_NODE_SYNTAX_FAILED' }
+          Push-Location $env:GITHUB_WORKSPACE
+          node --test tests/windows147-update-transaction.test.mjs tests/windows147-update-trust.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'NATIVE_SHORTCUT_UPDATER_NODE_REGRESSIONS_FAILED' }
+          Pop-Location
           $probeDir = Join-Path $env:TEMP ('yutang-shortcut-cli-' + [guid]::NewGuid().ToString('N'))
           New-Item -ItemType Directory -Path $probeDir | Out-Null
           try {
