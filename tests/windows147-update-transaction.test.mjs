@@ -69,6 +69,7 @@ async function fixture(t) {
   await fs.writeFile(shortcut, 'old shortcut');
   await fs.writeFile(staged, 'new shortcut');
   await fs.writeFile(target, Buffer.concat([Buffer.from('MZ'), Buffer.alloc(2046, 1)]));
+  const stagedShortcutSha256 = hash(await fs.readFile(staged));
   const transaction = await beginUpdateTransaction({
     updatesDirectory: updates,
     shortcut,
@@ -76,10 +77,41 @@ async function fixture(t) {
     backupShortcut: backup,
     targetExe: target,
     targetExeSha256: hash(await fs.readFile(target)),
+    expectedStagedShortcutSha256: stagedShortcutSha256,
     nonce
   });
-  return { updates, desktop, shortcut, staged, backup, temporary, target, nonce, transaction };
+  return { updates, desktop, shortcut, staged, stagedShortcutSha256, backup, temporary, target, nonce, transaction };
 }
+
+
+test('事务准备拒绝与 Electron 主进程固定 SHA 不一致的暂存快捷方式', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'yutang-update-transaction-staged-pin-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const updates = path.join(root, 'updates'), desktop = path.join(root, 'desktop');
+  await fs.mkdir(updates);
+  await fs.mkdir(desktop);
+  const shortcut = path.join(desktop, 'YuTang.lnk');
+  const nonce = '12345678-1234-4234-8234-123456789abc';
+  const stagedShortcut = path.join(updates, '.shortcut-' + nonce + '.lnk');
+  const backupShortcut = path.join(desktop, '.YuTang.lnk.' + nonce + '.bak.lnk');
+  const targetExe = path.join(updates, 'Dafeiyu-Douyin-API-1.4.8-win-x64.exe');
+  await fs.writeFile(shortcut, 'old shortcut');
+  await fs.writeFile(stagedShortcut, 'tampered shortcut');
+  await fs.writeFile(targetExe, Buffer.concat([Buffer.from('MZ'), Buffer.alloc(2046, 1)]));
+  await assert.rejects(beginUpdateTransaction({
+    updatesDirectory: updates,
+    shortcut,
+    stagedShortcut,
+    backupShortcut,
+    targetExe,
+    targetExeSha256: hash(await fs.readFile(targetExe)),
+    expectedStagedShortcutSha256: hash(Buffer.from('new shortcut')),
+    nonce
+  }), /UPDATE_STAGED_SHORTCUT_IDENTITY_MISMATCH/);
+  assert.equal(await fs.readFile(shortcut, 'utf8'), 'old shortcut');
+  assert.equal(await fs.readFile(stagedShortcut, 'utf8'), 'tampered shortcut');
+  assert.equal(await fs.access(path.join(updates, 'update-transaction.json')).then(() => true, () => false), false);
+});
 
 test('提交前验证旧入口与暂存入口哈希，再切换并保留旧入口备份', async t => {
   const f = await fixture(t);
