@@ -67,7 +67,7 @@ test('inner desktop stop target is verified by exact wrapper and API Job Object 
  const exe='C:\\candidate\\Dafeiyu-Douyin-API-1.4.7-win-x64.exe';
  const rows=[
   {ProcessId:100,ParentProcessId:1,Name:'Dafeiyu-Douyin-API-1.4.7-win-x64.exe',ExecutablePath:path.resolve(exe)},
-  {ProcessId:101,ParentProcessId:100,Name:'\u5927\u80a5\u9c7c\u6296\u97f3\u52a9\u624b.exe',ExecutablePath:'C:\\tmp\\inner.exe'},
+  {ProcessId:101,ParentProcessId:100,Name:'\u5927\u80a5\u9c7c\u6296\u97f3\u52a9\u624b.exe',ExecutablePath:path.resolve('fixture','\u5927\u80a5\u9c7c\u6296\u97f3\u52a9\u624b.exe')},
   {ProcessId:102,ParentProcessId:101,Name:'node.exe',CommandLine:'node api-worker.mjs'},
   {ProcessId:103,ParentProcessId:101,Name:'jobguard.exe',CommandLine:'jobguard --owner-pid 101 --target-pid 102'}
  ];
@@ -106,4 +106,22 @@ test('early error path attempts exact verified cleanup, never blind inner-proces
  assert.match(s,/desktopTarget=verifyDesktopStopTarget\(remainingRows/);
  assert.match(s,/EARLY_DESKTOP_IDENTITY_NOT_VERIFIED/);
  assert.match(s,/stopVerifiedDesktop\(desktopTarget\)/);
+});
+
+test('missing, relative or mismatched Electron executable path cannot authorize taskkill',()=>{
+ const exe='C:\\candidate\\Dafeiyu-Douyin-API-1.4.7-win-x64.exe';
+ const rows=[
+  {ProcessId:100,ParentProcessId:1,Name:'Dafeiyu-Douyin-API-1.4.7-win-x64.exe',ExecutablePath:path.resolve(exe)},
+  {ProcessId:101,ParentProcessId:100,Name:'\u5927\u80a5\u9c7c\u6296\u97f3\u52a9\u624b.exe',ExecutablePath:path.resolve('fixture','\u5927\u80a5\u9c7c\u6296\u97f3\u52a9\u624b.exe')},
+  {ProcessId:102,ParentProcessId:101,Name:'node.exe',CommandLine:'node api-worker.mjs'},
+  {ProcessId:103,ParentProcessId:101,Name:'jobguard.exe',CommandLine:'jobguard --owner-pid 101 --target-pid 102'}
+ ];
+ const opts={exePid:100,exeFile:exe,backendPid:102};
+ assert.equal(verifyDesktopStopTarget(rows,opts).pid,101);
+ for(const bad of [null,'','relative.exe',path.resolve('other','unrelated.exe')]){
+  const mutated=rows.map(r=>r.ProcessId===101?{...r,ExecutablePath:bad}:r);
+  assert.throws(()=>verifyDesktopStopTarget(mutated,opts),/INNER_ELECTRON_IMAGE_PATH_NOT_VERIFIED/);
+ }
+ assert.match(s,/path\.isAbsolute\(target\.executablePath\)/);
+ assert.match(s,/INNER_ELECTRON_IMAGE_PATH_NOT_VERIFIED/);
 });

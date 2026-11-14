@@ -181,11 +181,17 @@ export function verifyDesktopStopTarget(rows, {exePid, exeFile, backendPid}) {
   const desktop=rows.find(r=>Number(r.ProcessId)===desktopPid);
   assert.ok(desktop && String(desktop.Name)==='\u5927\u80a5\u9c7c\u6296\u97f3\u52a9\u624b.exe' &&
     hasHostAncestor(desktopPid,exePid,rows), 'INNER_ELECTRON_IDENTITY_NOT_VERIFIED');
+  // A matching PID and process name alone never authorize terminating an executable.
+  // An unreadable or relative image path must fail closed, before taskkill can run.
+  const desktopImage=String(desktop.ExecutablePath||'');
+  assert.ok(path.isAbsolute(desktopImage) &&
+    path.basename(desktopImage)==='\u5927\u80a5\u9c7c\u6296\u97f3\u52a9\u624b.exe',
+    'INNER_ELECTRON_IMAGE_PATH_NOT_VERIFIED');
   const guards=rows.filter(r=>/jobguard\.exe$/i.test(String(r.Name||''))&&Number(r.ParentProcessId)===desktopPid);
   assert.equal(guards.length,1,'DESKTOP_JOB_GUARD_NOT_VERIFIED');
   assert.match(String(guards[0].CommandLine||''),new RegExp('--owner-pid\\s+'+desktopPid+'\\s+--target-pid\\s+'+backendPid+'(?:\\s|$)','i'),
     'DESKTOP_JOB_GUARD_PAIR_MISMATCH');
-  return {pid:desktopPid,executablePath:String(desktop.ExecutablePath||'')};
+  return {pid:desktopPid,executablePath:desktopImage};
 }
 function stopVerifiedDesktop(target) {
   if (!target) return false;
@@ -193,7 +199,10 @@ function stopVerifiedDesktop(target) {
   if (!current) return false;
   assert.equal(String(current.Name),'\u5927\u80a5\u9c7c\u6296\u97f3\u52a9\u624b.exe',
     'INNER_ELECTRON_CHANGED_BEFORE_STOP');
-  assert.equal(String(current.ExecutablePath||'').toLowerCase(),target.executablePath.toLowerCase(),
+  assert.ok(typeof target.executablePath==='string' && path.isAbsolute(target.executablePath) &&
+    String(current.ExecutablePath||'').length>0 && path.isAbsolute(String(current.ExecutablePath)),
+    'INNER_ELECTRON_IMAGE_PATH_NOT_VERIFIED');
+  assert.equal(String(current.ExecutablePath).toLowerCase(),target.executablePath.toLowerCase(),
     'INNER_ELECTRON_IMAGE_CHANGED_BEFORE_STOP');
   // Matches the previously accepted Windows EXE lifecycle check: exact inner desktop PID, never /T.
   execFileSync('taskkill.exe',['/PID',String(target.pid),'/F'],{windowsHide:true,timeout:10000,stdio:'ignore'});
