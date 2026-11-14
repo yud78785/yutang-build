@@ -365,4 +365,50 @@ Windows 2022 和 Windows 2025 均执行了：
 
 签名仍为 NotSigned；Ed25519 公钥与 Publisher thumbprint 未配置；自动更新保持 fail closed。正式发行主体确认签名资格后，才进入签名、真实在线升级、错误签名拒绝、启动失败回滚和用户数据保留 E2E。正式 Release 仍需单独授权。
 
+## 12. 2026-11-14 最新发布基线与塞尔维亚个人证书采购门槛
 
+本节为签名发布手册的最新状态，**优先于第 11 节的历史候选/排队状态**。前面旧 Run/旧 SHA 的记录保留作审计，不替代本节最新候选的验收。
+
+### 12.1 已完成且有真实 Windows 证据的项目
+
+- 最新已验收未签名 EXE 源码提交：`9cc16d7e64d59dc141e9c6687b8dd461934fcc35`。
+- [原 Windows 2022/2025 及同一 EXE 交叉验收 Run 43541915930](https://github.com/yud78785/yutang-build/actions/runs/43541915930)：完成、成功。Windows 2025 EXE Artifact `14092434238`；2022 独立构建 Artifact `14092741259` **SHA 不同**，不能混用；2022 对 2025 同一 EXE 的交叉回执 Artifact `14093021418`。
+- **唯一已确认的跨平台同一未签名 EXE：** `Dafeiyu-Douyin-API-1.4.7-win-x64.exe`，大小 `125446071` 字节，SHA-256 `3201d433df727a5d5fddf8e68a0f69ea1654057e04cfad7833fd3ed7dc241a34`。
+- 首次无签名 Windows PowerShell 预检查 [Run 43604551515](https://github.com/yud78785/yutang-build/actions/runs/43604551515)：**2022/2025 都失败**，`SIGNER_SCRIPT_SHA256_MISMATCH`；不得删除或改写该失败结果。
+- 增加 `.gitattributes` 强制签名脚本 LF 的修复提交：`27da129f96a2e7a343933147096cab947b0f2293`。
+- 第二次真实 Windows 无签名 PowerShell 预检查 [Run 43605324285](https://github.com/yud78785/yutang-build/actions/runs/43605324285)：**2022 job 132478620160、2025 job 132478619894 均 completed/success**。两份原始日志分别回报 `PASS_WINDOWS_POWERSHELL_NOSIGN_ONLY`、上述 EXE SHA 和不变的签名脚本 SHA `2d4285879872bd2ae26592c0473ad111b11aa77b9a304facd9e3536b23c482b1`；拒绝坏哈希/改名/篡改/缺失，原 EXE 不变，输出目录为空。此项**不**证明真实证书签名或签名后 EXE 运行。
+- [双平台真实回执和失败原因归档](https://github.com/yud78785/yutang-build/blob/experiment/windows-147-nosign-eol-retest-template-20261114/docs/windows-147-nosign-preflight-real-windows-acceptance-20261114.md)。
+
+### 12.2 Certum Individual Cloud Code Signing：官网核实（2026-11-14）
+
+| 事项 | 可核实事实 | 仍需书面确认 |
+| --- | --- | --- |
+| 产品 | SSLmentor.rs 的 Certum Individual Cloud CODE；面向个人开发者，非公司证书 | 塞尔维亚居住的自然人在实际证件/住址条件下能否签发；允许的公开发行/商业用途 |
+| 1、2、3 年报价 | €117、€218、€291，均**未含 VAT/PDV** | **塞尔维亚自然人 B2C 最终实付含税总额**；不得把塞尔维亚公司 B2B 的免税说明套给个人 |
+| 必要验证 | 身份证件照片/人脸识别、住址证明（如水电/固定网络账单），其他材料视核验决定；经销商 FAQ 原则支持非制裁国家的个人 | 具体身份证件、非本人名下账单、租约/银行流水能否接受 |
+| 公开身份 | 个人真实姓名出现在 CN 和 O，另有城市 L、地区 ST、国家 C；不显示完整街道地址 | 申请人是否接受姓名及地区公开；**没有匿名的个人公开可信代码签名** |
+| 生命周期 | Certum 官方：2026-02-27 起实际最长 **459 天**，CA/B 通则 460 天；多年产品需免费重新签发，可能因身份资料过期重新核验 | 重签实际流程、收费/退款、是否必须更换发布者证书指纹 |
+| 签名方式 | SimplySign Desktop 通过手机一次性授权进行 SignTool 手动签名；约 2 小时会话；云端私钥不可导出 PFX | 实际证书链、时间戳 RFC3161、Windows 端签名实测；无需假设支持无人值守 CI |
+| 退款 | SSLmentor CODE 退款条款有 30 天窗口，但验证中断/异常有至少约 25% 扣费条款，未完成 30 天可有手续费及最低 €10 管理费用 | **验证失败、未完成、撤销的逐项最终退款金额**，不能仅以“30 天可退款”下单 |
+
+官方及经销商可复核来源：
+- [SSLmentor.rs — Individual 产品与不含税价格](https://www.sslmentor.rs/certum/certumcodecloudindividual)
+- [SSLmentor.rs — VAT/PDV 规则](https://www.sslmentor.rs/ssl/tc-vat)
+- [SSLmentor.rs — CODE 产品退款条款](https://www.sslmentor.rs/ssl/tc-mbg)
+- [SSLmentor.rs — 联系渠道](https://www.sslmentor.rs/contact)，客服 `info@sslmentor.rs`
+- [Certum — 2026 年代码签名证书有效期缩短公告](https://www.certum.eu/en/news/shortening-code-signing-certificate-validity/)
+- [Certum — Standard Code Signing 所需身份与地址材料](https://support.certum.eu/en/code-signing-required-documents/)
+- [Certum — 续期流程](https://support.certum.eu/en/how-to-renew-code-signing/)
+- [SSLmentor — SimplySign / PFX / CI/CD FAQ](https://www.sslmentor.rs/certum/certumcodecloud)
+
+**当前决策：** 先选一年的 Certum Individual 产品作为待核实首选，暂不购买三年期。原因：最终 B2C VAT、退款、证件材料和公开身份尚未经经销商正式确认；多年期重签还涉及发布者指纹轮换、更新器信任策略及新签名后二次 Windows 验收。此为产品选择建议，**不是支付授权，也不是签发资格确认**。
+
+### 12.3 发布阻塞和不得越过的界限
+
+1. 供应商书面确认尚未取得；不要用自动生成的标价替代真实发票/报价，不要在仓库、聊天或 CI 里上传个人证件、人脸、PIN、TOTP、私钥或 PFX。
+2. 没有已签发的真实 Certum 证书；没有运行过 SimplySign + Microsoft SignTool 对 EXE 副本进行真实 Authenticode 签名。
+3. 没有**签名后的新 EXE SHA-256**。未经新的签名版 Windows 2022 与 2025 实际安全/生命周期验收，严禁把本节 unsigned EXE 或 no-sign PowerShell PASS 算作签名版通过。
+4. 已审查的签名候选登记表仍为空；`UPDATE_MANIFEST_PUBLIC_KEY` 与 `UPDATE_PUBLISHER_THUMBPRINT` 保持空字符串，自动更新继续 fail closed。
+5. 真正联网下载、错误签名拒绝、升级、用户数据保留和崩溃回滚仍待签名后单独测试。没有合并 `main`、签名发布或正式 Release。
+
+下一项**可执行外部动作**是由用户核准并发送现有的 SSLmentor 询价邮件，取得书面回复后再选择证书；没有必要继续重复已通过的无签名 Windows 测试。
