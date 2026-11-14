@@ -144,20 +144,6 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw ('UPDATE_TRUST_PATCHED_SOURCE_SYNTAX_FAILED: ' + $file) }
           }
 
-      - name: Run YuTang updater trust and rollback template tests
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          node --test tests/windows147-update-trust.test.mjs
-          if ($LASTEXITCODE -ne 0) { throw 'YU TANG UPDATE TRUST AND HEALTH ROLLBACK TESTS FAILED' }
-
-      - name: Run YuTang update transaction crash recovery tests
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          node --test tests/windows147-update-transaction.test.mjs
-          if ($LASTEXITCODE -ne 0) { throw 'YU TANG UPDATE TRANSACTION RECOVERY TESTS FAILED' }
-
       - name: Build and test Windows Job Object helper
         shell: pwsh
         run: |
@@ -177,6 +163,20 @@ jobs:
           Write-Host ('WINDOWS_JOBGUARD_SHA256=' + $guardSha)
           Write-Host ('WINDOWS_JOBGUARD_PATH=' + $guardPath)
           Pop-Location
+
+      - name: Run YuTang updater trust and rollback template tests
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node --test tests/windows147-update-trust.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'YU TANG UPDATE TRUST AND HEALTH ROLLBACK TESTS FAILED' }
+
+      - name: Run YuTang update transaction crash recovery tests
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node --test tests/windows147-update-transaction.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'YU TANG UPDATE TRANSACTION RECOVERY TESTS FAILED' }
 
       - name: Install exact-lockfile project, desktop and UI dependencies
         shell: pwsh
