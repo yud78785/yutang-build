@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import {inspectExistingDedicatedDouyinVideoReadOnly as inspect} from '../tools/douyin-existing-browser-readonly.mjs';
 const id='7512345678901234567';
 const address=`https://www.douyin.com/video/${id}`;
-function make({urls=[address],labels=['deepseek-douyin-api'],connected=true,contextsCount=1,abort,commentStatus='ok',aiStatus='entry_visible',mutate,afterStart}={}){
+function make({urls=[address],labels=['deepseek-douyin-api'],connected=true,contextsCount=1,abort,commentStatus='ok',aiStatus='entry_visible',mutate,afterStart,lockFail=false,releaseFail=false}={}){
  const calls=[],pages=urls.map((url,i)=>({
   _url:url,_label:labels[i]||'no-owner',_closed:false,_epoch:1000000,
   url(){calls.push('page.url');return this._url},isClosed(){calls.push('page.isClosed');return this._closed},
@@ -28,7 +28,11 @@ function make({urls=[address],labels=['deepseek-douyin-api'],connected=true,cont
  const inspectSummary=async opts=>{calls.push('ai-entry.read');assert.equal(opts.page,pages[0]);if(mutate==='afterSummary')pages[0]._closed=true;if(mutate==='reloadSameUrl')pages[0]._epoch+=1;
   if(mutate==='addOwnedTabAfterSummary')pages.push({...pages[0],_url:'https://www.douyin.com/video/7523456789012345678'});
   return aiStatus==='blocked'?{status:'blocked',reasonCode:'AI_FRAME_CHANGED_AFTER_READ'}:{status:aiStatus,videoId:id,evidenceSource:'visible_official_ai_iframe_entry_only',matchingFrameCount:aiStatus==='entry_visible'?1:0,aiSummaryEntryVisible:aiStatus==='entry_visible',aiSummaryGenerated:false,aiSummaryText:null};};
- const run=()=>inspect({controller,readPageState,readCommentDom,observeComments,inspectSummary,expectedVideoId:id,signal:abort});
+ const acquireReadLock=async()=>{
+  calls.push('lock.acquire');if(lockFail)throw Error('SECRETS MUST NOT LEAK');
+  return async()=>{calls.push('lock.release');if(releaseFail)throw Error('SECRET LOCK RELEASE ERROR')};
+ };
+ const run=()=>inspect({controller,readPageState,readCommentDom,observeComments,inspectSummary,acquireReadLock,expectedVideoId:id,signal:abort});
  return{run,calls,browser,controller,pages};
 }
 
@@ -38,6 +42,12 @@ test('positive inspection only calls the EXISTING-browser connector and read met
  assert.equal(r.browserLaunchedByThisProbe,false);assert.equal(r.clickedByThisProbe,false);assert.equal(r.navigationByThisProbe,false);
  assert.ok(f.calls.includes('controller.connectExistingBrowser'));
  assert.ok(f.calls.includes('comments.read'));assert.ok(f.calls.includes('ai-entry.read'));
+ assert.equal(r.operationLock,'upstream_tab_api_acquired_released');
+ assert.equal(r.temporaryOperationLockUsed,true);assert.equal(r.persistentDataModifiedByThisProbe,false);
+ assert.equal(f.calls.filter(x=>x==='lock.acquire').length,1);
+ assert.equal(f.calls.filter(x=>x==='lock.release').length,1);
+ assert.ok(f.calls.indexOf('lock.acquire')<f.calls.indexOf('comments.read'));
+ assert.ok(f.calls.indexOf('lock.release')>f.calls.indexOf('ai-entry.read'));
 });
 test('browser disconnected fails without looking at pages',async()=>{
  const f=make({connected:false}),r=await f.run();assert.equal(r.reasonCode,'BROWSER_NOT_CONNECTED');assert.ok(!f.calls.includes('context.pages'));
@@ -119,12 +129,38 @@ test('malformed or mismatched read-only receipts are rejected', async()=>{
  const f=make();
  const result=await f.run();assert.equal(result.status,'read_only_evidence');
  // An injected reader cannot return an unrelated video or made-up summary.
- const badComment=await inspect({controller:f.controller,expectedVideoId:id,readPageState:()=>{},readCommentDom:()=>{},
+ const badComment=await inspect({controller:f.controller,acquireReadLock:async()=>()=>{},expectedVideoId:id,readPageState:()=>{},readCommentDom:()=>{},
   observeComments:async()=>({status:'ok',videoId:'wrong',comments:[{text:'private',commentId:null}],visibleCommentCount:1}),
   inspectSummary:async()=>({status:'entry_visible'})});
  assert.equal(badComment.reasonCode,'PUBLIC_COMMENT_RECEIPT_INVALID');assert.deepEqual(badComment.comments,[]);
- const badAi=await inspect({controller:f.controller,expectedVideoId:id,readPageState:()=>{},readCommentDom:()=>{},
+ const badAi=await inspect({controller:f.controller,acquireReadLock:async()=>()=>{},expectedVideoId:id,readPageState:()=>{},readCommentDom:()=>{},
   observeComments:async()=>({status:'no_visible_comments',videoId:id,source:'visible_public_comment_dom',observationScope:'currently_visible_loaded_rows_only',comments:[],visibleCommentCount:0}),
   inspectSummary:async()=>({status:'entry_visible',videoId:id,evidenceSource:'visible_official_ai_iframe_entry_only',matchingFrameCount:1,aiSummaryEntryVisible:true,aiSummaryGenerated:true,aiSummaryText:'fabricated'})});
  assert.equal(badAi.reasonCode,'AI_ENTRY_RECEIPT_INVALID');assert.deepEqual(badAi.comments,[]);
+});
+
+test('missing concurrency lock provider fails closed BEFORE browser connection',async()=>{
+ let touched=false;
+ const controller={async connectExistingBrowser(){touched=true;throw Error('should not connect')}};
+ const r=await inspect({controller,expectedVideoId:id,readPageState:()=>{},readCommentDom:()=>{},
+  observeComments:()=>{},inspectSummary:()=>{}});
+ assert.equal(r.reasonCode,'UPSTREAM_OPERATION_LOCK_REQUIRED');assert.equal(touched,false);
+});
+test('exclusive lock is required and unavailable/busy lock cannot read comments',async()=>{
+ const failed=make({lockFail:true});const r=await failed.run();
+ assert.equal(r.reasonCode,'UPSTREAM_OPERATION_LOCK_FAILED');assert.equal(r.status,'blocked');
+ assert.ok(!failed.calls.includes('comments.read'));
+ assert.doesNotMatch(JSON.stringify(r),/SECRETS/);
+});
+test('release failure must invalidate otherwise verified public evidence',async()=>{
+ const failed=make({releaseFail:true});const r=await failed.run();
+ assert.equal(r.reasonCode,'UPSTREAM_OPERATION_LOCK_RELEASE_FAILED');
+ assert.deepEqual(r.comments,[]);assert.equal(r.status,'blocked');
+ assert.ok(failed.calls.includes('comments.read'));assert.ok(failed.calls.includes('lock.release'));
+ assert.doesNotMatch(JSON.stringify(r),/SECRET/);
+});
+test('blocked comment read still invokes upstream release exactly once',async()=>{
+ const f=make({commentStatus:'blocked'}),r=await f.run();
+ assert.equal(r.reasonCode,'COMMENT_LOGIN_REQUIRED');
+ assert.deepEqual(f.calls.filter(x=>x==='lock.release'),['lock.release']);
 });
