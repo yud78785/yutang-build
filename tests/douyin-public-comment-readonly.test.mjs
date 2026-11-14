@@ -106,3 +106,16 @@ test('invalid limit and arguments never touch browser',async()=>{
  await assert.rejects(observePublicCommentsReadOnly({page,readPageState:()=>{},readCommentDom:()=>{},expectedVideoId:id,limit:21}),/INVALID_COMMENT_LIMIT/);
  assert.equal(evaluated,false);
 });
+
+test('conflicting modal_id or aweme_id never matches an otherwise valid video detail URL',()=>{
+ for(const key of ['modal_id','aweme_id']){
+  const bad={...state,url:`https://www.douyin.com/video/${id}?${key}=7523456789012345678`};
+  assert.equal(inspect({stateBefore:bad}).reasonCode,'PAGE_VIDEO_ROUTE_UNVERIFIED');
+  const good={...state,url:`https://www.douyin.com/video/${id}?${key}=${id}`};
+  assert.equal(inspect({stateBefore:good,stateAfter:good}).status,'ok');
+ }
+});
+test('non-boolean pending status cannot be silently treated as a published comment',()=>{
+ const r=inspect({commentRows:{rows:[{...row('尚未发布'),pending:'true'}]}});
+ assert.equal(r.status,'blocked');assert.deepEqual(r.comments,[]);
+});
