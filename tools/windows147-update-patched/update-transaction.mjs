@@ -10,13 +10,12 @@ const VERSIONED_EXE = /^Dafeiyu-Douyin-API-\d+\.\d+\.\d+-win-x64\.exe$/;
 const PHASES = ['prepared', 'switching', 'switched', 'committed'];
 const NATIVE_HELPER_MAX_BYTES = 64 * 1024 * 1024;
 
-export async function runNativeShortcutOperation(operation, values, {
+export async function verifyNativeShortcutHelper(
   nativeHelperPath = process.env.YUTANG_JOBGUARD_PATH,
   nativeHelperSha256 = process.env.YUTANG_JOBGUARD_SHA256
-} = {}) {
+) {
   if (process.platform !== 'win32') throw new Error('NATIVE_SHORTCUT_HELPER_WINDOWS_ONLY');
-  if (!['--shortcut-commit', '--shortcut-restore', '--shortcut-delete'].includes(operation) ||
-      !path.isAbsolute(nativeHelperPath || '') || !HASH.test(nativeHelperSha256 || '')) {
+  if (!path.isAbsolute(nativeHelperPath || '') || !HASH.test(nativeHelperSha256 || '')) {
     throw new Error('NATIVE_SHORTCUT_HELPER_NOT_CONFIGURED');
   }
   const stat = await fs.lstat(nativeHelperPath);
@@ -27,6 +26,17 @@ export async function runNativeShortcutOperation(operation, values, {
   if (bytes.subarray(0, 2).toString('ascii') !== 'MZ' || sha256(bytes) !== nativeHelperSha256) {
     throw new Error('NATIVE_SHORTCUT_HELPER_IDENTITY_MISMATCH');
   }
+  return true;
+}
+
+export async function runNativeShortcutOperation(operation, values, {
+  nativeHelperPath = process.env.YUTANG_JOBGUARD_PATH,
+  nativeHelperSha256 = process.env.YUTANG_JOBGUARD_SHA256
+} = {}) {
+  if (!['--shortcut-commit', '--shortcut-restore', '--shortcut-delete'].includes(operation)) {
+    throw new Error('NATIVE_SHORTCUT_OPERATION_INVALID');
+  }
+  await verifyNativeShortcutHelper(nativeHelperPath, nativeHelperSha256);
   const args = [operation, '--owner-pid', String(process.pid)];
   for (const [key, value] of Object.entries(values || {})) {
     if (!/^[a-z0-9-]+$/.test(key) || typeof value !== 'string' || value.length === 0) {
@@ -53,7 +63,6 @@ export async function runNativeShortcutOperation(operation, values, {
   }
   return output;
 }
-
 
 export function resolveDesktopShortcutPath(app) {
   if (!app || typeof app.getPath !== 'function') {
