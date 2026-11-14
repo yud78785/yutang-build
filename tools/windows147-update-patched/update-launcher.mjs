@@ -212,6 +212,8 @@ export async function runUpdateLauncher({
   const supplied = normalizedThumbprint(publisherThumbprint);
   if (!/^[A-F0-9]{40}$/.test(expected) || supplied !== expected) throw new Error('更新发布者身份未配置或不匹配');
   const nativeHelper = { nativeHelperPath, nativeHelperSha256 };
+  const stagedShortcutSha256 = await hashRegularFile(stagedShortcut);
+  if (!stagedShortcutSha256) throw new Error('UPDATE_STAGED_SHORTCUT_MISSING_OR_INVALID');
   if (process.platform === 'win32') await verifyNativeShortcutHelper(nativeHelperPath, nativeHelperSha256);
   const updatesDirectory = path.resolve(path.dirname(file));
   if (path.resolve(path.dirname(healthFile)) !== updatesDirectory ||
@@ -286,7 +288,15 @@ export async function runUpdateLauncher({
     await stopChild(child, delayImpl);
     if (!recoveryError) {
       await fs.rm(healthFile, { force: true }).catch(() => {});
-      if (process.platform !== 'win32') await fs.rm(stagedShortcut, { force: true }).catch(() => {});
+      if (process.platform !== 'win32') {
+        await fs.rm(stagedShortcut, { force: true }).catch(() => {});
+      } else if (!transaction && stagedShortcutSha256) {
+        try {
+          await runNativeShortcutOperation('--shortcut-delete', { path: stagedShortcut, sha256: stagedShortcutSha256 }, nativeHelper);
+        } catch (cleanupError) {
+          console.warn('UPDATE_STAGED_SHORTCUT_PRESERVED', String(cleanupError?.message || cleanupError).slice(0, 240));
+        }
+      }
       if (transaction) await fs.rm(transaction.transactionFile, { force: true }).catch(() => {});
     }
     if (recoveryError) {
