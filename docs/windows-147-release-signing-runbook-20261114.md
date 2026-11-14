@@ -419,9 +419,9 @@ Windows 2022 和 Windows 2025 均执行了：
 - [Code Signing required documents](https://support.certum.eu/en/code-signing-required-documents/)
 - [Activate Code Signing in the Cloud](https://support.certum.eu/en/how-to-activate-code-signing-simplysign/)
 - [Certum SignTool / SimplySign instructions](https://support.certum.eu/en/signing-the-code-using-tools-like-signtool-and-jarsigner-instruction/)
-- [Certum Partner Network](https://shop.certum.eu/certum-reseller-points-map)
+- [Certum Reseller Program / country coverage](https://www.certum.eu/en/certum-reseller-program/)
 
-注意：SSLmentor 页面展示了 Certum 授权合作伙伴标识，但本轮没有通过 Certum 动态合作伙伴目录独立确认该商户的具体授权记录；也没有获得对用户个人申请的正式报价或资格确认。Certum 合作网络官方页面列出 Serbia 为服务国家之一，但这不等于某一具体身份证件已通过验证。
+注意：SSLmentor 页面展示了 Certum 授权合作伙伴标识，但本轮没有通过 Certum 动态合作伙伴目录独立确认该商户的具体授权记录；也没有获得对用户个人申请的正式报价或资格确认。Certum 官方 Reseller Program 页面将 Serbia 列为合作网络覆盖国家之一；这不等于某一具体身份证件已通过验证，也不等于已经独立核验 SSLmentor 的具体合作伙伴登记。
 
 ### 12.4 对 YuTang 的技术影响
 
