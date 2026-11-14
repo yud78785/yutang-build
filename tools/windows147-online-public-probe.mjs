@@ -16,6 +16,21 @@ const BYTES = 125446071;
 const PORT = 9227;
 const ORIGIN = 'https://www.douyin.com';
 const MAX_DELAY = 90000;
+const PUBLIC_READY_WAIT_MS = 45000;
+
+export function summarizePublicPageState(status,page) {
+  const ready=['loading','interactive','complete'].includes(page?.ready)?page.ready:'unknown';
+  return {
+    documentHttp200:status===200,
+    approvedOrigin:page?.origin===ORIGIN,
+    readiness:ready,
+    titlePresent:Number(page?.titleLength)>0,
+    bodyLengthAtLeast30:Number(page?.bodyLength)>=30,
+    bodyChildrenPresent:Number(page?.bodyChildren)>0,
+    screenshotMoreThan2KiB:Number(page?.paintBytes)>2048,
+    challengeDetected:page?.challenged===true
+  };
+}
 
 export function validatePublicPageEvidence({status, page, sandbox, identity}) {
   assert.equal(status, 200, 'PUBLIC_DOCUMENT_NOT_HTTP_200');
@@ -139,14 +154,16 @@ async function inspectOnlinePage() {
     await command(ws,id++,'Page.reload',{ignoreCache:true},sessionId);
     const status=await responsePromise;
     let page;
-    for(let attempt=0;attempt<24;attempt++){
+    const readyDeadline=Date.now()+PUBLIC_READY_WAIT_MS;
+    while(Date.now()<readyDeadline){
       const r=await command(ws,id++,'Runtime.evaluate',{
         expression:"JSON.stringify({origin:location.origin,ready:document.readyState,titleLength:document.title.length,bodyLength:(document.body?.innerText||'').length,bodyChildren:document.body?.children.length||0,challenged:/(?:请完成.{0,8}验证|安全验证|人机验证|拖动滑块|captcha required)/i.test((document.body?.innerText||'').slice(0,4000))||/(?:captcha|verify|login)/i.test(location.pathname)})",
         returnByValue:true
       },sessionId);
       if(typeof r.result?.value==='string') page=JSON.parse(r.result.value);
       if(page?.ready==='complete' && page.bodyLength>=30 && page.titleLength>0)break;
-      await delay(300);
+      if(page?.challenged===true)break;
+      await delay(500);
     }
     const captured=await command(ws,id++,'Page.captureScreenshot',{format:'png',captureBeyondViewport:false},sessionId);
     if (!page) throw new Error('PUBLIC_DOM_UNAVAILABLE');
@@ -382,7 +399,11 @@ export async function run(exe) {
     assert.ok(trackedEdgePids.size>0,'CANDIDATE_EDGE_PROCESS_IDS_NOT_CAPTURED');
     const sandbox=await inspectRendererSandbox(PORT,{profile,hostPid});
     const online=await inspectOnlinePage();
-    validatePublicPageEvidence({status:online.status,page:online.page,sandbox,identity});
+    try { validatePublicPageEvidence({status:online.status,page:online.page,sandbox,identity}); }
+    catch(error) {
+      console.error('WINDOWS_PUBLIC_WEB_PAGE_DIAGNOSTIC '+JSON.stringify(summarizePublicPageState(online.status,online.page)));
+      throw error;
+    }
     console.log('WINDOWS_PUBLIC_PAGE_GATE_OK '+JSON.stringify({exeSha256:SHA,httpStatus:online.status,rendered:true,cleanupPending:true}));
     const beforeClose=processes();
     for(const p of beforeClose)if(hasHostAncestor(Number(p.ProcessId),desktopTarget.pid,beforeClose))

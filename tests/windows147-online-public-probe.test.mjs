@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import {validatePublicReceipt, validatePublicPageEvidence, verifyDesktopStopTarget, identityReasonCode, ownedEdgePids, trackedEdgeSurvivors, cleanupRole, ownedJobGuardForCleanup, summarizeIdentityTopology, safeProcessSnapshot} from '../tools/windows147-online-public-probe.mjs';
+import {validatePublicReceipt, validatePublicPageEvidence, verifyDesktopStopTarget, identityReasonCode, ownedEdgePids, trackedEdgeSurvivors, cleanupRole, ownedJobGuardForCleanup, summarizeIdentityTopology, safeProcessSnapshot, summarizePublicPageState} from '../tools/windows147-online-public-probe.mjs';
 const SHA='3201d433df727a5d5fddf8e68a0f69ea1654057e04cfad7833fd3ed7dc241a34';
 const s=fs.readFileSync(new URL('../tools/windows147-online-public-probe.mjs', import.meta.url),'utf8');
 const green={status:200,page:{origin:'https://www.douyin.com',ready:'complete',challenged:false,titleLength:8,bodyLength:220,bodyChildren:8,paintBytes:10000},sandbox:{rendererSandboxVerified:true,networkServiceWindowsTokenVerified:true,networkServiceLowIntegrityVerified:true,networkServiceProcessOwned:true},identity:{loopbackOnly:true,listenerMatchesEdge:true},cleaned:true};
@@ -277,4 +277,26 @@ test('valid sparse process snapshot keeps only object rows, snapshot gate is wir
  assert.equal((s.match(/safeProcessSnapshot\(processes\)/g)||[]).length,2);
  assert.match(s,/lastIdentityReason=snapshot\.error;return null/);
  assert.match(s,/if\(snapshot\.error\)throw new Error\(snapshot\.error\)/);
+});
+
+
+test('fourth-run interactive state stays rejected, even with substantial page content',()=>{
+  const interactive={...green,page:{...green.page,ready:'interactive'}};
+  assert.throws(()=>validatePublicReceipt(interactive),/PUBLIC_PAGE_NOT_FULLY_LOADED/);
+  assert.equal(summarizePublicPageState(200,interactive.page).readiness,'interactive');
+});
+test('public-page error reporting is bounded and does not expose page text, URL or credentials',()=>{
+  const summary=summarizePublicPageState(200,{origin:'https://www.douyin.com',ready:'custom secret user token',
+    title:'secret',body:'private data',titleLength:9,bodyLength:900,bodyChildren:2,paintBytes:4096,challenged:false});
+  assert.deepEqual(summary,{documentHttp200:true,approvedOrigin:true,readiness:'unknown',titlePresent:true,
+    bodyLengthAtLeast30:true,bodyChildrenPresent:true,screenshotMoreThan2KiB:true,challengeDetected:false});
+  assert.doesNotMatch(JSON.stringify(summary),/secret|private|token|body\"|title\"/i);
+});
+test('real page readiness has a bounded longer wait but still requires complete state',()=>{
+  assert.match(s,/const PUBLIC_READY_WAIT_MS = 45000/);
+  assert.match(s,/const readyDeadline=Date\.now\(\)\+PUBLIC_READY_WAIT_MS/);
+  assert.match(s,/while\(Date\.now\(\)<readyDeadline\)/);
+  assert.match(s,/if\(page\?\.ready==='complete' && page\.bodyLength>=30 && page\.titleLength>0\)break/);
+  assert.match(s,/WINDOWS_PUBLIC_WEB_PAGE_DIAGNOSTIC/);
+  assert.match(s,/if\(page\?\.challenged===true\)break/);
 });
