@@ -69,3 +69,33 @@ After the 14-test pass, the read-only CLI was run twice on the **actual extracte
 - Proposed `1.4.8`: `BLOCKED_FOR_AUTOMATIC_UPDATE_BOOTSTRAP`, version is higher but disabled trust pins prevent the original client from auto-updating.
 - No executable was launched, no release was created, and both checks are **offline planning evidence only**.
 
+
+## 2026-11-14 signed Windows matrix provenance consistency gate
+
+Added as isolated preparation on the signing-tools branch; **no EXE change, real signing, Windows Actions run, merge or publication**:
+
+- `tools/signing/audit-signed-matrix.mjs`, exact Git blob SHA-1 `7522b6261f5a87a07977e41733aed262bff0047d`.
+- `tests/windows147-signed-matrix-audit.test.mjs`, exact Git blob SHA-1 `2b88c4bd2b9ed5f36a5a411462c456db54b6b821`.
+- Isolated Linux Node.js 22.16.0 `node --test tests/windows147-signed-matrix-audit.test.mjs`: **9 passed / 0 failed / 0 skipped**; test log SHA-256 `6fa2dd0fc59faf929e974f21993bb1debf7ce2025de6491a1486bb95507a8c6f`.
+- In addition, the real 65,429-byte unsigned Windows 2025 receipt from artifact `14092434238` was supplied as negative evidence. It was rejected with `SIGNED_EXE_NOT_NEW_OR_INVALID`. The genuine receipt SHA-256 was `db5335813a3c69e2ce578deabd8c7f99993dba4cedee0ae73378db328086f563`.
+
+### Gate contract for a future signed candidate (none exists yet)
+
+Read-only input: signed EXE, two signed CI artifact ZIP files, locally extracted signing receipt and Windows 2025/2022 signed acceptance receipts, signed release metadata, plus GitHub run, jobs and artifacts JSON. The checker computes EXE/ZIP SHA-256 via streaming (without executing binaries), checks the two OS receipts refer to one exact signed SHA, verifies the trusted timestamp/isolated Edge/lifecycle/forced-exit booleans, and cross-checks claimed run, artifact, job and critical step IDs against supplied GitHub API JSON.
+
+Future job contracts use signed-specific names and step names, deliberately distinct from the old unsigned CI workflow. The future signed branch must use prefix `experiment/windows-147-signed-`. This is only a required evidence shape, **not** a configured workflow or scheduled Windows test.
+
+The checker **cannot authenticate JSON snapshots**: an attacker could edit local `--github-run`, `--github-jobs`, `--github-artifacts` or extracted receipt files. It does not parse ZIP members to bind extracted receipts to the digested archives, query live GitHub, or verify Windows Authenticode itself. Therefore even completely matching inputs return:
+
+`UNTRUSTED_GITHUB_SNAPSHOT_AND_LOCAL_EVIDENCE_CONSISTENT_NOT_RELEASE_APPROVED`
+
+with `releaseReady=false`, followed by requirements for independently authenticated GitHub metadata, receipt-to-archive provenance, Windows signature/timestamp verification, real updater E2E and explicit Release approval. A success exit here **must not be reported as signed-EXE acceptance**.
+
+The 9 synthetic tests check two-platform same-file SHA, old unsigned ID and SHA reuse, wrong publisher, absent timestamp, AppContainer/Low Integrity/CDP/restarts/Job Object cleanup, failed jobs/critical steps and wrong GitHub artifact ZIP digest. No actual Windows 2022/2025 signed binary was used.
+
+### Blocking order remains
+
+1. Obtain case-specific SSLmentor response and genuine Certum Individual issuance; no payment or personal identity submission is authorized yet.
+2. Review/implement a signed-specific Windows workflow with real screenshot/process/Windows token and Authenticode checks; preserve the passed unsigned SHA separately.
+3. Run the **same actual signed EXE SHA** on both Windows 2022 and Windows 2025; capture authenticated ZIPs, receipts, run, jobs and artifact digests.
+4. Only after independent GitHub/ZIP/Windows verification allow local Ed25519 manifest preparation. Even a valid manifest does not bypass real online upgrade/download/reject/rollback gates or explicit release approval.
