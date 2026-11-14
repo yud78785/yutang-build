@@ -22,7 +22,7 @@ test('single visible iframe video summary entry is recognized without clicking',
  assert.equal(r.status,'entry_visible');assert.equal(r.aiSummaryEntryVisible,true);
  assert.equal(r.aiSummaryGenerated,false);assert.equal(r.aiSummaryText,null);
  assert.deepEqual(f.calls,[['视频总结',{exact:true}]]);
- assert.deepEqual(p.calls,['evaluate','frames','evaluate']);
+ assert.deepEqual(p.calls,['evaluate','frames','evaluate','frames']);
 });
 test('the entry is not the AI summary content',async()=>{
  const r=await inspect(page({frames:[frame()]}));
@@ -73,4 +73,19 @@ test('invalid arguments block before accessing any browser API',async()=>{
  let count=0;const p={evaluate(){count++;throw Error('unexpected')}};
  await assert.rejects(inspectDouyinAiSummaryEntryReadOnly({page:p,readPageState:()=>{},expectedVideoId:id}),/READ_ONLY_FRAME_ADAPTER_REQUIRED/);
  assert.equal(count,0);
+});
+
+test('iframe replacement after summary entry was read is never accepted',async()=>{
+ const f=frame(),replacement=frame(),p=page({frames:[f]});let n=0;
+ p.frames=()=>{p.calls.push('frames');return ++n===1?[f]:[replacement]};
+ const r=await inspect(p);
+ assert.equal(r.status,'blocked');assert.equal(r.reasonCode,'AI_FRAME_CHANGED_AFTER_READ');
+ assert.equal(r.aiSummaryEntryVisible,false);
+});
+test('iframe navigation after label observation is not accepted',async()=>{
+ let n=0;const base='https://so-landing.douyin.com/search_ai_mobile/pc';
+ const f=frame(base),p=page({frames:[f]});
+ f.url=()=>++n>=3?'https://evil.example/intercept':base;
+ const r=await inspect(p);
+ assert.equal(r.status,'blocked');assert.equal(r.aiSummaryEntryVisible,false);
 });
