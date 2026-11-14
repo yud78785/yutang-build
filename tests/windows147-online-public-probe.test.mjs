@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import {validatePublicReceipt, validatePublicPageEvidence, verifyDesktopStopTarget, identityReasonCode, ownedEdgePids, trackedEdgeSurvivors} from '../tools/windows147-online-public-probe.mjs';
+import {validatePublicReceipt, validatePublicPageEvidence, verifyDesktopStopTarget, identityReasonCode, ownedEdgePids, trackedEdgeSurvivors, cleanupRole, ownedJobGuardForCleanup} from '../tools/windows147-online-public-probe.mjs';
 const SHA='3201d433df727a5d5fddf8e68a0f69ea1654057e04cfad7833fd3ed7dc241a34';
 const s=fs.readFileSync(new URL('../tools/windows147-online-public-probe.mjs', import.meta.url),'utf8');
 const green={status:200,page:{origin:'https://www.douyin.com',ready:'complete',challenged:false,titleLength:8,bodyLength:220,bodyChildren:8,paintBytes:10000},sandbox:{rendererSandboxVerified:true,networkServiceWindowsTokenVerified:true,networkServiceLowIntegrityVerified:true,networkServiceProcessOwned:true},identity:{loopbackOnly:true,listenerMatchesEdge:true},cleaned:true};
@@ -135,4 +135,20 @@ test('identity errors expose fixed codes rather than raw WMI paths',()=>{
 test('unknown inner desktop PID never counts the Windows PID-0 idle process as Electron',()=>{
  assert.match(s,/desktopPid>0 && pid===desktopPid/);
  assert.match(s,/\(desktopPid>0 && Number\(p\.ProcessId\)===desktopPid\)/);
+});
+
+
+test('unset browser-host PID zero cannot claim idle PID or unrelated guard',()=>{
+ const identity={exePid:100,desktopPid:0,backendPid:102,hostPid:0,trackedEdgePids:new Set()};
+ assert.notEqual(cleanupRole({ProcessId:0,Name:'Idle'},identity),'browser-host');
+ assert.equal(ownedJobGuardForCleanup({Name:'jobguard.exe',ParentProcessId:0},identity),false);
+ assert.equal(ownedJobGuardForCleanup({Name:'jobguard.exe',ParentProcessId:555},identity),false);
+ assert.equal(ownedJobGuardForCleanup({Name:'jobguard.exe',ParentProcessId:100},identity),true);
+});
+test('positive verified host can own its jobguard and normal and diagnostic filters agree',()=>{
+ const identity={exePid:100,desktopPid:101,backendPid:102,hostPid:200,trackedEdgePids:new Set()};
+ assert.equal(cleanupRole({ProcessId:200,Name:'node.exe'},identity),'browser-host');
+ assert.equal(ownedJobGuardForCleanup({Name:'jobguard.exe',ParentProcessId:200},identity),true);
+ assert.equal(ownedJobGuardForCleanup({Name:'jobguard.exe',ParentProcessId:555},identity),false);
+ assert.equal((s.match(/ownedJobGuardForCleanup\(p,\{exePid,hostPid\}\)/g)||[]).length,2);
 });

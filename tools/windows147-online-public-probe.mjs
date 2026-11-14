@@ -217,12 +217,17 @@ function stopVerifiedDesktop(target) {
   execFileSync('taskkill.exe',['/PID',String(target.pid),'/F'],{windowsHide:true,timeout:10000,stdio:'ignore'});
   return true;
 }
-function cleanupRole(p,{exePid,desktopPid,backendPid,hostPid,trackedEdgePids}) {
+export function ownedJobGuardForCleanup(p,{exePid,hostPid}) {
+  const parentPid=Number(p.ParentProcessId);
+  return /jobguard\.exe$/i.test(String(p.Name||'')) &&
+    ((exePid>0 && parentPid===exePid) || (hostPid>0 && parentPid===hostPid));
+}
+export function cleanupRole(p,{exePid,desktopPid,backendPid,hostPid,trackedEdgePids}) {
   const pid=Number(p.ProcessId);
   if(pid===exePid)return 'packaged-wrapper';
   if(desktopPid>0 && pid===desktopPid)return 'inner-electron';
   if(pid===backendPid)return 'api-worker';
-  if(pid===hostPid)return 'browser-host';
+  if(hostPid>0 && pid===hostPid)return 'browser-host';
   if(trackedEdgePids.has(pid)&&/msedge\.exe$/i.test(String(p.Name||'')))return 'edge-descendant';
   if(/jobguard\.exe$/i.test(String(p.Name||'')))return 'jobguard';
   return 'owned-descendant';
@@ -235,8 +240,7 @@ async function waitCleanup({exePid,desktopPid,backendPid,hostPid,profile,control
       (backendPid > 0 && Number(p.ProcessId)===backendPid) ||
       String(p.CommandLine||'').toLowerCase().includes(profile.toLowerCase()) ||
       String(p.CommandLine||'').toLowerCase().includes(controlDir.toLowerCase()) ||
-      (/jobguard\.exe$/i.test(String(p.Name||'')) &&
-        (Number(p.ParentProcessId)===exePid || Number(p.ParentProcessId)===hostPid)));
+      ownedJobGuardForCleanup(p,{exePid,hostPid}));
     return !owned.length && trackedEdgeSurvivors(procs,trackedEdgePids).length===0 && listeners().length===0;
   },20000,'CANDIDATE_PROCESSES_OR_CDP_REMAIN');
   } catch(error) {
@@ -246,7 +250,8 @@ async function waitCleanup({exePid,desktopPid,backendPid,hostPid,profile,control
         Number(p.ProcessId)===exePid || Number(p.ProcessId)===backendPid ||
         String(p.CommandLine||'').toLowerCase().includes(profile.toLowerCase()) ||
         String(p.CommandLine||'').toLowerCase().includes(controlDir.toLowerCase()) ||
-        trackedEdgePids.has(Number(p.ProcessId)));
+        trackedEdgePids.has(Number(p.ProcessId)) ||
+        ownedJobGuardForCleanup(p,{exePid,hostPid}));
       console.error('WINDOWS_PUBLIC_WEB_CLEANUP_DIAGNOSTIC '+JSON.stringify({
         remaining: left.slice(0,40).map(p=>({pid:Number(p.ProcessId),role:cleanupRole(p,{exePid,desktopPid,backendPid,hostPid,trackedEdgePids})})),
         remainingCount:left.length,cdpListenerCount:listeners().length

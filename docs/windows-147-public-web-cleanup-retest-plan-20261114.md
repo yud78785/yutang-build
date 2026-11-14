@@ -50,3 +50,9 @@ On **each** runner, require exact EXE SHA, true main-frame HTTP 200/DOM/render/s
 - Diagnostics reported a surviving API worker in each runner and zero CDP listeners. The `pid:0, role:inner-electron` entry was a **diagnostic false positive**, not a real desktop process.
 - New source commit `356c17c6966b825339830f4eb27f384ab5c02247` adds fixed-code identity gate diagnostics and excludes unverified desktop PID 0 from the process survivor check; its new unit assertions remain **not executed**, and there is no new Windows EXE acceptance.
 - Dormant template now pins `356c17c6966b825339830f4eb27f384ab5c02247`. This change did not activate a third run; the user's second-run authorization was exhausted by Run 43627404909.
+
+## Unverified host-PID zero follow-up (source-only, no CI activation)
+
+- Source review found another PID-0 edge case outside the previously fixed `desktopPid`: before the browser opens, `hostPid=0`. The cleanup role classifier could label Windows PID 0 as `browser-host`, and the active guard ownership predicate could treat a `jobguard.exe` with parent PID 0 as candidate-owned. This is a source-level misclassification risk; it is **not** established as the cause of Run `43627404909`.
+- The targeted patch requires `hostPid>0` for browser-host roles and guard attribution. The same guarded Job Object predicate is now used by both the active cleanup gate and its failure diagnostic. The existing fail-closed image, ancestry and exact owner/target checks remain intact; no blind taskkill, EXE modification, cloud run, merge, or release.
+- A separate Node 22.16.0 Linux test harness manually reproducing the corresponding identity/cleanup functions completed **23/23 targeted synthetic tests** with no failures (not a byte-identical run of the repository's test suite). Full newly changed source tests and Windows integration remain **not verified**. The already-failed two-platform online Run `43627404909` stays FAILED.
