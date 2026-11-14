@@ -1,0 +1,61 @@
+name: YuTang 1.4.7 Windows shortcut handle experiment - NOT RELEASE
+
+on:
+  push:
+    branches:
+      - experiment/windows-147-shortcut-handle-20261114
+    paths:
+      - .github/workflows/windows-147-shortcut-handle-experiment.yml
+      - tools/jobguard/shortcut_file_windows.go
+      - tools/jobguard/shortcut_file_windows_test.go
+      - tools/jobguard/go.mod
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native-windows-shortcut-handle:
+    name: '${{ matrix.os }} shortcut handle safety'
+    runs-on: '${{ matrix.os }}'
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-2025]
+    steps:
+      - name: Checkout isolated experiment without persisted credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Verify exact experiment scope
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REPOSITORY -cne 'yud78785/yutang-build') { throw 'WRONG_REPOSITORY' }
+          if ($env:GITHUB_REF -cne 'refs/heads/experiment/windows-147-shortcut-handle-20261114') { throw 'WRONG_EXPERIMENT_BRANCH' }
+          if ($env:RUNNER_OS -cne 'Windows') { throw 'WINDOWS_RUNNER_REQUIRED' }
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.2'
+
+      - name: Run native Windows shortcut handle tests
+        shell: pwsh
+        working-directory: tools/jobguard
+        run: |
+          $ErrorActionPreference = 'Stop'
+          go version
+          go test -count=5 -timeout=90s ./...
+          if ($LASTEXITCODE -ne 0) { throw 'SHORTCUT_HANDLE_NATIVE_TESTS_FAILED' }
+          go vet ./...
+          if ($LASTEXITCODE -ne 0) { throw 'SHORTCUT_HANDLE_NATIVE_VET_FAILED' }
+          go build -trimpath -ldflags="-s -w" -o shortcut-handle-probe.exe .
+          if ($LASTEXITCODE -ne 0) { throw 'SHORTCUT_HANDLE_PROBE_BUILD_FAILED' }
+          $sha = (Get-FileHash -LiteralPath shortcut-handle-probe.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          Write-Host ('SHORTCUT_HANDLE_PROBE_SHA256=' + $sha)
+          Write-Host 'SHORTCUT_HANDLE_NATIVE_WINDOWS_TESTS=PASS'
+          Write-Host 'NOT_RELEASE=true'
+          Remove-Item -LiteralPath shortcut-handle-probe.exe -Force
+          if (Test-Path -LiteralPath shortcut-handle-probe.exe) { throw 'PROBE_BINARY_CLEANUP_FAILED' }
