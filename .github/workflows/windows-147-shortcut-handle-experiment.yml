@@ -105,6 +105,7 @@ jobs:
             $output = & $probe --shortcut-delete --owner-pid ($PID + 1) --path $protectedPath --sha256 $protectedSha
             $wrongParentExit = $LASTEXITCODE
             if ($wrongParentExit -eq 0 -or -not (Test-Path -LiteralPath $protectedPath)) { throw 'SHORTCUT_CLI_WRONG_PARENT_GUARD_FAILED' }
+            $LASTEXITCODE = 0
             Write-Host 'SHORTCUT_HANDLE_CLI_SMOKE=PASS'
           } finally {
             Remove-Item -LiteralPath $probeDir -Recurse -Force -ErrorAction SilentlyContinue
