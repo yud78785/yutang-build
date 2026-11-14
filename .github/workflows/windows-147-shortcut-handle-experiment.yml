@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - experiment/windows-147-shortcut-handle-20261114
+      - experiment/windows-147-shortcut-handle-fix-20261114
     paths:
       - .github/workflows/windows-147-shortcut-handle-experiment.yml
       - tools/jobguard/shortcut_file_windows.go
