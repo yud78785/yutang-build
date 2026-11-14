@@ -81,7 +81,9 @@ test('probe stops verified inner Electron main nonrecursively, not only outer wr
  assert.match(s,/stopVerifiedDesktop\(desktopTarget\)/);
  assert.match(s,/execFileSync\('taskkill\.exe',\['\/PID',String\(target\.pid\),'\/F'\]/);
  assert.doesNotMatch(s,/execFileSync\('taskkill\.exe',\['\/PID',String\(target\.pid\),'\/T'/);
- assert.match(s,/INNER_ELECTRON_IDENTITY_NOT_VERIFIED/);
+ assert.match(s,/INNER_ELECTRON_PARENT_NOT_FOUND/);
+ assert.match(s,/INNER_ELECTRON_NAME_MISMATCH/);
+ assert.match(s,/INNER_ELECTRON_ANCESTRY_NOT_VERIFIED/);
 });
 test('page-only readiness is separate from entire lifecycle acceptance',()=>{
  assert.equal(validatePublicPageEvidence({...green,cleaned:false}),true);
@@ -151,4 +153,35 @@ test('positive verified host can own its jobguard and normal and diagnostic filt
  assert.equal(ownedJobGuardForCleanup({Name:'jobguard.exe',ParentProcessId:200},identity),true);
  assert.equal(ownedJobGuardForCleanup({Name:'jobguard.exe',ParentProcessId:555},identity),false);
  assert.equal((s.match(/ownedJobGuardForCleanup\(p,\{exePid,hostPid\}\)/g)||[]).length,3);
+});
+
+
+test('early inner Electron check distinguishes missing parent with no termination',()=>{
+ const exe='C:\\candidate\\Dafeiyu-Douyin-API-1.4.7-win-x64.exe';
+ const rows=[
+  {ProcessId:100,ParentProcessId:1,Name:'candidate.exe',ExecutablePath:path.resolve(exe)},
+  {ProcessId:102,ParentProcessId:101,Name:'node.exe',CommandLine:'node api-worker.mjs'}
+ ];
+ assert.throws(()=>verifyDesktopStopTarget(rows,{exePid:100,exeFile:exe,backendPid:102}),/INNER_ELECTRON_PARENT_NOT_FOUND/);
+ assert.equal(identityReasonCode(new Error('INNER_ELECTRON_PARENT_NOT_FOUND')), 'INNER_ELECTRON_PARENT_NOT_FOUND');
+});
+test('early inner Electron check distinguishes unexpected basename with no termination',()=>{
+ const exe='C:\\candidate\\Dafeiyu-Douyin-API-1.4.7-win-x64.exe';
+ const rows=[
+  {ProcessId:100,ParentProcessId:1,Name:'candidate.exe',ExecutablePath:path.resolve(exe)},
+  {ProcessId:101,ParentProcessId:100,Name:'unexpected.exe'},
+  {ProcessId:102,ParentProcessId:101,Name:'node.exe',CommandLine:'node api-worker.mjs'}
+ ];
+ assert.throws(()=>verifyDesktopStopTarget(rows,{exePid:100,exeFile:exe,backendPid:102}),/INNER_ELECTRON_NAME_MISMATCH/);
+ assert.equal(identityReasonCode(new Error('INNER_ELECTRON_NAME_MISMATCH')), 'INNER_ELECTRON_NAME_MISMATCH');
+});
+test('early inner Electron check distinguishes unverified ancestry with no termination',()=>{
+ const exe='C:\\candidate\\Dafeiyu-Douyin-API-1.4.7-win-x64.exe';
+ const rows=[
+  {ProcessId:100,ParentProcessId:1,Name:'candidate.exe',ExecutablePath:path.resolve(exe)},
+  {ProcessId:101,ParentProcessId:999,Name:'\u5927\u80a5\u9c7c\u6296\u97f3\u52a9\u624b.exe'},
+  {ProcessId:102,ParentProcessId:101,Name:'node.exe',CommandLine:'node api-worker.mjs'}
+ ];
+ assert.throws(()=>verifyDesktopStopTarget(rows,{exePid:100,exeFile:exe,backendPid:102}),/INNER_ELECTRON_ANCESTRY_NOT_VERIFIED/);
+ assert.equal(identityReasonCode(new Error('INNER_ELECTRON_ANCESTRY_NOT_VERIFIED')), 'INNER_ELECTRON_ANCESTRY_NOT_VERIFIED');
 });

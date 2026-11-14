@@ -174,7 +174,8 @@ export function identityReasonCode(error) {
   // Only fixed error codes are printed; never log untrusted process command lines or paths.
   const known=[
     'CANDIDATE_WRAPPER_IDENTITY_NOT_VERIFIED','API_WORKER_IDENTITY_NOT_VERIFIED',
-    'INNER_ELECTRON_IDENTITY_NOT_VERIFIED','INNER_ELECTRON_IMAGE_PATH_NOT_VERIFIED',
+    'INNER_ELECTRON_PARENT_NOT_FOUND','INNER_ELECTRON_NAME_MISMATCH',
+    'INNER_ELECTRON_ANCESTRY_NOT_VERIFIED','INNER_ELECTRON_IMAGE_PATH_NOT_VERIFIED',
     'DESKTOP_JOB_GUARD_NOT_VERIFIED','DESKTOP_JOB_GUARD_PAIR_MISMATCH'
   ];
   return known.find(code=>String(error?.message||'').includes(code)) || 'IDENTITY_VERIFICATION_UNKNOWN';
@@ -188,8 +189,10 @@ export function verifyDesktopStopTarget(rows, {exePid, exeFile, backendPid}) {
     'API_WORKER_IDENTITY_NOT_VERIFIED');
   const desktopPid=Number(backend.ParentProcessId);
   const desktop=rows.find(r=>Number(r.ProcessId)===desktopPid);
-  assert.ok(desktop && String(desktop.Name)==='\u5927\u80a5\u9c7c\u6296\u97f3\u52a9\u624b.exe' &&
-    hasHostAncestor(desktopPid,exePid,rows), 'INNER_ELECTRON_IDENTITY_NOT_VERIFIED');
+  assert.ok(desktop, 'INNER_ELECTRON_PARENT_NOT_FOUND');
+  assert.equal(String(desktop.Name), '\u5927\u80a5\u9c7c\u6296\u97f3\u52a9\u624b.exe',
+    'INNER_ELECTRON_NAME_MISMATCH');
+  assert.ok(hasHostAncestor(desktopPid,exePid,rows), 'INNER_ELECTRON_ANCESTRY_NOT_VERIFIED');
   // A matching PID and process name alone never authorize terminating an executable.
   // An unreadable or relative image path must fail closed, before taskkill can run.
   const desktopImage=String(desktop.ExecutablePath||'');
