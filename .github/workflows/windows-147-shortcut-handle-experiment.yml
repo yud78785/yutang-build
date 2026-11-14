@@ -67,6 +67,51 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'SHORTCUT_HANDLE_PROBE_BUILD_FAILED' }
           $sha = (Get-FileHash -LiteralPath shortcut-handle-probe.exe -Algorithm SHA256).Hash.ToLowerInvariant()
           Write-Host ('SHORTCUT_HANDLE_PROBE_SHA256=' + $sha)
+          $probe = (Resolve-Path -LiteralPath 'shortcut-handle-probe.exe').Path
+          $probeDir = Join-Path $env:TEMP ('yutang-shortcut-cli-' + [guid]::NewGuid().ToString('N'))
+          New-Item -ItemType Directory -Path $probeDir | Out-Null
+          try {
+            $shortcut = Join-Path $probeDir 'YuTang.lnk'
+            $backup = Join-Path $probeDir 'YuTang.backup.lnk'
+            $temporary = Join-Path $probeDir 'YuTang.temporary.lnk'
+            $quarantine = Join-Path $probeDir 'YuTang.quarantine.lnk'
+            [System.IO.File]::WriteAllText($shortcut, 'old shortcut')
+            [System.IO.File]::WriteAllText($temporary, 'new shortcut')
+            $oldSha = (Get-FileHash -LiteralPath $shortcut -Algorithm SHA256).Hash.ToLowerInvariant()
+            $newSha = (Get-FileHash -LiteralPath $temporary -Algorithm SHA256).Hash.ToLowerInvariant()
+            $output = & $probe --shortcut-commit --owner-pid $PID --shortcut $shortcut --backup $backup --temporary $temporary --old-sha256 $oldSha --new-sha256 $newSha
+            $outputText = [string]($output -join "`n")
+            if ($LASTEXITCODE -ne 0 -or $outputText -notmatch '^SHORTCUT_OPERATION_OK --shortcut-commit
+) { throw ('SHORTCUT_CLI_COMMIT_FAILED: ' + $outputText) }
+            if ((Get-FileHash -LiteralPath $shortcut -Algorithm SHA256).Hash.ToLowerInvariant() -cne $newSha) { throw 'SHORTCUT_CLI_COMMIT_HASH_MISMATCH' }
+            if ((Get-FileHash -LiteralPath $backup -Algorithm SHA256).Hash.ToLowerInvariant() -cne $oldSha) { throw 'SHORTCUT_CLI_BACKUP_HASH_MISMATCH' }
+
+            $output = & $probe --shortcut-restore --owner-pid $PID --shortcut $shortcut --backup $backup --quarantine $quarantine --old-sha256 $oldSha --new-sha256 $newSha
+            $outputText = [string]($output -join "`n")
+            if ($LASTEXITCODE -ne 0 -or $outputText -notmatch '^SHORTCUT_OPERATION_OK --shortcut-restore
+) { throw ('SHORTCUT_CLI_RESTORE_FAILED: ' + $outputText) }
+            if ((Get-FileHash -LiteralPath $shortcut -Algorithm SHA256).Hash.ToLowerInvariant() -cne $oldSha) { throw 'SHORTCUT_CLI_RESTORE_HASH_MISMATCH' }
+            if ((Test-Path -LiteralPath $backup) -or (Test-Path -LiteralPath $quarantine)) { throw 'SHORTCUT_CLI_RESTORE_LEFT_TEMPORARY_FILES' }
+
+            $deletePath = Join-Path $probeDir 'delete-me.lnk'
+            [System.IO.File]::WriteAllText($deletePath, 'delete me')
+            $deleteSha = (Get-FileHash -LiteralPath $deletePath -Algorithm SHA256).Hash.ToLowerInvariant()
+            $output = & $probe --shortcut-delete --owner-pid $PID --path $deletePath --sha256 $deleteSha
+            $outputText = [string]($output -join "`n")
+            if ($LASTEXITCODE -ne 0 -or $outputText -notmatch '^SHORTCUT_OPERATION_OK --shortcut-delete
+) { throw ('SHORTCUT_CLI_DELETE_FAILED: ' + $outputText) }
+            if (Test-Path -LiteralPath $deletePath) { throw 'SHORTCUT_CLI_DELETE_DID_NOT_REMOVE_FILE' }
+
+            $protectedPath = Join-Path $probeDir 'wrong-parent.lnk'
+            [System.IO.File]::WriteAllText($protectedPath, 'keep me')
+            $protectedSha = (Get-FileHash -LiteralPath $protectedPath -Algorithm SHA256).Hash.ToLowerInvariant()
+            $output = & $probe --shortcut-delete --owner-pid ($PID + 1) --path $protectedPath --sha256 $protectedSha
+            $wrongParentExit = $LASTEXITCODE
+            if ($wrongParentExit -eq 0 -or -not (Test-Path -LiteralPath $protectedPath)) { throw 'SHORTCUT_CLI_WRONG_PARENT_GUARD_FAILED' }
+            Write-Host 'SHORTCUT_HANDLE_CLI_SMOKE=PASS'
+          } finally {
+            Remove-Item -LiteralPath $probeDir -Recurse -Force -ErrorAction SilentlyContinue
+          }
           Write-Host 'SHORTCUT_HANDLE_NATIVE_WINDOWS_TESTS=PASS'
           Write-Host 'NOT_RELEASE=true'
           Remove-Item -LiteralPath shortcut-handle-probe.exe -Force
