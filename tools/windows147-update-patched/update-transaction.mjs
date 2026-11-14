@@ -268,15 +268,19 @@ export async function recoverUpdateTransaction(updatesDirectory, {
   }
   if (!transaction) return { status: 'no-transaction' };
 
-  const [currentHash, backupHash, stagedHash, targetHash, temporaryHash] = await Promise.all([
+  const [currentHash, backupHash, stagedHash, targetHash, temporaryHash, quarantineHash] = await Promise.all([
     hashFile(transaction.shortcut),
     hashFile(transaction.backupShortcut),
     hashFile(transaction.stagedShortcut),
     hashFile(transaction.targetExe),
-    hashFile(transaction.temporaryShortcut)
+    hashFile(transaction.temporaryShortcut),
+    hashFile(transaction.quarantineShortcut)
   ]);
   if (targetHash !== transaction.targetExeSha256) {
     return { status: 'blocked', reason: 'UPDATE_TARGET_IDENTITY_CHANGED' };
+  }
+  if (quarantineHash && quarantineHash !== transaction.newShortcutSha256) {
+    return { status: 'blocked', reason: 'QUARANTINE_IDENTITY_CHANGED' };
   }
 
   const removeShortcut = async (file, expectedHash) => {
@@ -299,6 +303,7 @@ export async function recoverUpdateTransaction(updatesDirectory, {
     if (backupHash) await removeShortcut(transaction.backupShortcut, transaction.oldShortcutSha256);
     if (stagedHash === transaction.newShortcutSha256) await removeShortcut(transaction.stagedShortcut, transaction.newShortcutSha256);
     if (temporaryHash === transaction.newShortcutSha256) await removeShortcut(transaction.temporaryShortcut, transaction.newShortcutSha256);
+    if (quarantineHash === transaction.newShortcutSha256) await removeShortcut(transaction.quarantineShortcut, transaction.newShortcutSha256);
     await fs.rm(transactionFile);
     return { status: 'committed-cleanup' };
   }
@@ -310,6 +315,7 @@ export async function recoverUpdateTransaction(updatesDirectory, {
     if (backupHash) await removeShortcut(transaction.backupShortcut, transaction.oldShortcutSha256);
     if (stagedHash === transaction.newShortcutSha256) await removeShortcut(transaction.stagedShortcut, transaction.newShortcutSha256);
     if (temporaryHash === transaction.newShortcutSha256) await removeShortcut(transaction.temporaryShortcut, transaction.newShortcutSha256);
+    if (quarantineHash === transaction.newShortcutSha256) await removeShortcut(transaction.quarantineShortcut, transaction.newShortcutSha256);
     await fs.rm(transactionFile);
     return { status: 'old-shortcut-preserved' };
   }
@@ -338,6 +344,7 @@ export async function recoverUpdateTransaction(updatesDirectory, {
   }
   if (stagedHash === transaction.newShortcutSha256) await removeShortcut(transaction.stagedShortcut, transaction.newShortcutSha256);
   if (temporaryHash === transaction.newShortcutSha256) await removeShortcut(transaction.temporaryShortcut, transaction.newShortcutSha256);
+  if (quarantineHash === transaction.newShortcutSha256) await removeShortcut(transaction.quarantineShortcut, transaction.newShortcutSha256);
   await fs.rm(transactionFile);
   return { status: 'rolled-back' };
 }
