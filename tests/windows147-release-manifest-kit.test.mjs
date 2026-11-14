@@ -8,7 +8,7 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { inspectWindowsAuthenticode, makeManifest, prepareSignedManifest } from '../tools/windows147-release-manifest-kit.mjs';
 
-const THUMB='A'.repeat(40),SIGNATURE_PRESENT={status:'Valid',thumbprint:THUMB,subject:'CN=Local Test Publisher',codeSigningEku:true,timestampCertificatePresent:true};
+const THUMB='A'.repeat(40),SIGNATURE_PRESENT={status:'Valid',thumbprint:THUMB,subject:'CN=Local Test Publisher',codeSigningEku:true,timestampCertificatePresent:true,signatureType:'Authenticode',signtoolEmbeddedVerified:true};
 const cfg={tag:'v1.4.8',upstreamCommit:'a'.repeat(40),yutangPatchCommit:'b'.repeat(40),workflowRunId:43541915930,artifactId:14092434238,expectedThumbprint:THUMB};
 const short={...cfg,exeFileName:'Dafeiyu-Douyin-API-1.4.8-win-x64.exe',signedExeSize:2048,signedExeSha256:'c'.repeat(64),certEvidence:SIGNATURE_PRESENT};
 const summarySha=x=>createHash('sha256').update(x).digest('hex');
@@ -51,24 +51,73 @@ test('source identity and candidate numeric provenance must be complete',()=>{
 });
 test('refuses missing, invalid, mismatched or untimestamped Authenticode evidence',()=>{
  const invalid=[null,{...SIGNATURE_PRESENT,status:'NotSigned'}, {...SIGNATURE_PRESENT,thumbprint:'B'.repeat(40)},
- {...SIGNATURE_PRESENT,subject:' '},{...SIGNATURE_PRESENT,codeSigningEku:false},{...SIGNATURE_PRESENT,timestampCertificatePresent:false}];
+ {...SIGNATURE_PRESENT,subject:' '},{...SIGNATURE_PRESENT,codeSigningEku:false},{...SIGNATURE_PRESENT,timestampCertificatePresent:false},
+ {...SIGNATURE_PRESENT,signatureType:'Catalog'},{...SIGNATURE_PRESENT,signatureType:'None'},{...SIGNATURE_PRESENT,signtoolEmbeddedVerified:false}];
  for(const certEvidence of invalid)assert.throws(()=>makeManifest({...fixture(),certEvidence}),/RELEASE_AUTHENTICODE_NOT_VERIFIED/);
 });
 test('non-Windows platform cannot claim real Authenticode acceptance',()=>{
  assert.throws(()=>inspectWindowsAuthenticode('C:\\bad.exe',{platform:'linux'}),/WINDOWS_AUTHENTICODE_REQUIRED/);
 });
-test('Windows Authenticode query requires valid JSON and redacts arbitrary exceptions',()=>{
- const file=path.resolve(os.tmpdir(),'Dafeiyu-Douyin-API-1.4.8-win-x64.exe');
- assert.throws(()=>inspectWindowsAuthenticode(file,{platform:'win32',exec:()=>{throw Error('private secret')}}),/WINDOWS_AUTHENTICODE_QUERY_FAILED/);
- assert.throws(()=>inspectWindowsAuthenticode(file,{platform:'win32',exec:()=>'{bad'}),/WINDOWS_AUTHENTICODE_RESPONSE_INVALID/);
- const got=inspectWindowsAuthenticode(file,{platform:'win32',exec:(name,args,options)=>{
-  assert.equal(name,'powershell.exe');assert.equal(options.env.YUTANG_SIGNED_EXE,file);
-  assert.match(args.join(' '),/Get-AuthenticodeSignature/);
-  assert.match(args.join(' '),/TimeStamperCertificate/);
-  assert.match(args.join(' '),/1\.3\.6\.1\.5\.5\.7\.3\.3/);
-  return JSON.stringify(SIGNATURE_PRESENT);
+test('Windows native preflight requires SDK SignTool by absolute path',()=>{
+ const exe=path.resolve(os.tmpdir(),'Dafeiyu-Douyin-API-1.4.8-win-x64.exe');
+ assert.throws(()=>inspectWindowsAuthenticode(exe,{platform:'win32',signToolPath:undefined}),/SIGNTOOL_ABSOLUTE_PATH_REQUIRED/);
+ assert.throws(()=>inspectWindowsAuthenticode(exe,{platform:'win32',signToolPath:'signtool.exe'}),/SIGNTOOL_ABSOLUTE_PATH_REQUIRED/);
+ assert.throws(()=>inspectWindowsAuthenticode(exe,{platform:'win32',signToolPath:path.resolve(os.tmpdir(),'not-signtool.exe')}),/SIGNTOOL_ABSOLUTE_PATH_REQUIRED/);
+});
+test('Windows embedded signer is verified independently by SignTool /pa /tw',()=>{
+ const exe=path.resolve(os.tmpdir(),'Dafeiyu-Douyin-API-1.4.8-win-x64.exe');
+ const signToolPath=path.resolve(os.tmpdir(),'signtool.exe');
+ const psEvidence={...SIGNATURE_PRESENT};delete psEvidence.signtoolEmbeddedVerified;
+ let invoked=0;
+ const got=inspectWindowsAuthenticode(exe,{platform:'win32',signToolPath,exec:(name,args,options)=>{
+  invoked++;
+  if(name==='powershell.exe') {
+   assert.equal(options.env.YUTANG_SIGNED_EXE,exe);
+   assert.match(args.join(' '),/Get-AuthenticodeSignature/);
+   assert.match(args.join(' '),/SignatureType/);
+   assert.match(args.join(' '),/TimeStamperCertificate/);
+   assert.match(args.join(' '),/1\.3\.6\.1\.5\.5\.7\.3\.3/);
+   return JSON.stringify(psEvidence);
+  }
+  assert.equal(name,signToolPath);
+  assert.deepEqual(args,['verify','/pa','/tw',exe]);
+  assert.ok(!args.includes('/a') && !args.includes('/c'));
+  assert.ok(!('YUTANG_SIGNED_EXE' in options));
+  return 'Successfully verified';
  }});
- assert.deepEqual(got,SIGNATURE_PRESENT);
+ assert.equal(invoked,2);
+ assert.equal(got.signatureType,'Authenticode');
+ assert.equal(got.signtoolEmbeddedVerified,true);
+});
+test('Windows signature inspector refuses a valid catalog without launching SignTool',()=>{
+ const exe=path.resolve(os.tmpdir(),'Dafeiyu-Douyin-API-1.4.8-win-x64.exe');
+ let count=0;
+ assert.throws(()=>inspectWindowsAuthenticode(exe,{platform:'win32',signToolPath:path.resolve(os.tmpdir(),'signtool.exe'),exec:(name)=>{
+  count++;
+  assert.equal(name,'powershell.exe');
+  return JSON.stringify({...SIGNATURE_PRESENT,signatureType:'Catalog'});
+ }}),/WINDOWS_EMBEDDED_SIGNATURE_REQUIRED/);
+ assert.equal(count,1);
+});
+test('Windows native inspection fails closed on SignTool warnings or errors without leaking them',()=>{
+ const exe=path.resolve(os.tmpdir(),'Dafeiyu-Douyin-API-1.4.8-win-x64.exe');
+ for(const status of [1,2]){
+  const psEvidence={...SIGNATURE_PRESENT};delete psEvidence.signtoolEmbeddedVerified;
+  let calls=0;
+  assert.throws(()=>inspectWindowsAuthenticode(exe,{platform:'win32',signToolPath:path.resolve(os.tmpdir(),'signtool.exe'),exec:(name)=>{
+   calls++;
+   if(name==='powershell.exe')return JSON.stringify(psEvidence);
+   const error=new Error('D:\secret\customer path with user data');
+   error.status=status;throw error;
+  }}),/^Error: WINDOWS_EMBEDDED_SIGNTOOL_VERIFY_FAILED$/);
+  assert.equal(calls,2);
+ }
+});
+test('Windows signature query refuses malformed JSON and redacts errors',()=>{
+ const exe=path.resolve(os.tmpdir(),'Dafeiyu-Douyin-API-1.4.8-win-x64.exe');
+ const signToolPath=path.resolve(os.tmpdir(),'signtool.exe');
+ assert.throws(()=>inspectWindowsAuthenticode(exe,{platform:'win32',signToolPath,exec:()=>{throw Error('private secret')}}),/WINDOWS_AUTHENTICODE_QUERY_FAILED/);
+ assert.throws(()=>inspectWindowsAuthenticode(exe,{platform:'win32',signToolPath,exec:()=>'{bad'}),/WINDOWS_AUTHENTICODE_RESPONSE_INVALID/);
 });
 test('real entry point refuses Linux rather than manufacturing fake release trust',()=>{
  const file=fileURLToPath(new URL('../tools/windows147-release-manifest-kit.mjs',import.meta.url));

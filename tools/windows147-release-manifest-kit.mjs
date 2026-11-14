@@ -46,7 +46,8 @@ export function makeManifest({ tag, exeFileName, signedExeSize, signedExeSha256,
   const observed = thumbprint(certEvidence?.thumbprint);
   if (!THUMBPRINT_RE.test(expected) || certEvidence?.status !== 'Valid' || observed !== expected ||
       typeof certEvidence.subject !== 'string' || !certEvidence.subject.trim() ||
-      certEvidence.codeSigningEku !== true || certEvidence.timestampCertificatePresent !== true) fail('RELEASE_AUTHENTICODE_NOT_VERIFIED');
+      certEvidence.codeSigningEku !== true || certEvidence.timestampCertificatePresent !== true ||
+      certEvidence.signatureType !== 'Authenticode' || certEvidence.signtoolEmbeddedVerified !== true) fail('RELEASE_AUTHENTICODE_NOT_VERIFIED');
   return {
     schema: 'yutang.windows-update-manifest.v1', repository: REPOSITORY, tag, version,
     asset: { name: exeFileName, size: signedExeSize, sha256: signedExeSha256 },
@@ -56,9 +57,14 @@ export function makeManifest({ tag, exeFileName, signedExeSize, signedExeSha256,
   };
 }
 
-export function inspectWindowsAuthenticode(exeFile, { platform = process.platform, exec = execFileSync } = {}) {
+export function inspectWindowsAuthenticode(exeFile, { platform = process.platform, exec = execFileSync,
+  signToolPath = process.env.YUTANG_SIGNTOOL_PATH } = {}) {
   if (platform !== 'win32') fail('WINDOWS_AUTHENTICODE_REQUIRED');
   if (typeof exeFile !== 'string' || !path.isAbsolute(exeFile)) fail('SIGNED_EXE_PATH_INVALID');
+  // Explicit trusted Windows SDK SignTool location supplied by the signer.
+  // Missing/unverified SDK tools must not silently weaken the validation path.
+  if (typeof signToolPath !== 'string' || !path.isAbsolute(signToolPath) ||
+      path.basename(signToolPath).toLowerCase() !== 'signtool.exe') fail('SIGNTOOL_ABSOLUTE_PATH_REQUIRED');
   // No cert credentials; only read public Windows signature evidence.
   const script = [
     "$ErrorActionPreference='Stop'",
@@ -67,7 +73,7 @@ export function inspectWindowsAuthenticode(exeFile, { platform = process.platfor
     '$c=$s.SignerCertificate',
     '$eku=$false',
     `if($null -ne $c){foreach($e in $c.EnhancedKeyUsageList){if([string]$e.ObjectId -eq '${CODE_SIGNING_EKU}'){$eku=$true}}}`,
-    '[pscustomobject]@{status=[string]$s.Status;thumbprint=[string]$c.Thumbprint;subject=[string]$c.Subject;codeSigningEku=[bool]$eku;timestampCertificatePresent=($null -ne $s.TimeStamperCertificate)} | ConvertTo-Json -Compress'
+    '[pscustomobject]@{status=[string]$s.Status;signatureType=[string]$s.SignatureType;thumbprint=[string]$c.Thumbprint;subject=[string]$c.Subject;codeSigningEku=[bool]$eku;timestampCertificatePresent=($null -ne $s.TimeStamperCertificate)} | ConvertTo-Json -Compress'
   ].join(';');
   let raw;
   try { raw = exec('powershell.exe', ['-NoLogo','-NoProfile','-NonInteractive','-Command',script], {
@@ -77,8 +83,24 @@ export function inspectWindowsAuthenticode(exeFile, { platform = process.platfor
   try {
     const value = JSON.parse(String(raw).trim());
     if (!value || typeof value !== 'object' || Array.isArray(value)) fail('WINDOWS_AUTHENTICODE_RESPONSE_INVALID');
-    return value;
-  } catch { fail('WINDOWS_AUTHENTICODE_RESPONSE_INVALID'); }
+    // Get-AuthenticodeSignature can select a Windows catalog over embedded data.
+    // Catalog trust is not portable with a standalone EXE.
+    if(value.signatureType !== 'Authenticode') fail('WINDOWS_EMBEDDED_SIGNATURE_REQUIRED');
+    if(value.status !== 'Valid' || value.codeSigningEku !== true ||
+        value.timestampCertificatePresent !== true) fail('WINDOWS_AUTHENTICODE_NOT_VALID');
+    try {
+      // No /a, /ad or /c: SignTool verifies the EXE's embedded signature,
+      // using Authenticode policy and warning on absent timestamps.
+      // execFileSync throws on exit code 1 (failed) and 2 (warning).
+      exec(signToolPath,['verify','/pa','/tw',exeFile],{
+        encoding:'utf8',windowsHide:true,timeout:18000,maxBuffer:64*1024
+      });
+    } catch { fail('WINDOWS_EMBEDDED_SIGNTOOL_VERIFY_FAILED'); }
+    return {...value,signtoolEmbeddedVerified:true};
+  } catch(error) {
+    if (/^[A-Z_]{4,80}$/.test(String(error?.message||''))) throw error;
+    fail('WINDOWS_AUTHENTICODE_RESPONSE_INVALID');
+  }
 }
 
 async function readSigningKey(keyFile) {
