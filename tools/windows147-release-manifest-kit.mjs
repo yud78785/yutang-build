@@ -138,10 +138,20 @@ export async function prepareSignedManifest({config, signedExe, privateKeyFile, 
   const manifest = makeManifest({...config, exeFileName:path.basename(signedExe),
     signedExeSize:stat.size,signedExeSha256,certEvidence});
   const key=await readSigningKey(privateKeyFile);
+  const publicKey=createPublicKey(key);
+  // A mathematically valid detached signature is NOT proof that an installed
+  // YuTang update client trusts this Ed25519 key.  Pin the *canonical DER SPKI*
+  // digest from the intended update-enabled client before signing anything.
+  // DER (not PEM text) avoids line-ending/whitespace fingerprint changes.
+  const publicSpkiSha256=sha256(publicKey.export({format:'der',type:'spki'}));
+  const expectedPublicSpkiSha256=config.expectedManifestPublicKeySpkiSha256;
+  if(!SHA_RE.test(String(expectedPublicSpkiSha256||'')))
+    fail('MANIFEST_PUBLIC_KEY_PIN_MISSING');
+  if(publicSpkiSha256!==expectedPublicSpkiSha256)
+    fail('MANIFEST_PUBLIC_KEY_PIN_MISMATCH');
   const body=Buffer.from(JSON.stringify(manifest,null,2)+'\n','utf8');
   if (body.byteLength > 64*1024) fail('MANIFEST_TOO_LARGE');
   const signature=sign(null,body,key);
-  const publicKey=createPublicKey(key);
   if(signature.length!==64 || !verify(null,body,publicKey,signature)) fail('MANIFEST_SIGNATURE_SELF_CHECK_FAILED');
   const publicPem=publicKey.export({format:'pem',type:'spki'});
   if (path.dirname(outputDir)===outputDir || inside(ROOT,outputDir) || inside(outputDir,ROOT)) fail('MANIFEST_OUTPUT_ROOT_INVALID');
@@ -166,8 +176,8 @@ export async function prepareSignedManifest({config, signedExe, privateKeyFile, 
     if(exists)await fs.rm(temp,{recursive:true});
   }
   return { status:'SOURCE_ONLY_MANIFEST_PREPARED_NOT_RELEASED', exeSha256:signedExeSha256,
-    exeSize:stat.size,manifestSha256:sha256(body),manifestName:MANIFEST,signatureName:SIGNATURE,
-    publicKeyName:PUBLIC_KEY,outputDir };
+    exeSize:stat.size,manifestSha256:sha256(body),manifestPublicKeySpkiSha256:publicSpkiSha256,
+    manifestName:MANIFEST,signatureName:SIGNATURE,publicKeyName:PUBLIC_KEY,outputDir };
 }
 
 async function main() {
@@ -180,7 +190,8 @@ async function main() {
   const summary=await prepareSignedManifest({config,signedExe,privateKeyFile,outputDir});
   // Never log raw signer certificate subject, signed file path, or private key.
   console.log('YUTANG_MANIFEST_PREPARED '+JSON.stringify({status:summary.status,exeSha256:summary.exeSha256,
-    exeSize:summary.exeSize,manifestSha256:summary.manifestSha256,releaseAuthorized:false}));
+    exeSize:summary.exeSize,manifestSha256:summary.manifestSha256,
+    manifestPublicKeySpkiSha256:summary.manifestPublicKeySpkiSha256,releaseAuthorized:false}));
 }
 const called=process.argv[1]&&pathToFileURL(path.resolve(process.argv[1])).href===import.meta.url;
 if(called)main().catch(e=>{console.error('YUTANG_MANIFEST_REFUSED '+(/^[A-Z_]{3,80}$/.test(String(e?.message||''))?e.message:'RELEASE_TOOL_ERROR')); process.exitCode=1;});

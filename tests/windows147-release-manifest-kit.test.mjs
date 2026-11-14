@@ -17,10 +17,12 @@ async function env(t){
  t.after(()=>fs.rm(dir,{recursive:true,force:true}));
  const exe=path.join(dir,short.exeFileName),key=path.join(dir,'outside-project-test-only-private.pem');
  const {privateKey,publicKey}=generateKeyPairSync('ed25519');
+ const expectedManifestPublicKeySpkiSha256=summarySha(publicKey.export({format:'der',type:'spki'}));
  await fs.writeFile(exe,Buffer.concat([Buffer.from('MZ'),Buffer.alloc(2046,23)]),{flag:'wx'});
  await fs.writeFile(key,privateKey.export({format:'pem',type:'pkcs8'}),{flag:'wx',mode:0o600});
  await fs.chmod(key,0o600);
- return {dir,exe,key,publicKey,output:path.join(dir,'release-evidence'),input:{config:cfg,signedExe:exe,privateKeyFile:key,outputDir:path.join(dir,'release-evidence')}};
+ const input={config:{...cfg,expectedManifestPublicKeySpkiSha256},signedExe:exe,privateKeyFile:key,outputDir:path.join(dir,'release-evidence')};
+ return {dir,exe,key,publicKey,expectedManifestPublicKeySpkiSha256,output:path.join(dir,'release-evidence'),input};
 }
 const fixture=()=>({...short,certEvidence:{...SIGNATURE_PRESENT}});
 
@@ -224,4 +226,39 @@ test('legitimate output directory is still allowed outside source project',async
  const proof=await prepareSignedManifest(f.input,{verifyAuthenticode:()=>SIGNATURE_PRESENT});
  assert.equal(proof.status,'SOURCE_ONLY_MANIFEST_PREPARED_NOT_RELEASED');
  assert.equal((await fs.readdir(f.output)).length,3);
+});
+
+test('release manifest signing refuses missing client Ed25519 public key pin before creating outputs',async t=>{
+ const f=await env(t);
+ const config={...f.input.config};delete config.expectedManifestPublicKeySpkiSha256;
+ await assert.rejects(prepareSignedManifest({...f.input,config},{verifyAuthenticode:()=>SIGNATURE_PRESENT}),/MANIFEST_PUBLIC_KEY_PIN_MISSING/);
+ await assert.rejects(fs.lstat(f.output),{code:'ENOENT'});
+});
+test('release manifest signing rejects a valid but wrong Ed25519 key for the pinned client',async t=>{
+ const f=await env(t);
+ const wrongKey=generateKeyPairSync('ed25519').publicKey;
+ const wrongPin=summarySha(wrongKey.export({format:'der',type:'spki'}));
+ await assert.rejects(prepareSignedManifest({...f.input,config:{...f.input.config,expectedManifestPublicKeySpkiSha256:wrongPin}},{verifyAuthenticode:()=>SIGNATURE_PRESENT}),/MANIFEST_PUBLIC_KEY_PIN_MISMATCH/);
+ await assert.rejects(fs.lstat(f.output),{code:'ENOENT'});
+});
+test('release manifest requires canonical lower-case SHA256 DER SPKI pin rather than PEM-text hash',async t=>{
+ const f=await env(t);
+ const pem=f.publicKey.export({format:'pem',type:'spki'});
+ const pemSha=summarySha(pem);
+ assert.notEqual(pemSha,f.expectedManifestPublicKeySpkiSha256);
+ for(const bad of [pemSha.toUpperCase(),'invalid-hash','']){
+  await assert.rejects(prepareSignedManifest({...f.input,config:{...f.input.config,expectedManifestPublicKeySpkiSha256:bad}},{verifyAuthenticode:()=>SIGNATURE_PRESENT}),/MANIFEST_PUBLIC_KEY_PIN_MISSING|MANIFEST_PUBLIC_KEY_PIN_MISMATCH/);
+ }
+ await assert.rejects(fs.lstat(f.output),{code:'ENOENT'});
+});
+test('pin is source configuration only; signed manifest schema stays compatible with consumer v1',async t=>{
+ const f=await env(t);
+ const receipt=await prepareSignedManifest(f.input,{verifyAuthenticode:()=>SIGNATURE_PRESENT});
+ const body=await fs.readFile(path.join(f.output,'yutang-update-manifest.json'));
+ const manifest=JSON.parse(body);
+ assert.equal(receipt.manifestPublicKeySpkiSha256,f.expectedManifestPublicKeySpkiSha256);
+ assert.ok(!Object.hasOwn(manifest,'expectedManifestPublicKeySpkiSha256'));
+ assert.ok(!Object.hasOwn(manifest,'manifestPublicKeySpkiSha256'));
+ assert.equal(manifest.schema,'yutang.windows-update-manifest.v1');
+ assert.equal(manifest.repository,'yud78785/yutang-build');
 });
