@@ -92,6 +92,6 @@ if(entry){
   void runReadOnlySourcePreflight({argv:process.argv.slice(2)}).then(value=>{
     // There is no 'browser.close()': dropping this one-shot connection must never
     // terminate an Edge process that existed before this probe.
-    process.stdout.write(JSON.stringify(value)+'\n',()=>process.exit(value.status==='blocked'?2:0));
+    process.stdout.write(JSON.stringify(value)+'\n',()=>process.exit(value.status==='read_only_evidence'?0:2));
   },()=>process.stdout.write(JSON.stringify(blocked('UNEXPECTED_PRECHECK_FAILURE'))+'\n',()=>process.exit(2)));
 }
