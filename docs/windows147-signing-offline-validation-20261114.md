@@ -61,6 +61,22 @@ References:
 
 Supplier contact published by seller: info@sslmentor.rs. No email was sent or personal data disclosed.
 
+
+## Certificate reissue and publisher-thumbprint rotation — newly identified compatibility gate
+
+The shipped update-service currently expects a **single** `UPDATE_PUBLISHER_THUMBPRINT` (40 hex characters). Its `validateManifest` and `verifyAuthenticodeSignature` require that same thumbprint. This safely rejects unexpected signers, but creates a future update continuity problem: a Certum certificate reissue or renewal may change the certificate thumbprint even when the individual publisher's name is unchanged.
+
+**Never** silently switch the pinned thumbprint or weaken verification to 'any valid certificate'. A new certificate must be introduced via an explicitly validated client trust transition while the old signing identity is still usable.
+
+Before the first release, decide and test a rotation mechanism with:
+- A signed, update-authorized bridge release using the currently trusted publisher certificate and existing Ed25519 manifest key; the bridge client recognizes the next approved publisher certificate (with exact fingerprint(s) and validity rules), *or* a rigorously versioned dual-pin transition shipped in advance.
+- Both Windows versions verifying the same exact bridge EXE SHA, then the same new-cert EXE SHA, with wrong-publisher, revoked/invalid cert and tampered manifest rejection tests.
+- Delayed client/skip-a-version scenarios: older clients that miss a one-release bridge must have an explicit supported recovery/install path; they cannot be claimed to auto-update after old-pin removal.
+- Separate lifecycle for the Ed25519 update manifest public key. Rotate by pinning and testing the new public key in a previously trusted client **before** signing manifests solely with the new key.
+- Explicit approval of certificate reissue fees, signer public identity and renewal validation rules. A multi-year purchase is not proof of one unchanged X.509 cert/thumbprint for all years.
+
+This is a **design/policy finding, not an implemented or Windows-tested rotation feature**. No current EXE was changed; automatic updates remain disabled. It should be resolved before turning on a public update channel, not postponed until certificate expiration.
+
 ## Remaining gates
 
 - Obtain supplier's written Serbia individual eligibility, identity/address document types, final VAT-inclusive quotation, proper commercial Code Signing issuance and refund/reissue conditions.
