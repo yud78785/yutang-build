@@ -70,8 +70,14 @@ test('another owned Douyin homepage blocks the target, but personal and offsite 
 });
 test('missing visible comments and AI entry are valid but never called summary content',async()=>{
  const f=make({commentStatus:'no_visible_comments',aiStatus:'not_observed'});const r=await f.run();
+ assert.equal(r.status,'no_visible_evidence');assert.equal(r.reasonCode,'NO_PUBLIC_COMMENTS_OR_AI_ENTRY_VISIBLE');
  assert.equal(r.publicCommentsStatus,'no_visible_comments');assert.deepEqual(r.comments,[]);
  assert.equal(r.aiSummaryEntryVisible,false);assert.equal(r.aiSummaryGenerated,false);assert.equal(r.aiSummaryText,null);
+});
+test('a visible AI entry alone is limited evidence, not a generated AI summary',async()=>{
+ const f=make({commentStatus:'no_visible_comments',aiStatus:'entry_visible'}),r=await f.run();
+ assert.equal(r.status,'read_only_evidence');assert.equal(r.aiSummaryEntryVisible,true);
+ assert.equal(r.aiSummaryGenerated,false);assert.equal(r.aiSummaryText,null);
 });
 test('public comment failure blocks AI phase, not leaking earlier evidence',async()=>{
  const f=make({commentStatus:'blocked'}),r=await f.run();assert.equal(r.reasonCode,'COMMENT_LOGIN_REQUIRED');assert.ok(!f.calls.includes('ai-entry.read'));
