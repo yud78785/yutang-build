@@ -148,8 +148,12 @@ export async function applyUpdateTrustPatch(upstream, repositoryRoot = REPOSITOR
   main = replaceExactlyOnce(main, "import { UpdateService } from './update-service.mjs';", "import { UpdateService } from './update-service.mjs';\nimport { recoverUpdateTransaction, resolveDesktopShortcutPath } from './update-transaction.mjs';", 'update-transaction-import');
   main = replaceExactlyOnce(main,
     "    await fs.mkdir(userData, { recursive: true });\n    startup = await createStartupTimeline(userData);\n    startup.record('startup.started');",
-    "    await fs.mkdir(userData, { recursive: true });\n    startup = await createStartupTimeline(userData);\n    startup.record('startup.started');\n    const desktopShortcut = resolveDesktopShortcutPath(app);\n    const updateRecovery = await recoverUpdateTransaction(path.join(userData, 'updates'), { shortcut: desktopShortcut });\n    startup.record('startup.stage', { stage: 'update-recovery-' + updateRecovery.status });\n    if (updateRecovery.status === 'blocked') throw new Error('更新恢复被安全保护阻止：' + updateRecovery.reason + '。旧版备份已保留，请联系支持人员。');",
-    'update-transaction-startup-recovery');
+    "    await fs.mkdir(userData, { recursive: true });\n    startup = await createStartupTimeline(userData);\n    startup.record('startup.started');",
+    'startup-timeline-anchor');
+  main = replaceExactlyOnce(main,
+    "    const runtime = await prepareApiRuntime({ seedDir: path.join(resources, 'api-runtime'), userData, manifestFile: path.join(appRoot, 'app', 'build-manifest.json') });\n    startup.record('startup.stage', { stage: 'runtime-prepared' });",
+    "    const runtime = await prepareApiRuntime({ seedDir: path.join(resources, 'api-runtime'), userData, manifestFile: path.join(appRoot, 'app', 'build-manifest.json') });\n    startup.record('startup.stage', { stage: 'runtime-prepared' });\n    const desktopShortcut = resolveDesktopShortcutPath(app);\n    const nativeShortcutHelperPath = path.join(runtime, 'jobguard.exe');\n    const nativeShortcutHelperSha256 = createHash('sha256').update(await fs.readFile(nativeShortcutHelperPath)).digest('hex');\n    const updateRecovery = await recoverUpdateTransaction(path.join(userData, 'updates'), { shortcut: desktopShortcut, nativeHelperPath: nativeShortcutHelperPath, nativeHelperSha256: nativeShortcutHelperSha256 });\n    startup.record('startup.stage', { stage: 'update-recovery-' + updateRecovery.status });\n    if (updateRecovery.status === 'blocked') throw new Error('更新恢复被安全保护阻止：' + updateRecovery.reason + '。旧版备份已保留，请联系支持人员。');",
+    'update-transaction-startup-recovery-after-runtime');
   if (!main.includes("import { randomUUID, createHash } from 'node:crypto';") ||
       !main.includes("import { UpdateService } from './update-service.mjs';")) {
     throw new Error('UPDATE_TRUST_PATCH_MAIN_IMPORTS_CHANGED');
@@ -192,7 +196,7 @@ export async function applyUpdateTrustPatch(upstream, repositoryRoot = REPOSITOR
     "      await fs.mkdir(path.dirname(shortcut),{recursive:true});",
     "      await fs.rm(healthFile,{force:true});await fs.rm(stagedShortcut,{force:true});",
     "      if(!shell.writeShortcutLink(stagedShortcut,'create',{target:file,cwd:path.dirname(file),description:'大肥鱼抖音助手 · 独立 API 版',icon:file,iconIndex:0,appUserModelId:'local.dafeiyu.douyin.api'}))throw new Error('无法创建新版暂存快捷方式，旧版入口未改变。');",
-    "      const child=spawn(launcherNode,[launcher,String(process.pid),file,sha256,publisherThumbprint,version,nonce,healthFile,stagedShortcut,shortcut],{detached:true,windowsHide:true,stdio:'ignore',shell:false});",
+    "      const child=spawn(launcherNode,[launcher,String(process.pid),file,sha256,publisherThumbprint,version,nonce,healthFile,stagedShortcut,shortcut,nativeShortcutHelperPath,nativeShortcutHelperSha256],{detached:true,windowsHide:true,stdio:'ignore',shell:false});",
     "      await new Promise((resolve,reject)=>{child.once('spawn',resolve);child.once('error',reject);});child.unref();",
     "      setTimeout(()=>{void quit();},100);return {status:'restarting',message:'正在启动新版并检查 UI、API 和文件身份；确认健康后才切换桌面快捷方式。'};"
   ].join('\n');
