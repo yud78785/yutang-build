@@ -2,7 +2,7 @@
 
 **NOT AN ACTIVE WORKFLOW. NO WINDOWS JOB HAS BEEN STARTED.**
 
-Source test commit: `ea8d289411f917a785e768982efe865e3063c7ab` on `experiment/windows-147-public-web-proof-20261114`.
+Source test commit: `7d5517679d80059d2be405112a06b85ff90dee51` on `experiment/windows-147-public-web-proof-20261114`.
 
 The template `docs/templates/windows-147-public-web-one-shot.inert.yml` is intentionally stored **outside** `.github/workflows` and is never triggered by edits to this document. It is derived from the same explicit one-shot branch-push design previously tested for the no-sign PowerShell check.
 
@@ -10,7 +10,7 @@ The template `docs/templates/windows-147-public-web-one-shot.inert.yml` is inten
 
 Only after a separately granted, scoped GitHub Actions approval:
 1. Review that the repository is still public and the standard `windows-2022` and `windows-2025` runners apply.
-2. Create an isolated run branch named `experiment/windows-147-public-web-run-20261114` at **exact commit `ea8d289411f917a785e768982efe865e3063c7ab`**.
+2. Create an isolated run branch named `experiment/windows-147-public-web-run-20261114` at **exact commit `7d5517679d80059d2be405112a06b85ff90dee51`**.
 3. On that existing branch, add **only** the reviewed template as `.github/workflows/windows-147-public-web-one-shot.yml` in a separate, non-force push; only one transition from the pinned `github.event.before` SHA is eligible.
 4. The workflow itself checks out the immutable source commit (not an unreviewed branch tip), downloads original unsigned Artifact from Run `43541915930`, verifies exact EXE name, length `125446071` and SHA-256 `3201d433df727a5d5fddf8e68a0f69ea1654057e04cfad7833fd3ed7dc241a34`.
 5. On each runner, run the negative unit cases, then perform the single real public-homepage navigation probe using the **unmodified EXE**. Never reuse an earlier offline/sandbox green status as internet acceptance.
@@ -23,3 +23,7 @@ The previous Run `43541915930` already passed the old sandbox/Job Object/forced 
 Known caveats: A CI-hosted IP can be blocked or presented with CAPTCHA by the site, which makes this a BLOCKED/FAILED functional test. Neither this workflow nor a successful browser render establishes user-PC safety, a signed public release, autonomous AI abilities, or video understanding. No workaround for login/captcha is authorized.
 
 The one-shot condition guards against ordinary repeat pushes, but is **not** a cryptographic exactly-once guarantee under branch history rewriting; the active workflow must not be created without separate approval.
+
+## Pre-activation correction
+
+The immutable probe source was revised at `7d5517679d80059d2be405112a06b85ff90dee51` to (1) treat null PowerShell TCP listener output as no listeners; (2) accept only a successful HTTP response from the **top-level CDP frame** rather than an iframe; (3) require `document.readyState === 'complete'`, in addition to the rendered DOM and in-memory screenshot checks. After these changes, Node 22 local test-only-stub results were **20/20 passed**, and the exact source/test Git blobs matched the locally tested bytes. These are **offline unit results**, not Windows browser results. No Actions workflow has been activated.
