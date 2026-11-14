@@ -1,0 +1,87 @@
+# INERT TEMPLATE ONLY. File intentionally lives in docs/templates, NOT .github/workflows.
+# Requires a separate explicit user authorization before activation on its dedicated branch.
+name: YuTang 1.4.7 exact unsigned EXE public homepage cleanup RETEST - ONCE NOT RELEASE
+on:
+  push:
+    branches:
+      - experiment/windows-147-public-web-cleanup-retest-20261114
+    paths:
+      - .github/workflows/windows-147-public-web-cleanup-retest.yml
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: yutang-147-public-web-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  public-homepage:
+    # Job-level gating occurs before matrix runner allocation.
+    # Subsequent edits, branch creation, forced pushes and deletion are SKIPPED not PASS.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/experiment/windows-147-public-web-cleanup-retest-20261114' && github.event.before == '23a8959d38c9f0b72ea7ff894f01c0b0e4bcd77a' && github.event.created == false && github.event.forced == false && github.event.deleted == false
+    name: ${{ matrix.os }} - original EXE real homepage read-only probe
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-2025]
+
+    steps:
+      - name: Checkout immutable inspected test source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 23a8959d38c9f0b72ea7ff894f01c0b0e4bcd77a
+          persist-credentials: false
+
+      - name: Verify exact checked-out code SHA
+        shell: pwsh
+        run: |
+          if ((& git rev-parse HEAD).Trim() -cne '23a8959d38c9f0b72ea7ff894f01c0b0e4bcd77a') {
+            throw 'PUBLIC_WEB_PROBE_SOURCE_SHA_MISMATCH'
+          }
+
+      - name: Download the original accepted unsigned Windows 2025 EXE only
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          repository: yud78785/yutang-build
+          run-id: 43541915930
+          name: YuTang-OpenRouter-Desktop-1.4.7-SecurityHardening-windows-2025-CANDIDATE-NOT-RELEASE
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/yutang-147-accepted-exe
+
+      - name: Verify immutable EXE filename size and SHA-256 before execution
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Join-Path '${{ runner.temp }}' 'yutang-147-accepted-exe\desktop\release-api\Dafeiyu-Douyin-API-1.4.7-win-x64.exe'
+          if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw 'ACCEPTED_EXE_NOT_FOUND' }
+          if ((Get-Item -LiteralPath $exe).Length -ne 125446071) { throw 'ACCEPTED_EXE_SIZE_MISMATCH' }
+          $sha = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($sha -cne '3201d433df727a5d5fddf8e68a0f69ea1654057e04cfad7833fd3ed7dc241a34') {
+            throw 'ACCEPTED_EXE_SHA256_MISMATCH'
+          }
+          'YUTANG_ACCEPTED_EXE=' + $exe | Out-File -LiteralPath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host ('ACCEPTED_EXE_SHA256=' + $sha)
+
+      - name: Execute public-web receipt fail-closed unit tests
+        shell: pwsh
+        run: |
+          node --version
+          node --test tests/windows147-online-public-probe.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'PUBLIC_WEB_PROBE_NEGATIVE_TESTS_FAILED' }
+
+      - name: Run corrected exact unsigned EXE public homepage and cleanup probe
+        shell: pwsh
+        timeout-minutes: 18
+        env:
+          YUTANG_PUBLIC_WEB_TEST_AUTHORIZED: 'yes'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (Get-NetFirewallRule -DisplayName 'YuTang147EphemeralEdgeEgressBlock' -ErrorAction SilentlyContinue) {
+            throw 'OFFLINE_FIREWALL_RULE_NOT_ALLOWED_DURING_ONLINE_PROBE'
+          }
+          node tools/windows147-online-public-probe.mjs "$env:YUTANG_ACCEPTED_EXE"
+          if ($LASTEXITCODE -ne 0) { throw 'PUBLIC_WEB_EXE_ACCEPTANCE_NOT_PROVEN' }
