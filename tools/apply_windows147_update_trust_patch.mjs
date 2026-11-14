@@ -196,7 +196,8 @@ export async function applyUpdateTrustPatch(upstream, repositoryRoot = REPOSITOR
     "      await fs.mkdir(path.dirname(shortcut),{recursive:true});",
     "      await fs.rm(healthFile,{force:true});await fs.rm(stagedShortcut,{force:true});",
     "      if(!shell.writeShortcutLink(stagedShortcut,'create',{target:file,cwd:path.dirname(file),description:'大肥鱼抖音助手 · 独立 API 版',icon:file,iconIndex:0,appUserModelId:'local.dafeiyu.douyin.api'}))throw new Error('无法创建新版暂存快捷方式，旧版入口未改变。');",
-    "      const child=spawn(launcherNode,[launcher,String(process.pid),file,sha256,publisherThumbprint,version,nonce,healthFile,stagedShortcut,shortcut,nativeShortcutHelperPath,nativeShortcutHelperSha256],{detached:true,windowsHide:true,stdio:'ignore',shell:false});",
+    "      const stagedShortcutSha256=createHash('sha256').update(await fs.readFile(stagedShortcut)).digest('hex');",
+    "      const child=spawn(launcherNode,[launcher,String(process.pid),file,sha256,publisherThumbprint,version,nonce,healthFile,stagedShortcut,stagedShortcutSha256,shortcut,nativeShortcutHelperPath,nativeShortcutHelperSha256],{detached:true,windowsHide:true,stdio:'ignore',shell:false});",
     "      await new Promise((resolve,reject)=>{child.once('spawn',resolve);child.once('error',reject);});child.unref();",
     "      setTimeout(()=>{void quit();},100);return {status:'restarting',message:'正在启动新版并检查 UI、API 和文件身份；确认健康后才切换桌面快捷方式。'};"
   ].join('\n');
