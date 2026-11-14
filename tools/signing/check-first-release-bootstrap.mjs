@@ -66,7 +66,7 @@ export function inspectBootstrap(receipt, targetVersion) {
     currentClientCanAutomaticallyInstallSignedRelease: false,
     manualBootstrapDistributionRequired: true,
     currentUnsignedExeMustRemainUnchanged: true,
-    realSignedExeExists: false,
+    signedExeEvidenceInSourceReceipt: false,
     signedWindowsAcceptance: 'NOT_EVALUATED',
     reasons: targetIsHigher
       ? ['SOURCE_UPDATE_TRUST_DISABLED', 'NEW_PINNED_CLIENT_BUILD_AND_RETEST_REQUIRED']
