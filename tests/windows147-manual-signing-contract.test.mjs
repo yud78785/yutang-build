@@ -15,6 +15,13 @@ test('manual signer is pinned to the accepted unsigned 1.4.7 EXE SHA', () => {
   before('UNSIGNED_SHA256_NOT_ACCEPTED_BASELINE', '& $signTool sign ');
 });
 
+test('manual signer refuses renamed 1.4.7 baseline masquerading as another version', () => {
+  assert.match(script, /pinnedUnsignedFileName\s*=\s*'Dafeiyu-Douyin-API-1\.4\.7-win-x64\.exe'/);
+  assert.match(script, /if \(\$name -cne \$pinnedUnsignedFileName\) \{ Fail 'UNSIGNED_FILENAME_NOT_ACCEPTED_BASELINE' \}/);
+  before('UNSIGNED_FILENAME_NOT_ACCEPTED_BASELINE', 'Get-FileHash -LiteralPath $source -Algorithm SHA256');
+  before('UNSIGNED_FILENAME_NOT_ACCEPTED_BASELINE', '& $signTool sign ');
+});
+
 test('default invocation exits before any signing operation', () => {
   assert.match(script, /if \(-not \$Sign\)\s*\{[\s\S]*?PREFLIGHT_OK_NO_SIGNING[\s\S]*?return/);
   before('PREFLIGHT_OK_NO_SIGNING', '& $signTool sign ');

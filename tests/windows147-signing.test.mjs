@@ -12,7 +12,7 @@ const WORDS = 'a local-only long sample passphrase';
 const options = {
   version: '1.4.8', exeName: NAME, exeBytes: EXE,
   upstreamCommit: 'a'.repeat(40), patchCommit: 'b'.repeat(40),
-  workflowRunId: 43541915930, artifactId: 14092434238,
+  workflowRunId: 1001, artifactId: 2002,
   thumbprint: THUMBPRINT, subject: 'CN=Mock Publisher, C=RS'
 };
 const fixture = () => {

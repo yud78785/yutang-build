@@ -23,6 +23,9 @@ $sourceItem = Get-Item -LiteralPath $source -Force
 if (($sourceItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { Fail 'SOURCE_REPARSE_POINT_FORBIDDEN' }
 $name = [System.IO.Path]::GetFileName($source)
 if ($name -cnotmatch '^Dafeiyu-Douyin-API-\d+\.\d+\.\d+-win-x64\.exe$') { Fail 'SOURCE_EXE_NAME_INVALID' }
+# The accepted unsigned SHA belongs to version 1.4.7 only; a renamed 1.4.8 EXE is not an accepted candidate.
+$pinnedUnsignedFileName = 'Dafeiyu-Douyin-API-1.4.7-win-x64.exe'
+if ($name -cne $pinnedUnsignedFileName) { Fail 'UNSIGNED_FILENAME_NOT_ACCEPTED_BASELINE' }
 $actual = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant()
 if ($actual -cne $sha) { Fail 'UNSIGNED_CANDIDATE_SHA256_MISMATCH' }
 $sourceStatus = Get-AuthenticodeSignature -LiteralPath $source
