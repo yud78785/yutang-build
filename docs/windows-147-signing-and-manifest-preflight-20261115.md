@@ -78,3 +78,19 @@ The earlier V1 package described in section 3 remains a historical 17-test sourc
 - No signature secret or identity document is included in the ZIP or repository.
 
 **Release remains BLOCKED:** the test suite invokes a synthetic Authenticode verification callback with fixture keys, not Microsoft's native Windows signature engine. Before any genuine release, the Windows tool must be tested against a real signed EXE with actual Certum certificate validation, signer thumbprint, EKU and RFC3161 timestamp; then the **new signed EXE SHA** must complete Windows 2022/2025 full tests, updater public-key/bootstrap, malicious-signature rejection, upgrade and rollback. No certificate has been purchased, no real EXE signed, no Windows Actions run authorized or executed by V2, and no `main` change.
+
+## 8. V3 embedded-signature preflight — LATEST source-only tooling state
+
+**V3 supersedes V2 for future signers; V1/V2 remain historical offline source/test evidence only.** Detailed immutable report: `docs/windows-147-release-signing-v3-embedded-preflight-20261115.md`.
+
+The Windows `Get-AuthenticodeSignature` API can select a catalog signature; for an independently distributed EXE this is insufficient. V3 requires exact `SignatureType=Authenticode` and independently successful `signtool verify /pa /tw` with zero failures/warnings; missing configured Windows SDK SignTool path is a fail-closed condition. It does not allow catalog verification options `/a`, `/ad`, `/c`. These were **mocked** in Linux local unit tests, not verified on a Windows host with a genuine publisher certificate. No new EXE was created.
+
+- Exact V3 source Git blob: `0f9838b4c0a9cf9d375d3d76b0495a367cc6e856`.
+- Exact V3 test Git blob: `c85d59f69417055ff7751807b62332c25c53920e`.
+- Source commit: `7ef4080307e4acc9eae5963427c0d1cbf1c4cb98` (experiment branch only).
+- Node v22.16.0 Linux: syntax pass and **23/23 mock-backed unit tests pass**, TAP SHA-256 `13abaf771d28e793729339f1b72b76b2c1b8d62c392ccd0ecac620bd515be5f0`.
+- V3 ZIP SHA-256 `bad4b323fe7f9a42158efa0c3f4074cf2a97c248ad4ff8ef6fc59ff8ab56c44f`.
+- Private Google Drive backup: https://drive.google.com/file/d/1b7H6v8v9ouMa9hDib4Qo_636ZoHqheg4/view?usp=drivesdk (metadata `shared=false`, 16,801 bytes).
+- Windows certificate, timestamp, SDK tool authenticity and signer identity must all still be **checked independently in the future real signing environment**.
+- Original unsigned EXE SHA `3201d433df727a5d5fddf8e68a0f69ea1654057e04cfad7833fd3ed7dc241a34` remains unchanged. Previously passed fifth Run `43643545361` remains its only real public-web Windows 2025 acceptance. A signed EXE will have a different SHA and must undergo separate Windows 2022/2025 packaged testing.
+- No GitHub Actions rerun, credential access, certificate purchase, signing, `main` change, merge, release or auto-update activation.
