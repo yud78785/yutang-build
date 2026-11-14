@@ -164,3 +164,33 @@ test('blocked comment read still invokes upstream release exactly once',async()=
  assert.equal(r.reasonCode,'COMMENT_LOGIN_REQUIRED');
  assert.deepEqual(f.calls.filter(x=>x==='lock.release'),['lock.release']);
 });
+
+test('hung comment read returns bounded timeout, discards evidence and releases the upstream lock',async()=>{
+ const f=make();let releases=0,summaryCalled=false;
+ const r=await inspect({controller:f.controller,acquireReadLock:async()=>()=>{releases++},
+  readPageState:()=>{},readCommentDom:()=>{},observeComments:()=>new Promise(()=>{}),
+  inspectSummary:async()=>{summaryCalled=true;throw Error('must not summarize')},
+  expectedVideoId:id,observationTimeoutMs:35});
+ assert.equal(r.status,'blocked');assert.equal(r.reasonCode,'READ_ONLY_OBSERVATION_TIMEOUT');
+ assert.deepEqual(r.comments,[]);assert.equal(r.temporaryOperationLockCleanupVerified,true);
+ assert.equal(releases,1);assert.equal(summaryCalled,false);
+});
+test('hung AI-entry read cannot turn valid earlier comments into a successful result',async()=>{
+ const f=make();let releases=0;
+ const r=await inspect({controller:f.controller,acquireReadLock:async()=>()=>{releases++},
+  readPageState:()=>{},readCommentDom:()=>{},
+  observeComments:async()=>({status:'ok',videoId:id,source:'visible_public_comment_dom',
+    observationScope:'currently_visible_loaded_rows_only',comments:[{text:'earlier',commentId:'123'}],visibleCommentCount:1}),
+  inspectSummary:()=>new Promise(()=>{}),expectedVideoId:id,observationTimeoutMs:35});
+ assert.equal(r.status,'blocked');assert.equal(r.reasonCode,'READ_ONLY_OBSERVATION_TIMEOUT');
+ assert.deepEqual(r.comments,[]);assert.equal(releases,1);
+});
+test('invalid observation deadlines are rejected before any browser connection',async()=>{
+ let connected=0;const controller={async connectExistingBrowser(){connected++;return null}};
+ for(const observationTimeoutMs of [0,-1,24,60001,1.5,NaN]){
+  await assert.rejects(inspect({controller,expectedVideoId:id,observationTimeoutMs,
+    readPageState:()=>{},readCommentDom:()=>{},observeComments:()=>{},inspectSummary:()=>{},
+    acquireReadLock:async()=>()=>{}}),/INVALID_OBSERVATION_TIMEOUT/);
+ }
+ assert.equal(connected,0);
+});
