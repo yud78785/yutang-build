@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import {validatePublicReceipt, validatePublicPageEvidence, verifyDesktopStopTarget, identityReasonCode, ownedEdgePids, trackedEdgeSurvivors, cleanupRole, ownedJobGuardForCleanup} from '../tools/windows147-online-public-probe.mjs';
+import {validatePublicReceipt, validatePublicPageEvidence, verifyDesktopStopTarget, identityReasonCode, ownedEdgePids, trackedEdgeSurvivors, cleanupRole, ownedJobGuardForCleanup, summarizeIdentityTopology} from '../tools/windows147-online-public-probe.mjs';
 const SHA='3201d433df727a5d5fddf8e68a0f69ea1654057e04cfad7833fd3ed7dc241a34';
 const s=fs.readFileSync(new URL('../tools/windows147-online-public-probe.mjs', import.meta.url),'utf8');
 const green={status:200,page:{origin:'https://www.douyin.com',ready:'complete',challenged:false,titleLength:8,bodyLength:220,bodyChildren:8,paintBytes:10000},sandbox:{rendererSandboxVerified:true,networkServiceWindowsTokenVerified:true,networkServiceLowIntegrityVerified:true,networkServiceProcessOwned:true},identity:{loopbackOnly:true,listenerMatchesEdge:true},cleaned:true};
@@ -184,4 +184,60 @@ test('early inner Electron check distinguishes unverified ancestry with no termi
  ];
  assert.throws(()=>verifyDesktopStopTarget(rows,{exePid:100,exeFile:exe,backendPid:102}),/INNER_ELECTRON_ANCESTRY_NOT_VERIFIED/);
  assert.equal(identityReasonCode(new Error('INNER_ELECTRON_ANCESTRY_NOT_VERIFIED')), 'INNER_ELECTRON_ANCESTRY_NOT_VERIFIED');
+});
+
+
+test('topology snapshot is redacted and fails closed for missing parent',()=>{
+  const rows=[
+    {ProcessId:100,Name:'wrapper.exe',CommandLine:'secret CUSTOMER_API_KEY'},
+    {ProcessId:102,ParentProcessId:101,Name:'node.exe',CommandLine:'secret api-worker.mjs'},
+    {ProcessId:190,ParentProcessId:101,Name:'random.exe',CommandLine:'--owner-pid 101 --target-pid 102'}
+  ];
+  const details=summarizeIdentityTopology(rows,{exePid:100,backendPid:102});
+  assert.deepEqual(details,{wrapperPresent:true,workerPresent:true,immediateParentPresent:false,
+    immediateParentNameExpected:false,wrapperAncestryVerified:false,workerGuardCount:0,exactGuardPairVerified:false});
+  assert.doesNotMatch(JSON.stringify(details),/secret|CUSTOMER_API_KEY|ProcessId|ParentProcessId|CommandLine/);
+});
+test('topology confirms a live verified desktop and exact guard pairing',()=>{
+ const rows=[
+   {ProcessId:100,ParentProcessId:1,Name:'wrapper.exe'},
+   {ProcessId:101,ParentProcessId:100,Name:'\u5927\u80a5\u9c7c\u6296\u97f3\u52a9\u624b.exe'},
+   {ProcessId:102,ParentProcessId:101,Name:'node.exe'},
+   {ProcessId:103,ParentProcessId:101,Name:'jobguard.exe',CommandLine:'helper --owner-pid 101 --target-pid 102'}
+ ];
+ const details=summarizeIdentityTopology(rows,{exePid:100,backendPid:102});
+ assert.deepEqual(details,{wrapperPresent:true,workerPresent:true,immediateParentPresent:true,
+   immediateParentNameExpected:true,wrapperAncestryVerified:true,workerGuardCount:1,exactGuardPairVerified:true});
+});
+test('topology must detect false parent name and missing wrapper ancestry',()=>{
+ const rows=[
+   {ProcessId:100,ParentProcessId:1,Name:'wrapper.exe'},
+   {ProcessId:101,ParentProcessId:999,Name:'unexpected.exe'},
+   {ProcessId:102,ParentProcessId:101,Name:'node.exe'},
+   {ProcessId:103,ParentProcessId:101,Name:'jobguard.exe',CommandLine:'helper --owner-pid 101 --target-pid 102'}
+ ];
+ const details=summarizeIdentityTopology(rows,{exePid:100,backendPid:102});
+ assert.equal(details.immediateParentPresent,true);
+ assert.equal(details.immediateParentNameExpected,false);
+ assert.equal(details.wrapperAncestryVerified,false);
+ assert.equal(details.exactGuardPairVerified,true);
+});
+test('unrelated or duplicated guards do not validate exact pairing',()=>{
+ const rows=[
+   {ProcessId:100,ParentProcessId:1,Name:'wrapper.exe'},
+   {ProcessId:101,ParentProcessId:100,Name:'\u5927\u80a5\u9c7c\u6296\u97f3\u52a9\u624b.exe'},
+   {ProcessId:102,ParentProcessId:101,Name:'node.exe'},
+   {ProcessId:103,ParentProcessId:101,Name:'jobguard.exe',CommandLine:'helper --owner-pid 101 --target-pid 999'},
+   {ProcessId:104,ParentProcessId:101,Name:'jobguard.exe',CommandLine:'helper --owner-pid 101 --target-pid 102'}
+ ];
+ const details=summarizeIdentityTopology(rows,{exePid:100,backendPid:102});
+ assert.equal(details.workerGuardCount,2);
+ assert.equal(details.exactGuardPairVerified,false);
+});
+test('topology logs only fixed booleans/counts; PowerShell enforces UTF-8 stdout',()=>{
+ assert.match(s,/WINDOWS_PUBLIC_WEB_IDENTITY_TOPOLOGY/);
+ assert.match(s,/WINDOWS_PUBLIC_WEB_FINAL_IDENTITY_TOPOLOGY/);
+ assert.match(s,/\[Console\]::OutputEncoding=\[System\.Text\.UTF8Encoding\]::new\(\$false\)/);
+ assert.doesNotMatch(s,/JSON\.stringify\(earlyRows\)|JSON\.stringify\(remainingRows\)/);
+ assert.doesNotMatch(s,/taskkill\.exe.*'\/T'/);
 });

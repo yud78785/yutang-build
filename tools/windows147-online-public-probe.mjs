@@ -47,7 +47,8 @@ async function until(getValue, timeoutMs, reason) {
   throw new Error(reason);
 }
 function windowsJson(psCode) {
-  const raw = execFileSync('powershell.exe', ['-NoLogo','-NoProfile','-NonInteractive','-Command', psCode],
+  const utf8Ps='[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false);'+psCode;
+  const raw = execFileSync('powershell.exe', ['-NoLogo','-NoProfile','-NonInteractive','-Command', utf8Ps],
     { encoding: 'utf8', windowsHide: true, timeout: 12000, maxBuffer: 1_000_000 }).trim();
   if (!raw) return [];
   const value = JSON.parse(raw);
@@ -170,6 +171,29 @@ export function trackedEdgeSurvivors(rows, trackedEdgePids) {
   return rows.filter(p=>/msedge\.exe$/i.test(String(p.Name||'')) &&
     trackedEdgePids.has(Number(p.ProcessId)));
 }
+export function summarizeIdentityTopology(rows,{exePid,backendPid}) {
+  // Bounded, non-sensitive telemetry only. Never emit raw PIDs, process names,
+  // parent chains, paths, command lines, or environment contents.
+  const snapshot=Array.isArray(rows)?rows:[];
+  const wrapper=snapshot.find(r=>Number(r.ProcessId)===exePid);
+  const worker=snapshot.find(r=>Number(r.ProcessId)===backendPid);
+  const parentPid=Number(worker?.ParentProcessId);
+  const parent=parentPid>0?snapshot.find(r=>Number(r.ProcessId)===parentPid):null;
+  const guards=parentPid>0?snapshot.filter(r=>/jobguard\.exe$/i.test(String(r.Name||''))&&Number(r.ParentProcessId)===parentPid):[];
+  const pairedGuardCount=guards.filter(g=>
+    new RegExp('--owner-pid\\s+'+parentPid+'\\s+--target-pid\\s+'+backendPid+'(?:\\s|$)','i').test(String(g.CommandLine||''))
+  ).length;
+  return {
+    wrapperPresent:!!wrapper,
+    workerPresent:!!worker,
+    immediateParentPresent:!!parent,
+    immediateParentNameExpected:!!parent && String(parent.Name)==='\u5927\u80a5\u9c7c\u6296\u97f3\u52a9\u624b.exe',
+    wrapperAncestryVerified:!!parent && hasHostAncestor(parentPid,exePid,snapshot),
+    workerGuardCount:Math.min(guards.length,10),
+    exactGuardPairVerified:guards.length===1&&pairedGuardCount===1
+  };
+}
+
 export function identityReasonCode(error) {
   // Only fixed error codes are printed; never log untrusted process command lines or paths.
   const known=[
@@ -287,6 +311,7 @@ export async function run(exe) {
   let childError=null,exited=false,hostPid=0,backendPid=0,cleaned=false;
   let desktopTarget=null;
   let lastIdentityReason='IDENTITY_VERIFICATION_NOT_OBSERVED';
+  let lastIdentityTopology=null;
   const trackedEdgePids=new Set();
   const trackedOwnedPids=new Set();
   child.once('error',e=>{childError=e;});child.once('exit',()=>{exited=true;});
@@ -303,6 +328,7 @@ export async function run(exe) {
     // a network error can still trigger the same owned Job Object shutdown.
     desktopTarget=await until(()=>{
       const earlyRows=processes();
+      lastIdentityTopology=summarizeIdentityTopology(earlyRows,{exePid:child.pid,backendPid});
       try {
         const target=verifyDesktopStopTarget(earlyRows,{exePid:child.pid,exeFile:exe,backendPid});
         for(const p of earlyRows)if(Number(p.ProcessId)===child.pid || Number(p.ProcessId)===target.pid ||
@@ -311,6 +337,7 @@ export async function run(exe) {
       } catch(error) { lastIdentityReason=identityReasonCode(error); return null; }
     },7500,'INNER_DESKTOP_IDENTITY_NOT_READY').catch(error=>{
       console.error('WINDOWS_PUBLIC_WEB_IDENTITY_GATE '+lastIdentityReason);
+      if(lastIdentityTopology)console.error('WINDOWS_PUBLIC_WEB_IDENTITY_TOPOLOGY '+JSON.stringify(lastIdentityTopology));
       throw error;
     });
     assert.match(desktop.origin,/^http:\/\/127\.0\.0\.1:\d{4,5}$/,'LOCAL_API_NOT_LOOPBACK');
@@ -372,12 +399,14 @@ export async function run(exe) {
     if(!desktopTarget && Number.isSafeInteger(backendPid) && backendPid>0) {
       try {
         const remainingRows=processes();
+        lastIdentityTopology=summarizeIdentityTopology(remainingRows,{exePid:child.pid,backendPid});
         desktopTarget=verifyDesktopStopTarget(remainingRows,{exePid:child.pid,exeFile:exe,backendPid});
         for(const p of remainingRows)if(Number(p.ProcessId)===child.pid || Number(p.ProcessId)===desktopTarget.pid ||
           hasHostAncestor(Number(p.ProcessId),desktopTarget.pid,remainingRows))
           trackedOwnedPids.add(Number(p.ProcessId));
       } catch(error) {
         console.error('WINDOWS_PUBLIC_WEB_FINAL_IDENTITY_GATE '+identityReasonCode(error));
+        if(lastIdentityTopology)console.error('WINDOWS_PUBLIC_WEB_FINAL_IDENTITY_TOPOLOGY '+JSON.stringify(lastIdentityTopology));
         cleanupError=new Error('EARLY_DESKTOP_IDENTITY_NOT_VERIFIED');
       }
     }
