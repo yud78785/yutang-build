@@ -1,0 +1,2 @@
+# Preserve the exact Windows-tested manual signing script bytes on Git checkouts.
+tools/signing/Sign-YuTangCandidate.ps1 text eol=lf
