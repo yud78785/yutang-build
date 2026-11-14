@@ -183,6 +183,63 @@ func TestShortcutHandleCommitRejectsExistingBackup(t *testing.T) {
 	if got := shortcutRead(t, backup); got != "user backup" { t.Fatalf("user backup overwritten: %q", got) }
 }
 
+func TestRunShortcutOperationCommit(t *testing.T) {
+	shortcut, backup, temporary, _ := shortcutTestPaths(t)
+	shortcutWrite(t, shortcut, "old shortcut")
+	shortcutWrite(t, temporary, "new shortcut")
+	err := runShortcutOperation([]string{
+		"--shortcut-commit", "--owner-pid", "101",
+		"--shortcut", shortcut, "--backup", backup, "--temporary", temporary,
+		"--old-sha256", shortcutTestHash([]byte("old shortcut")),
+		"--new-sha256", shortcutTestHash([]byte("new shortcut")),
+	}, 101)
+	if err != nil { t.Fatal(err) }
+	if got := shortcutRead(t, shortcut); got != "new shortcut" { t.Fatalf("shortcut=%q", got) }
+	if got := shortcutRead(t, backup); got != "old shortcut" { t.Fatalf("backup=%q", got) }
+}
+
+func TestRunShortcutOperationRestore(t *testing.T) {
+	shortcut, backup, _, quarantine := shortcutTestPaths(t)
+	shortcutWrite(t, shortcut, "new shortcut")
+	shortcutWrite(t, backup, "old shortcut")
+	err := runShortcutOperation([]string{
+		"--shortcut-restore", "--owner-pid", "101",
+		"--shortcut", shortcut, "--backup", backup, "--quarantine", quarantine,
+		"--old-sha256", shortcutTestHash([]byte("old shortcut")),
+		"--new-sha256", shortcutTestHash([]byte("new shortcut")),
+	}, 101)
+	if err != nil { t.Fatal(err) }
+	if got := shortcutRead(t, shortcut); got != "old shortcut" { t.Fatalf("shortcut=%q", got) }
+	if _, err := os.Lstat(backup); !errors.Is(err, os.ErrNotExist) { t.Fatalf("backup remains: %v", err) }
+	if _, err := os.Lstat(quarantine); !errors.Is(err, os.ErrNotExist) { t.Fatalf("quarantine remains: %v", err) }
+}
+
+func TestRunShortcutOperationDelete(t *testing.T) {
+	shortcut, _, _, _ := shortcutTestPaths(t)
+	shortcutWrite(t, shortcut, "temporary shortcut")
+	err := runShortcutOperation([]string{
+		"--shortcut-delete", "--owner-pid", "101",
+		"--path", shortcut, "--sha256", shortcutTestHash([]byte("temporary shortcut")),
+	}, 101)
+	if err != nil { t.Fatal(err) }
+	if _, err := os.Lstat(shortcut); !errors.Is(err, os.ErrNotExist) { t.Fatalf("shortcut remains: %v", err) }
+}
+
+func TestRunShortcutOperationRejectsWrongParentWithoutMutation(t *testing.T) {
+	shortcut, backup, temporary, _ := shortcutTestPaths(t)
+	shortcutWrite(t, shortcut, "old shortcut")
+	shortcutWrite(t, temporary, "new shortcut")
+	err := runShortcutOperation([]string{
+		"--shortcut-commit", "--owner-pid", "101",
+		"--shortcut", shortcut, "--backup", backup, "--temporary", temporary,
+		"--old-sha256", shortcutTestHash([]byte("old shortcut")),
+		"--new-sha256", shortcutTestHash([]byte("new shortcut")),
+	}, 999)
+	if err == nil { t.Fatal("wrong parent accepted") }
+	if got := shortcutRead(t, shortcut); got != "old shortcut" { t.Fatalf("shortcut changed: %q", got) }
+	if _, err := os.Lstat(backup); !errors.Is(err, os.ErrNotExist) { t.Fatalf("backup unexpectedly created: %v", err) }
+}
+
 func TestShortcutHandleRejectsReparsePoint(t *testing.T) {
 	shortcut, _, _, _ := shortcutTestPaths(t)
 	target := filepath.Join(filepath.Dir(shortcut), "target.lnk")
