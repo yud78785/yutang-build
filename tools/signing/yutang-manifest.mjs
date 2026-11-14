@@ -8,6 +8,7 @@ import {
   verifyManifest, validateManifest, normalizedThumbprint, sha256
 } from '../windows147-signing/core.mjs';
 import { pathToFileURL } from 'node:url';
+import { requireReviewedSignedCandidate } from './signed-acceptance-registry.mjs';
 
 function requireCondition(ok, code) { if (!ok) throw new Error(code); }
 function isPlainObject(o) { return o && typeof o === 'object' && !Array.isArray(o); }
@@ -70,7 +71,7 @@ async function publicKeyObject(file) {
   return key;
 }
 
-async function build(options) {
+async function build(options, { reviewedRegistry } = {}) {
   const exe = path.resolve(options.exe);
   const receipt = await readJson(path.resolve(options.receipt));
   const meta = await readJson(path.resolve(options.metadata));
@@ -86,13 +87,6 @@ async function build(options) {
     /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/.test(String(meta.version)) &&
     meta.tag === 'v' + meta.version && normalizedThumbprint(meta.authenticodeThumbprint) === thumb,
     'METADATA_IDENTITY_MISMATCH');
-  // A signed release must have a separate signed-file acceptance run and artifact.
-  // These historical IDs belong to the unsigned EXE only, even if its code is identical.
-  if (meta.version === '1.4.7' &&
-      (meta.candidate?.workflowRunId === 43541915930 ||
-       [14092434238, 14092741259, 14093021418].includes(meta.candidate?.artifactId))) {
-    throw new Error('UNSIGNED_CANDIDATE_IDS_NOT_SIGNED_PROVENANCE');
-  }
   // One canonical implementation for schema, hashing, serialization and Ed25519.
   const manifest = makeManifest({
     version: meta.version,
@@ -106,6 +100,10 @@ async function build(options) {
     subject: receipt.authenticode.subject.trim()
   });
   validatedManifest(manifest, thumb);
+  // Production uses the empty, source-controlled reviewed registry until a
+  // newly signed EXE has independent Windows 2022/2025 job evidence.
+  // The second argument exists solely to inject disposable fixtures in unit tests.
+  requireReviewedSignedCandidate(meta, binary.sha256, receipt.originalUnsignedSha256, reviewedRegistry);
   const pub = await publicKeyObject(path.resolve(options['public-key']));
   await regularFile(path.resolve(options['private-key']), 16 * 1024);
   const privatePem = await fs.readFile(path.resolve(options['private-key']));

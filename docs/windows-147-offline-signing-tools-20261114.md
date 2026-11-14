@@ -34,6 +34,7 @@ Date: 2026-11-14. Branch: experiment/windows-147-signing-tools-20261114. No prod
 - The signing-tools experiment branch is NOT in the push-trigger branch allowlist of windows-147-packaged-smoke-fix.yml; do not start the Windows build merely to prove synthetic signing scripts.
 - Windows PowerShell/SignTool script remains UNTESTED on a real Windows signing workstation. The isolated Node test pass does not replace that validation.
 - A local JSON signing receipt is NOT cryptographic proof by itself; independently check Authenticode trust, chain, signer thumbprint and timestamp.
+- The signed-candidate provenance registry is intentionally EMPTY until a new exact signed SHA is independently verified in Windows 2022 and Windows 2025. tools/signing/yutang-manifest.mjs now refuses production manifest creation without a matching reviewed registry entry; test-only mock evidence cannot be passed as a CLI option. See docs/windows-147-signed-candidate-provenance-gate-20261114.md.
 - Do not publish until the same signed SHA passes two Windows versions, signature mismatch and tampering fail closed, real download/health/rollback and user data preservation E2E checks succeed; explicit release authorization remains required.
 
 ## Supplier conditions requiring written confirmation before buying
