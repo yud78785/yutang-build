@@ -680,18 +680,48 @@ Edge 外网在本轮被主动阻断；真实 Douyin 导航返回 ERR_NETWORK_ACC
 
 两台机器的新候选均已完成真实 EXE 启动、Edge sandbox、Network Service AppContainer + Low Integrity、CDP loopback、两次重启和三种强制退出清理，两个独立构建 job 全部成功。
 
-### 16.4 尚未关闭
+### 16.4 同一 Windows 2025 EXE 在 Windows 2022 的交叉验收最终通过
 
-Windows 2022 对同一个 Windows 2025 候选的交叉 job 已下载并校验 Windows 2025 Artifact 14088736556，SHA 预期为：
+- 交叉 job：132257080868，success，15/15 steps。
+- 交叉测试 Artifact：14089001701。
+- 状态：PASS_SAME_WINDOWS_2025_CANDIDATE_WINDOWS_2022_CROSS_TEST。
+- Windows 2022 下载的是本轮 Windows 2025 Artifact 14088736556 中的原始 EXE，没有重新构建。
+- 下载文件大小：125,304,537 bytes。
+- 交叉回执 SHA-256：2b3200db6c9be0aa07ea10df8c56077a31c6afec7e16d6806f7700696707367a。
+- sameBinaryAsWindows2025=true、sourceCandidateReceiptVerified=true、release=false。
+- 已独立提取 Windows 2025 EXE 并重新计算 SHA；实际文件、sidecar、Windows 2025 候选回执、Windows 2022 交叉回执完全一致。
 
-2b3200db6c9be0aa07ea10df8c56077a31c6afec7e16d6806f7700696707367a
+同一二进制在 Windows 2022 的安全证据：
+- Renderer 3 个进程均为 AppContainer + Lockdown + Untrusted。
+- Network Service 的真实 Windows Token：isAppContainer=true、integrityRid=4096、integrityLevel=Low。
+- edge://sandbox 的 Network Service Lockdown 仍为 None、Integrity 列仍为 Default；准确表述仍是 AppContainer + Low Integrity，不是 LPAC。
+- CDP 仅 loopback；3 次启动、3 次关闭、两次重启；正常关闭后进程和监听残留均为 0。
+- kill-host-only、kill-jobguard-only、kill-electron-main-only 三种强杀均通过；每种 tracked processes、profile processes、CDP listeners 均为 0，无关 Edge 进程保持存活。
+- 四份交叉回执（normal、force-host、force-guard、force-desktop）均绑定相同候选 SHA；Edge cleanupVerified=true。
+- 外网阻断按设计生效；没有真实抖音播放、账号、模型密钥或模型调用。
 
-但同一 EXE 的 Edge 沙盒与生命周期复测仍在运行。因此：
-- 两台独立构建：通过。
-- 两台独立 EXE 安全验收：通过。
-- 新候选同一 EXE 跨平台交叉验收：待完成。
-- 不可沿用第 15 节旧候选的 cross-test 结果替代本轮。
-- 签名仍为 NotSigned；Ed25519 公钥和 Publisher thumbprint 仍未配置；自动更新保持关闭。
+### 16.5 更新器并发修改保护的准确边界
 
-本轮临时 Edge 外网阻断规则的删除命令会在各 job 完成时执行；仍保留第 15.6 节的审计限制：现有 cleanup step 没有删除后查询规则不存在的显式断言。
+本轮新增的 3 项事务测试确认：在提交前检测到旧快捷方式或暂存快捷方式的 SHA 与事务日志不一致时，更新器拒绝继续；恢复逻辑把未知的当前快捷方式优先识别为 CURRENT_SHORTCUT_CHANGED_BY_USER。
 
+但文件哈希复核与最终 rename 不是操作系统级 compare-and-swap。极窄的时间窗口内，如果另一个同用户进程恰好在最后一次哈希复核之后、rename 之前再次改写快捷方式，本轮测试没有证明能原子阻止该竞态。因此本保护的证据范围是“提交前和替换前检查能够检测到的并发修改”；不能声称抵御拥有同一用户权限的恶意并发进程。正式更新启用前，若威胁模型要求防同用户恶意竞态，还需设计 Windows 原生文件句柄/替换机制并做专门竞争测试。
+
+### 16.6 当前最终状态与仍未完成事项
+
+- 本轮 Workflow Run 43532232402：completed / success。
+- Windows 2022 独立 EXE：Artifact 14087804790，SHA a37d552ce33c117ef60c4d7d394c8f5ed2c7808a0a75087f07785c92cf74aec6。
+- Windows 2025 独立 EXE：Artifact 14088736556，SHA 2b3200db6c9be0aa07ea10df8c56077a31c6afec7e16d6806f7700696707367a。
+- 同一个 Windows 2025 EXE 在 Windows 2022 交叉测试：Artifact 14089001701，SHA 与 Windows 2025 完全一致。
+- 三个 job 全部 success；两个独立构建 job 各 25/25 steps，交叉 job 15/15 steps。
+- main 仍为 4745ed23cbb748cb4b070ed70390703d1261aea0，未修改；没有 PR 合并、正式 Release 或用户电脑安装。
+
+本轮临时 Edge 外网阻断规则的删除命令已执行，cleanup step 成功；但没有删除后查询规则不存在的独立断言。GitHub hosted runner 是一次性环境，不涉及用户电脑的防火墙配置。
+
+仍未完成：
+1. 正式 Authenticode 发布者证书 / 受控签名服务。
+2. 固定客户端 Ed25519 manifest 公钥和 Publisher thumbprint。
+3. 签名发布候选及真实在线更新 E2E。
+4. 真实成功升级、错误签名拒绝、启动失败回滚和用户数据保留验收。
+5. 若要覆盖同用户恶意并发写入，再做 Windows 原生原子替换/文件锁方案及竞争测试。
+
+当前候选仍为 NotSigned / CANDIDATE-NOT-RELEASE，自动更新继续关闭。
