@@ -94,22 +94,36 @@ async function wsOpen(url) {
   );
   return ws;
 }
-async function command(ws,id,method,params={},sessionId) {
-  return await bounded(
-    new Promise((resolve,reject)=>{
-      const onMessage = e => {
-        let result; try { result = JSON.parse(String(e.data)); } catch {return;}
-        if(result.id !== id) return;
-        ws.removeEventListener('message',onMessage);
-        if(result.error) reject(new Error('CDP_COMMAND_ERROR_'+method));
-        else resolve(result.result || {});
-      };
-      ws.addEventListener('message',onMessage);
-      try { ws.send(JSON.stringify({id,method,params,...(sessionId?{sessionId}:{})})); }
-      catch(error) { ws.removeEventListener('message',onMessage); reject(error); }
-    }),
-    7500,'CDP_COMMAND_TIMEOUT_'+method
-  );
+export function command(ws,id,method,params={},sessionId,timeoutMs=7500) {
+  // Give the command its own cleanup-bound timeout. Promise.race alone leaves
+  // the response listener active after a timeout or socket closure.
+  return new Promise((resolve,reject)=>{
+    let timer=null,settled=false;
+    const onMessage=e=>{
+      let response;
+      try { response=JSON.parse(String(e.data)); } catch { return; }
+      if(response?.id!==id)return;
+      if(response.error)finish(reject,new Error('CDP_COMMAND_ERROR_'+method));
+      else finish(resolve,response.result||{});
+    };
+    const onClose=()=>finish(reject,new Error('CDP_SOCKET_CLOSED'));
+    const onError=()=>finish(reject,new Error('CDP_SOCKET_ERROR'));
+    const finish=(callback,value)=>{
+      if(settled)return;
+      settled=true;
+      clearTimeout(timer);
+      ws.removeEventListener('message',onMessage);
+      ws.removeEventListener('close',onClose);
+      ws.removeEventListener('error',onError);
+      callback(value);
+    };
+    ws.addEventListener('message',onMessage);
+    ws.addEventListener('close',onClose);
+    ws.addEventListener('error',onError);
+    timer=setTimeout(()=>finish(reject,new Error('CDP_COMMAND_TIMEOUT_'+method)),timeoutMs);
+    try { ws.send(JSON.stringify({id,method,params,...(sessionId?{sessionId}:{})})); }
+    catch { finish(reject,new Error('CDP_COMMAND_SEND_FAILED')); }
+  });
 }
 async function version() {
   const r = await fetch('http://127.0.0.1:9227/json/version',{signal:AbortSignal.timeout(5000)});
@@ -540,6 +554,17 @@ export async function run(exe) {
       } catch { cleanupError=new Error('CANDIDATE_DIRECTORY_CLEANUP_UNVERIFIED'); }
     }
     if(cleanupError) throw cleanupError;
+    // Independent positive cleanup evidence, including when the page gate
+    // failed. Only the exact verified desktop and observed candidate tree
+    // authorize this claim; no PIDs, paths or user data are emitted.
+    if(cleaned && desktopTarget?.pid>0 && trackedOwnedPids.size>0) {
+      console.log('WINDOWS_PUBLIC_WEB_CLEANUP_OK '+JSON.stringify({
+        exeSha256:SHA,verifiedDesktop:true,
+        trackedCandidateProcessCount:trackedOwnedPids.size,
+        trackedProcessesRemaining:0,cdpListenersRemaining:0,
+        isolatedDirectoriesRemoved:true
+      }));
+    }
   }
 }
 const invoked=process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url);

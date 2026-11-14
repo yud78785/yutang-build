@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import {validatePublicReceipt, validatePublicPageEvidence, verifyDesktopStopTarget, identityReasonCode, ownedEdgePids, trackedEdgeSurvivors, cleanupRole, ownedJobGuardForCleanup, summarizeIdentityTopology, safeProcessSnapshot, summarizePublicPageState, observePublicCdpEvent, summarizePublicCdpSignals, createPublicDocumentResponseWatch} from '../tools/windows147-online-public-probe.mjs';
+import {validatePublicReceipt, validatePublicPageEvidence, verifyDesktopStopTarget, identityReasonCode, ownedEdgePids, trackedEdgeSurvivors, cleanupRole, ownedJobGuardForCleanup, summarizeIdentityTopology, safeProcessSnapshot, summarizePublicPageState, observePublicCdpEvent, summarizePublicCdpSignals, createPublicDocumentResponseWatch, command} from '../tools/windows147-online-public-probe.mjs';
 const SHA='3201d433df727a5d5fddf8e68a0f69ea1654057e04cfad7833fd3ed7dc241a34';
 const s=fs.readFileSync(new URL('../tools/windows147-online-public-probe.mjs', import.meta.url),'utf8');
 const green={status:200,page:{origin:'https://www.douyin.com',ready:'complete',challenged:false,titleLength:8,bodyLength:220,bodyChildren:8,paintBytes:10000},sandbox:{rendererSandboxVerified:true,networkServiceWindowsTokenVerified:true,networkServiceLowIntegrityVerified:true,networkServiceProcessOwned:true},identity:{loopbackOnly:true,listenerMatchesEdge:true},cleaned:true};
@@ -417,4 +417,62 @@ test('the instrumented CDP session enables authoritative lifecycle events',()=>{
  assert.match(s,/'Page.setLifecycleEventsEnabled',\{enabled:true\}/);
  assert.match(s,/params\.loaderId===state\.mainDocumentLoaderId/);
  assert.match(s,/assert\.equal\(page\?\.ready, 'complete'/);
+});
+
+
+class FakeCdpSocket extends EventTarget {
+ constructor() {super();this.sent=[];this.listeners={message:new Set(),close:new Set(),error:new Set()};this.throwOnSend=false;}
+ addEventListener(type,listener,options) {super.addEventListener(type,listener,options);this.listeners[type]?.add(listener);}
+ removeEventListener(type,listener,options) {super.removeEventListener(type,listener,options);this.listeners[type]?.delete(listener);}
+ send(data) {if(this.throwOnSend)throw new Error('C:\\private\\source\\token');this.sent.push(JSON.parse(data));}
+ response(body) {this.dispatchEvent(new MessageEvent('message',{data:JSON.stringify(body)}));}
+ count() {return Object.values(this.listeners).reduce((n,s)=>n+s.size,0);}
+}
+test('CDP command accepts only matching response, and releases listeners on success',async()=>{
+ const ws=new FakeCdpSocket();
+ const pending=command(ws,91,'Page.getFrameTree',{},'safe-session',100);
+ assert.equal(ws.sent.length,1);
+ assert.equal(ws.sent[0].id,91);
+ ws.response({id:92,result:{ignored:true}});
+ ws.response({id:91,result:{accepted:true}});
+ assert.deepEqual(await pending,{accepted:true});
+ assert.equal(ws.count(),0);
+});
+test('CDP command rejects protocol errors without preserving listeners',async()=>{
+ const ws=new FakeCdpSocket();
+ const pending=command(ws,8,'Page.reload',{},'safe-session',100);
+ ws.response({id:8,error:{code:-32601,message:'private: url and token'}});
+ await assert.rejects(pending,/^Error: CDP_COMMAND_ERROR_Page.reload$/);
+ assert.equal(ws.count(),0);
+});
+test('CDP command timeout closes response, error, and close listeners',async()=>{
+ const ws=new FakeCdpSocket();
+ const pending=command(ws,9,'Runtime.evaluate',{},'safe-session',10);
+ await assert.rejects(pending,/CDP_COMMAND_TIMEOUT_Runtime.evaluate/);
+ assert.equal(ws.count(),0);
+ ws.response({id:9,result:{late:true}});
+ assert.equal(ws.count(),0);
+});
+test('CDP socket close or error while command pending rejects and cleans up',async()=>{
+ for(const [event,reason] of [['close','CDP_SOCKET_CLOSED'],['error','CDP_SOCKET_ERROR']]) {
+   const ws=new FakeCdpSocket();
+   const pending=command(ws,19,'Page.enable',{},'safe-session',100);
+   ws.dispatchEvent(new Event(event));
+   await assert.rejects(pending,new RegExp(reason));
+   assert.equal(ws.count(),0);
+ }
+});
+test('CDP command send failure is redacted and cleans up all listeners',async()=>{
+ const ws=new FakeCdpSocket();ws.throwOnSend=true;
+ await assert.rejects(command(ws,13,'Page.reload',{},'safe-session',100),/CDP_COMMAND_SEND_FAILED/);
+ assert.equal(ws.count(),0);
+});
+test('public-web cleanup success is emitted only after verified process and directory cleanup',()=>{
+ const guard=s.indexOf('if(cleanupError) throw cleanupError;');
+ const marker=s.indexOf("console.log('WINDOWS_PUBLIC_WEB_CLEANUP_OK '");
+ assert.ok(marker>guard && guard>0);
+ assert.match(s,/if\(cleaned && desktopTarget\?\.pid>0 && trackedOwnedPids\.size>0\)/);
+ assert.match(s,/trackedProcessesRemaining:0,cdpListenersRemaining:0/);
+ assert.match(s,/isolatedDirectoriesRemoved:true/);
+ assert.doesNotMatch(s,/taskkill\.exe.*'\/T'/);
 });
