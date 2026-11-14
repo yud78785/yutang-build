@@ -34,7 +34,11 @@ jobs:
         shell: pwsh
         run: |
           if ($env:GITHUB_REPOSITORY -cne 'yud78785/yutang-build') { throw 'WRONG_REPOSITORY' }
-          if ($env:GITHUB_REF -cne 'refs/heads/experiment/windows-147-shortcut-handle-20261114') { throw 'WRONG_EXPERIMENT_BRANCH' }
+          $allowedRefs = @(
+            'refs/heads/experiment/windows-147-shortcut-handle-20261114',
+            'refs/heads/experiment/windows-147-shortcut-handle-fix-20261114'
+          )
+          if ($allowedRefs -cnotcontains $env:GITHUB_REF) { throw 'WRONG_EXPERIMENT_BRANCH' }
           if ($env:RUNNER_OS -cne 'Windows') { throw 'WINDOWS_RUNNER_REQUIRED' }
 
       - name: Set up Go
