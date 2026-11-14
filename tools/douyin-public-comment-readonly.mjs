@@ -79,8 +79,9 @@ export function classifyPublicCommentEvidence({ stateBefore, stateAfter, comment
     const key = item.commentId == null ? 'text:' + text : 'id:' + item.commentId;
     if (seen.has(key)) continue;
     seen.add(key);
-    comments.push({ text, commentId: item.commentId ?? null });
-    if (comments.length >= limit) break;
+    // Validate *every* visible row (bounded to 100) before returning a limited
+    // selection, or a late cross-video row could evade the evidence gate.
+    if (comments.length < limit) comments.push({ text, commentId: item.commentId ?? null });
   }
   return {
     status: comments.length ? 'ok' : 'no_visible_comments',
