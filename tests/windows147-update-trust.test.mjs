@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { EventEmitter } from 'node:events';
 import { generateKeyPairSync, sign, createHash } from 'node:crypto';
 import {
@@ -21,10 +22,24 @@ const stagedShortcutSha256 = createHash('sha256').update('new shortcut').digest(
 const { publicKey, privateKey } = generateKeyPairSync('ed25519');
 const publicKeyPem = publicKey.export({ type: 'spki', format: 'pem' });
 
+async function readRepositorySource(relativePath) {
+  const start = path.dirname(fileURLToPath(import.meta.url));
+  for (let depth = 0; depth < 8; depth++) {
+    const root = path.resolve(start, ...Array(depth).fill('..'));
+    try {
+      return await fs.readFile(path.join(root, relativePath), 'utf8');
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error;
+    }
+  }
+  throw new Error('REPOSITORY_SOURCE_NOT_FOUND: ' + relativePath);
+}
+
+
 test('Electron 主进程在创建暂存快捷方式后固定 SHA-256 并传给更新启动器', async () => {
-  const patcher = await fs.readFile(new URL('../tools/apply_windows147_update_trust_patch.mjs', import.meta.url), 'utf8');
-  const launcher = await fs.readFile(new URL('../tools/windows147-update-patched/update-launcher.mjs', import.meta.url), 'utf8');
-  const transaction = await fs.readFile(new URL('../tools/windows147-update-patched/update-transaction.mjs', import.meta.url), 'utf8');
+  const patcher = await readRepositorySource('tools/apply_windows147_update_trust_patch.mjs');
+  const launcher = await readRepositorySource('tools/windows147-update-patched/update-launcher.mjs');
+  const transaction = await readRepositorySource('tools/windows147-update-patched/update-transaction.mjs');
   const pinIndex = patcher.indexOf("const stagedShortcutSha256=createHash('sha256').update(await fs.readFile(stagedShortcut)).digest('hex');");
   const spawnIndex = patcher.indexOf("const child=spawn(launcherNode,[launcher,String(process.pid),file,sha256,publisherThumbprint,version,nonce,healthFile,stagedShortcut,stagedShortcutSha256,shortcut");
   assert.ok(pinIndex >= 0 && spawnIndex > pinIndex, 'Electron main must pin the staged shortcut before spawning the updater');
