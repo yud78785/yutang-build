@@ -46,3 +46,16 @@
 - No certificates purchased, individual validated, credentials used, real EXE signed, key shared, updater opened, release created or user's PC operated.
 - Main last confirmed `4745ed23cbb748cb4b070ed70390703d1261aea0`.
 - Release state: **NOT AUTHORIZED, NOT READY**. The unsigned original EXE fifth-run acceptance is preserved and must not be presented as the future signed EXE's acceptance.
+
+## 6. Vendor cancellation terms — verified from SSLmentor code-signing policy
+
+Official policy page: https://www.sslmentor.rs/ssl/tc-mbg (CODE certificate section, checked 2026-11-15).
+
+- The advertised 30-day cancellation window is **not** an unconditional full-refund offer. Cancellation uses the authorized written control-panel form.
+- Terms describe full refund for EUR bank transfer under the ordinary cancellation provisions, with roughly **2%–5%** rounded transaction deduction possible for card/PayPal.
+- In specified CODE certificate cancellation or interrupted validation cases, seller may charge **at least 25% of the ordered certificate price**. The text uses a generic SSL-certificate wording within the CODE clause; do not resolve this ambiguity without vendor confirmation.
+- When validation is not completed within 30 days and the certificate was not issued, seller may cancel/refund after transaction deductions and a credit-note processing fee of **at least €10**.
+- Distinguish (a) failed CA identity/address verification, (b) applicant's incomplete verification, and (c) certificate issued then voluntarily canceled. The text does not yield one guaranteed exact refund for every situation.
+- This is **not** permission to order or submit a passport, residency document, lease agreement, bank statement or payment credential. Await written final invoice and case-specific refund response if considering payment.
+
+New decision: prefer evaluating **one-year Certum Individual (€117 website price)** rather than committing to 2–3 years until the issuing CA, refund exposure, manual SimplySign operation and public personal certificate subject are acceptable. No orders have been made.
