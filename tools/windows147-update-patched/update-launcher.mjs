@@ -24,7 +24,7 @@ export function verifyAuthenticodeSignature(file, expectedThumbprint, {
   if (!/^[A-F0-9]{40}$/.test(expected)) throw new Error('AUTHENTICODE_PUBLISHER_NOT_CONFIGURED');
   if (!path.isAbsolute(file)) throw new Error('AUTHENTICODE_FILE_PATH_INVALID');
   const script = "$ErrorActionPreference='Stop'; $s=Get-AuthenticodeSignature -LiteralPath $env:YUTANG_SIGNED_EXE; " +
-    "[pscustomobject]@{status=[string]$s.Status; thumbprint=[string]$s.SignerCertificate.Thumbprint} | ConvertTo-Json -Compress";
+    "[pscustomobject]@{status=[string]$s.Status; signatureType=[string]$s.SignatureType; thumbprint=[string]$s.SignerCertificate.Thumbprint} | ConvertTo-Json -Compress";
   const stdout = execFileSyncImpl('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
     encoding: 'utf8',
     timeout: 15000,
@@ -34,7 +34,10 @@ export function verifyAuthenticodeSignature(file, expectedThumbprint, {
   });
   let result;
   try { result = JSON.parse(stdout); } catch { throw new Error('AUTHENTICODE_RESULT_INVALID'); }
-  if (result.status !== 'Valid' || normalizedThumbprint(result.thumbprint) !== expected) {
+  // Reject Windows Catalog signatures even when Windows reports Valid: they do not travel with the EXE.
+  // This is consumer-side validation and must not require an installed Windows SDK SignTool.
+  if (result.status !== 'Valid' || result.signatureType !== 'Authenticode' ||
+      normalizedThumbprint(result.thumbprint) !== expected) {
     throw new Error('AUTHENTICODE_PUBLISHER_VERIFICATION_FAILED');
   }
   return { status: result.status, thumbprint: normalizedThumbprint(result.thumbprint) };

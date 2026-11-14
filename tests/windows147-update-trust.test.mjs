@@ -11,9 +11,10 @@ import {
   UPDATE_REPOSITORY,
   validateManifest,
   newerVersion,
-  parseVersion
+  parseVersion,
+  verifyAuthenticodeSignature as verifyDownload
 } from '../tools/windows147-update-patched/update-service.mjs';
-import { runUpdateLauncher } from '../tools/windows147-update-patched/update-launcher.mjs';
+import { runUpdateLauncher, verifyAuthenticodeSignature as verifyLauncher } from '../tools/windows147-update-patched/update-launcher.mjs';
 
 const THUMBPRINT = 'A'.repeat(40);
 const bytes = Buffer.concat([Buffer.from('MZ'), Buffer.alloc(2046, 27)]);
@@ -574,3 +575,62 @@ test('发布者签名不通过时，更新启动器不会创建新版进程或�
   assert.equal(spawnCount, 0);
   assert.equal(await fs.readFile(shortcut, 'utf8'), 'old shortcut');
 });
+
+
+// New source-only update-trust regression: Windows Catalog signatures are not portable EXE signatures.
+// Win32 API responses are synthetic. These tests do not install Windows SDK tools,
+// contact a CA, sign or execute an EXE, or change an actual updater's trust pin.
+const publisher = 'A'.repeat(40);
+const signedFile = path.resolve('/tmp/YuTang-signature-type-test-only.exe');
+
+for (const [label, verifier] of [['download-verifier', verifyDownload], ['upgrade-launcher', verifyLauncher]]) {
+  function windowsReply(payload) {
+    let calls = 0;
+    const execFileSyncImpl = (program, argv, options) => {
+      calls++;
+      assert.equal(program, 'powershell.exe');
+      assert.equal(options.env.YUTANG_SIGNED_EXE, signedFile);
+      assert.match(argv.at(-1), /signatureType=\[string\]\$s\.SignatureType/);
+      return JSON.stringify(payload);
+    };
+    return { execFileSyncImpl, get calls() { return calls; } };
+  }
+  test(`${label}: accepts only a valid embedded Authenticode signature and pinned signer`, () => {
+    const reply = windowsReply({ status: 'Valid', signatureType: 'Authenticode', thumbprint: publisher, subject: 'CN=Fixture' });
+    const result = verifier(signedFile, publisher, { platform: 'win32', execFileSyncImpl: reply.execFileSyncImpl });
+    assert.equal(result.status, 'Valid');
+    assert.equal(result.thumbprint, publisher);
+    assert.equal(reply.calls, 1);
+  });
+  for (const [caseName, fields] of [
+    ['valid Catalog signature', { status: 'Valid', signatureType: 'Catalog', thumbprint: publisher }],
+    ['missing SignatureType field', { status: 'Valid', thumbprint: publisher }],
+    ['unsigned executable', { status: 'NotSigned', signatureType: 'None', thumbprint: publisher }],
+    ['wrong publisher', { status: 'Valid', signatureType: 'Authenticode', thumbprint: 'B'.repeat(40) }]
+  ]) {
+    test(`${label}: rejects ${caseName} even if other fields look valid`, () => {
+      const reply = windowsReply(fields);
+      assert.throws(() => verifier(signedFile, publisher, {
+        platform: 'win32', execFileSyncImpl: reply.execFileSyncImpl
+      }), /AUTHENTICODE_PUBLISHER_VERIFICATION_FAILED/);
+      assert.equal(reply.calls, 1);
+    });
+  }
+  test(`${label}: malformed PowerShell result fails closed`, () => {
+    assert.throws(() => verifier(signedFile, publisher, {
+      platform: 'win32', execFileSyncImpl: () => 'not-json'
+    }), /AUTHENTICODE_RESULT_INVALID/);
+  });
+  test(`${label}: missing pinned thumbprint is rejected before any PowerShell call`, () => {
+    let calls = 0;
+    assert.throws(() => verifier(signedFile, '', {
+      platform: 'win32', execFileSyncImpl: () => { calls++; return '{}'; }
+    }), /AUTHENTICODE_PUBLISHER_NOT_CONFIGURED/);
+    assert.equal(calls, 0);
+  });
+  test(`${label}: non-Windows environment is rejected`, () => {
+    assert.throws(() => verifier(signedFile, publisher, {
+      platform: 'linux', execFileSyncImpl: () => { throw Error('UNEXPECTED_CALL'); }
+    }), /AUTHENTICODE_WINDOWS_REQUIRED/);
+  });
+}
