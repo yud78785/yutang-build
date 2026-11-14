@@ -207,6 +207,7 @@ export async function runUpdateLauncher({
       !/^[a-f0-9]{64}$/.test(sha256 || '') || !/^\d+\.\d+\.\d+$/.test(version || '') ||
       !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(nonce || '') ||
       !path.isAbsolute(healthFile || '') || !path.isAbsolute(stagedShortcut || '') ||
+      !/^[a-f0-9]{64}$/.test(expectedStagedShortcutSha256 || '') ||
       !path.isAbsolute(shortcut || '') || path.extname(stagedShortcut).toLowerCase() !== '.lnk' ||
       path.extname(shortcut).toLowerCase() !== '.lnk') throw new Error('更新启动参数无效');
   const expected = normalizedThumbprint(expectedPublisherThumbprint);
