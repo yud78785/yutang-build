@@ -42,3 +42,20 @@ For the verified 1.4.7 receipt this always emits a **blocked planning result**, 
 ## Current next step
 
 No further Windows 1.4.7 Edge lifecycle reruns are useful until a new signed/pinned candidate SHA exists. The next external blocker is the reseller's case-specific written response on Serbian natural-person qualification, VAT-inclusive quote and SimplySign/renewal conditions. An inquiry draft exists but is **not sent**. After actual certificate issuance, proceed with the real pinned-client build and signed-file tests under separate authorization. `main` and auto-update remain unchanged.
+
+## 2026-11-14 exact-source follow-up: 14 offline integration tests executed
+
+This is an **append-only test result** beyond the earlier 7/7 local shim-based tests. It does not transfer acceptance to any signed EXE.
+
+- Exact tested GitHub signing branch prior to this documentation update: `68768f9501d5ecb528eb7e3f86ea4c8be23cb8f0`.
+- `tools/windows147-update-patched/update-service.mjs`, Git blob SHA-1 `b00c130f081cbe80bec3200bcfc024a738631784` (full unmodified source, **not a shim**).
+- `tools/signing/check-first-release-bootstrap.mjs`, blob `a41c5b20867fe55d5083f7018bafba81012440da`.
+- `tools/windows147-signing/core.mjs`, blob `4c8d1006102bc0d39a72b802cff140a72cd4f3f5`.
+- `tests/windows147-first-release-bootstrap.test.mjs`, blob `e4c5b2a589038c4f54f23f78b4bb78716eaf1a08` (8 tests).
+- **New:** `tests/windows147-manifest-updater-compat.test.mjs`, blob `58251a5f04a80fd2f90fe8796d69647c1a396db5` (6 tests).
+- An isolated Linux Node.js 22.16.0 environment reconstructed these exact tracked source files and checked each with `git hash-object` before execution. Command: `node --test tests/windows147-first-release-bootstrap.test.mjs tests/windows147-manifest-updater-compat.test.mjs`. **14 pass, 0 fail, 0 skipped**. Raw local TAP log SHA-256: `116217907fc01ac0307cc985e7602bba24a22229527fd0094a7652558bc75127`.
+- The compatibility tests generate throwaway Ed25519 signing keys and synthetic 2048-byte `MZ` data. They test signing-core output against the **real updater module** and an in-memory fake GitHub Release response (no network); good manifests become `available`, while invalid keys, edited manifests and wrong publisher identities fail closed. They do **not** test a real GitHub Release, EXE download, Windows Authenticode, SignTool, actual signing, install, rollback or physical Windows runtime.
+
+**Provenance limitation exposed by this test:** `validateManifest()` verifies signature, field types, repository, tag, publisher thumbprint and claimed numeric Run/Artifact IDs. It does **not independently query GitHub or attest that those IDs correspond to the same signed EXE and two passed Windows jobs**. A cryptographically valid manifest can still contain inaccurate build provenance if the authorized signer inputs incorrect metadata. Therefore public signing/publishing must require a separately verified signed-EXE acceptance receipt and an exact file SHA cross-check before manifest signing. Synthetic CLI passes cannot be used as such receipts.
+
+The original accepted unsigned 1.4.7 SHA, Windows 2022/2025 evidence, private Drive backup, publisher qualification blocker, disabled updates, unchanged `main` and no-Release restriction remain in effect. No Windows Actions were started for this test.
