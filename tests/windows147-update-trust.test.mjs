@@ -25,9 +25,11 @@ test('Electron 主进程在创建暂存快捷方式后固定 SHA-256 并传给�
   const patcher = await fs.readFile(new URL('../tools/apply_windows147_update_trust_patch.mjs', import.meta.url), 'utf8');
   const launcher = await fs.readFile(new URL('../tools/windows147-update-patched/update-launcher.mjs', import.meta.url), 'utf8');
   const transaction = await fs.readFile(new URL('../tools/windows147-update-patched/update-transaction.mjs', import.meta.url), 'utf8');
-  assert.match(patcher, /const stagedShortcutSha256=createHash\('sha256'\)\.update\(await fs\.readFile\(stagedShortcut\)\)\.digest\('hex'\);/);
+  const pinIndex = patcher.indexOf("const stagedShortcutSha256=createHash('sha256').update(await fs.readFile(stagedShortcut)).digest('hex');");
+  const spawnIndex = patcher.indexOf("const child=spawn(launcherNode,[launcher,String(process.pid),file,sha256,publisherThumbprint,version,nonce,healthFile,stagedShortcut,stagedShortcutSha256,shortcut");
+  assert.ok(pinIndex >= 0 && spawnIndex > pinIndex, 'Electron main must pin the staged shortcut before spawning the updater');
   assert.match(patcher, /stagedShortcut,stagedShortcutSha256,shortcut,nativeShortcutHelperPath/);
-  assert.match(launcher, /expectedStagedShortcutSha256/);
+  assert.match(launcher, /stagedShortcutSha256 !== expectedStagedShortcutSha256/);
   assert.match(transaction, /newShortcutSha256 !== expectedStagedShortcutSha256/);
 });
 
