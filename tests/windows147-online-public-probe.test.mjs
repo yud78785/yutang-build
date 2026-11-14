@@ -311,12 +311,12 @@ test('CDP frame lifecycle signals are bounded and scoped to approved session',()
  feed(sid,'Network.responseReceived',{type:'Document',frameId:'other',requestId:'wrong',response:{url:'https://www.douyin.com/'}});
  feed(sid,'Network.responseReceived',{type:'Document',frameId:frame,requestId:'blocked',response:{url:'https://evil.example/'}});
  assert.equal(state.mainDocumentResponseSeen,undefined);
- feed(sid,'Network.responseReceived',{type:'Document',frameId:frame,requestId:'good',response:{url:'https://www.douyin.com/'}});
- feed(sid,'Page.domContentEventFired');
+ feed(sid,'Network.responseReceived',{type:'Document',frameId:frame,requestId:'good',loaderId:'new-loader',response:{url:'https://www.douyin.com/'}});
+ feed(sid,'Page.lifecycleEvent',{frameId:frame,loaderId:'new-loader',name:'DOMContentLoaded'});
  feed(sid,'Network.loadingFinished',{requestId:'good'});
  feed(sid,'Network.loadingFailed',{requestId:'another',errorText:'private token and URL'});
  assert.deepEqual(summarizePublicCdpSignals(state),{
-  domContentLoaded:true,loadEventFired:false,mainDocumentResponseSeen:true,
+  domContentLoaded:true,loadEventFired:false,mainDocumentResponseSeen:true,mainDocumentLoaderVerified:true,
   mainDocumentFinished:true,mainDocumentFailed:false,resourceFailures:1});
  assert.doesNotMatch(JSON.stringify(summarizePublicCdpSignals(state)),/private|token|good|blocked|URL|requestId/i);
 });
@@ -362,13 +362,59 @@ test('interactive page stays unaccepted even when all lifecycle flags have occur
  assert.match(s,/\.\.\.online\.cdpSignals/);
 });
 
-test('old-page load event never masquerades as new-page load completion',()=>{
- const state={mainDocumentResponseSeen:true,loadEventFired:false,domContentLoaded:false,resourceFailures:0};
- observePublicCdpEvent(state,{sessionId:'s',method:'Page.loadEventFired'},'s','f');
- assert.equal(summarizePublicCdpSignals(state).loadEventFired,true);
- observePublicCdpEvent(state,{sessionId:'s',method:'Network.responseReceived',params:{type:'Document',frameId:'f',requestId:'new',response:{url:'https://www.douyin.com/'}}},'s','f');
+test('old-page events never masquerade as a fresh document load',()=>{
+ const state={resourceFailures:0};
+ const send=(method,params={})=>observePublicCdpEvent(state,{sessionId:'s',method,params},'s','f');
+ send('Network.responseReceived',{type:'Document',frameId:'f',requestId:'new',loaderId:'loader-new',response:{url:'https://www.douyin.com/'}});
+ send('Page.loadEventFired');
+ send('Page.domContentEventFired');
+ send('Page.lifecycleEvent',{frameId:'f',loaderId:'loader-old',name:'load'});
+ send('Page.lifecycleEvent',{frameId:'f',loaderId:'loader-old',name:'DOMContentLoaded'});
  assert.equal(summarizePublicCdpSignals(state).loadEventFired,false);
  assert.equal(summarizePublicCdpSignals(state).domContentLoaded,false);
- observePublicCdpEvent(state,{sessionId:'s',method:'Page.loadEventFired'},'s','f');
+ send('Page.lifecycleEvent',{frameId:'f',loaderId:'loader-new',name:'load'});
+ send('Page.lifecycleEvent',{frameId:'f',loaderId:'loader-new',name:'DOMContentLoaded'});
  assert.equal(summarizePublicCdpSignals(state).loadEventFired,true);
+ assert.equal(summarizePublicCdpSignals(state).domContentLoaded,true);
+ assert.doesNotMatch(JSON.stringify(summarizePublicCdpSignals(state)),/loader-new|loader-old/);
+});
+test('matching loader on a different frame or session cannot set page-ready flags',()=>{
+ const state={};
+ const send=(sessionId,method,params)=>observePublicCdpEvent(state,{sessionId,method,params},'allowed','main');
+ send('allowed','Network.responseReceived',{type:'Document',frameId:'main',requestId:'r1',loaderId:'one',response:{url:'https://www.douyin.com/'}});
+ send('allowed','Page.lifecycleEvent',{frameId:'subframe',loaderId:'one',name:'load'});
+ send('wrong','Page.lifecycleEvent',{frameId:'main',loaderId:'one',name:'DOMContentLoaded'});
+ assert.equal(summarizePublicCdpSignals(state).loadEventFired,false);
+ assert.equal(summarizePublicCdpSignals(state).domContentLoaded,false);
+ send('allowed','Page.lifecycleEvent',{frameId:'main',loaderId:'one',name:'DOMContentLoaded'});
+ assert.equal(summarizePublicCdpSignals(state).domContentLoaded,true);
+});
+test('missing loader ID cannot confirm DOM or load events',()=>{
+ const state={};
+ const send=(method,params)=>observePublicCdpEvent(state,{sessionId:'s',method,params},'s','main');
+ send('Network.responseReceived',{type:'Document',frameId:'main',requestId:'r',response:{url:'https://www.douyin.com/'}});
+ send('Page.lifecycleEvent',{frameId:'main',loaderId:'',name:'load'});
+ send('Page.loadEventFired',{});
+ assert.equal(summarizePublicCdpSignals(state).mainDocumentLoaderVerified,false);
+ assert.equal(summarizePublicCdpSignals(state).loadEventFired,false);
+ assert.equal(summarizePublicCdpSignals(state).mainDocumentResponseSeen,true);
+});
+test('second document resets previously confirmed loader and ready signals',()=>{
+ const state={};
+ const send=(method,params)=>observePublicCdpEvent(state,{sessionId:'s',method,params},'s','main');
+ const doc=(loaderId,requestId)=>({type:'Document',frameId:'main',loaderId,requestId,response:{url:'https://www.douyin.com/'}});
+ send('Network.responseReceived',doc('old','r1'));
+ send('Page.lifecycleEvent',{frameId:'main',loaderId:'old',name:'load'});
+ assert.equal(summarizePublicCdpSignals(state).loadEventFired,true);
+ send('Network.responseReceived',doc('new','r2'));
+ send('Page.lifecycleEvent',{frameId:'main',loaderId:'old',name:'load'});
+ assert.equal(summarizePublicCdpSignals(state).loadEventFired,false);
+ send('Page.lifecycleEvent',{frameId:'main',loaderId:'new',name:'load'});
+ assert.equal(summarizePublicCdpSignals(state).loadEventFired,true);
+});
+test('the instrumented CDP session enables authoritative lifecycle events',()=>{
+ assert.match(s,/Page\.setLifecycleEventsEnabled/);
+ assert.match(s,/'Page.setLifecycleEventsEnabled',\{enabled:true\}/);
+ assert.match(s,/params\.loaderId===state\.mainDocumentLoaderId/);
+ assert.match(s,/assert\.equal\(page\?\.ready, 'complete'/);
 });

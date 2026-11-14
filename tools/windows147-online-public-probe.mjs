@@ -128,6 +128,7 @@ export function observePublicCdpEvent(state,message,sessionId,mainFrameId) {
     params.frameId===mainFrameId && String(params.response?.url||'').startsWith(ORIGIN+'/')) {
     state.mainDocumentResponseSeen=true;
     state.mainDocumentRequestId=params.requestId;
+    state.mainDocumentLoaderId=typeof params.loaderId==='string'&&params.loaderId.length>0?params.loaderId:null;
     // Never attribute initial-page lifecycle events to the reloaded document.
     state.domContentLoaded=false;
     state.loadEventFired=false;
@@ -137,8 +138,13 @@ export function observePublicCdpEvent(state,message,sessionId,mainFrameId) {
     return;
   }
   if(!state.mainDocumentResponseSeen)return;
-  if (method==='Page.domContentEventFired') state.domContentLoaded=true;
-  else if (method==='Page.loadEventFired') state.loadEventFired=true;
+  // The legacy Page.loadEventFired/Page.domContentEventFired lack loaderId;
+  // never attribute those events to a newly reloaded document.
+  if (method==='Page.lifecycleEvent' && state.mainDocumentLoaderId &&
+    params.frameId===mainFrameId && params.loaderId===state.mainDocumentLoaderId) {
+    if(params.name==='DOMContentLoaded')state.domContentLoaded=true;
+    else if(params.name==='load')state.loadEventFired=true;
+  }
   else if (method==='Network.loadingFinished' && state.mainDocumentRequestId &&
     params.requestId===state.mainDocumentRequestId) state.mainDocumentFinished=true;
   else if (method==='Network.loadingFailed') {
@@ -152,6 +158,7 @@ export function summarizePublicCdpSignals(state) {
     domContentLoaded:state?.domContentLoaded===true,
     loadEventFired:state?.loadEventFired===true,
     mainDocumentResponseSeen:state?.mainDocumentResponseSeen===true,
+    mainDocumentLoaderVerified:typeof state?.mainDocumentLoaderId==='string'&&state.mainDocumentLoaderId.length>0,
     mainDocumentFinished:state?.mainDocumentFinished===true,
     mainDocumentFailed:state?.mainDocumentFailed===true,
     resourceFailures:Math.max(0,Math.min(99,Number.isSafeInteger(state?.resourceFailures)?state.resourceFailures:0))
@@ -206,6 +213,7 @@ async function inspectOnlinePage() {
     const sessionId=attached.sessionId;
     assert.ok(typeof sessionId==='string' && sessionId.length>0,'CDP_SESSION_MISSING');
     await command(ws,id++,'Page.enable',{},sessionId);
+    await command(ws,id++,'Page.setLifecycleEventsEnabled',{enabled:true},sessionId);
     await command(ws,id++,'Runtime.enable',{},sessionId);
     await command(ws,id++,'Network.enable',{},sessionId);
     const frameTree=await command(ws,id++,'Page.getFrameTree',{},sessionId);
