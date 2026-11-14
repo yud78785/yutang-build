@@ -337,12 +337,32 @@ Windows 2022 和 Windows 2025 均执行了：
 - 源码回归：145 tests，144 pass，0 fail，1 skipped。
 - 新候选 EXE 便携启动、Renderer、Network Service Token、CDP、两次重启和三种强制退出清理：各自构建 job 成功。
 
-### 11.4 当前唯一验收阻塞
+### 11.4 同一 Windows 2025 EXE 在 Windows 2022 的交叉验收最终通过
 
-交叉 job 132257080868 已下载并校验 Windows 2025 候选 Artifact 14088736556，目标 SHA-256 为：
+- 交叉 job：132257080868，success，15/15 steps。
+- 交叉 Artifact：14089001701。
+- 交叉回执状态：PASS_SAME_WINDOWS_2025_CANDIDATE_WINDOWS_2022_CROSS_TEST。
+- Windows 2022 下载并运行的正是 Windows 2025 Artifact 14088736556 中的原始 EXE。
+- 文件大小：125,304,537 bytes。
+- SHA-256：2b3200db6c9be0aa07ea10df8c56077a31c6afec7e16d6806f7700696707367a。
+- sameBinaryAsWindows2025=true、sourceCandidateReceiptVerified=true、release=false。
+- 已重新计算 Artifact ZIP 内 Windows 2025 EXE 的 SHA；与 sidecar、Windows 2025 候选回执和 Windows 2022 交叉回执完全一致。
 
-2b3200db6c9be0aa07ea10df8c56077a31c6afec7e16d6806f7700696707367a
+同一 EXE 的交叉安全测试通过：Renderer AppContainer + Lockdown + Untrusted；Network Service 真实 Token 为 AppContainer + Low Integrity（RID 4096）；CDP loopback；正常 3 次启动/关闭、两次重启；三种强制退出均无进程、profile 或 CDP 残留；无关 Edge 进程保持存活。Network Service 的 Lockdown 列仍为 None，不能称为 LPAC。Edge 外网按设计阻断，没有真实视频播放。
 
-但 Edge 生命周期步骤尚未完成。必须等待交叉 job 结束并核对交叉回执 SHA 与这个值完全一致，才可以宣布本轮新候选跨平台通过。
+### 11.5 新增并发修改保护及其边界
 
-签名、Ed25519 公钥、Publisher thumbprint 和真实在线更新仍未配置；自动更新保持 fail closed。
+本轮提交 268da 为快捷方式替换增加了旧入口、暂存入口、备份入口的 SHA-256 复核。检测到提交前的用户修改时拒绝覆盖，并保留事务证据。新增 3 项测试；两台 Windows runner 的事务测试均为 15/15 pass，0 fail。
+
+边界：最后一次 SHA 复核与 rename 之间仍不是操作系统级 compare-and-swap；本轮未证明可防止同用户恶意进程在这一极窄窗口内再次改写快捷方式。若正式更新威胁模型要求覆盖该场景，需要另行设计 Windows 原生文件句柄/替换方案并增加竞争测试。
+
+### 11.6 当前发布信任阻塞
+
+本轮 Run 43532232402 三个 job 全部成功；Windows 2022 和 Windows 2025 独立 EXE 各自通过，Windows 2025 同一 EXE 在 Windows 2022 也通过。Artifacts：
+- Windows 2022：14087804790，SHA a37d552ce33c117ef60c4d7d394c8f5ed2c7808a0a75087f07785c92cf74aec6。
+- Windows 2025：14088736556，SHA 2b3200db6c9be0aa07ea10df8c56077a31c6afec7e16d6806f7700696707367a。
+- 同一候选交叉回执：14089001701，SHA 与 Windows 2025 完全一致。
+
+签名仍为 NotSigned；Ed25519 公钥与 Publisher thumbprint 未配置；自动更新保持 fail closed。正式发行主体确认签名资格后，才进入签名、真实在线升级、错误签名拒绝、启动失败回滚和用户数据保留 E2E。正式 Release 仍需单独授权。
+
+
