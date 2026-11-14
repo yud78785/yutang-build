@@ -92,3 +92,46 @@ The correction was tested locally with Node.js v22.16.0 and PyYAML BaseLoader:
 - One-shot tests blob: `467c156a31bcecdd869a2a33c4078e7dde7a7014`.
 
 This changes only an inert workflow template, tests, and documentation. It does not modify the accepted unsigned EXE, build/runtime sources, main, updater trust settings, or release state. Genuine Windows PowerShell preflight is still pending.
+
+## 2026-11-14 verification: public standard Windows runner cost (NO RUN STARTED)
+
+The earlier draft described the proposed Windows Actions check as "paid" or
+potentially consuming Windows billed minutes. That is **incorrect for the
+currently verified configuration**:
+
+- GitHub repository visibility was checked as **public** for
+  `yud78785/yutang-build`.
+- The proposed matrix labels `windows-2022` and `windows-2025` are standard
+  GitHub-hosted runner types, **not larger paid runners**.
+- GitHub's current official billing documentation explicitly says that
+  GitHub Actions compute on standard GitHub-hosted runners is free for public
+  repositories. The proposed workflow contains no artifact upload.
+- Official sources (checked 2026-11-14):
+  https://docs.github.com/en/actions/concepts/billing-and-usage
+  https://docs.github.com/en/actions/how-tos/write-workflows/choose-where-workflows-run/choose-the-runner-for-a-job
+- This conclusion depends on the repository remaining public and on using
+  only the stated standard runner types. A later move to a private repository
+  or larger runners would require a new billing review.
+
+**Cost correction is not permission to execute.** The user's existing rule
+to avoid unapproved GitHub Actions runs remains in effect. As of this review,
+the branch `experiment/windows-147-nosign-event-before-fix-20261114` still
+has **zero new Actions runs**, its workflow exists only as an inert document
+template, and no active workflow was added to `.github/workflows`.
+
+The preserved unsigned acceptance evidence remains:
+- Source/build SHA: `9cc16d7e64d59dc141e9c6687b8dd461934fcc35`.
+- Run `43541915930` (completed, success); Windows 2025 candidate artifact
+  `14092434238`.
+- Inner EXE ZIP path:
+  `desktop/release-api/Dafeiyu-Douyin-API-1.4.7-win-x64.exe`.
+- Inner EXE size: `125446071` bytes.
+- Inner EXE SHA-256:
+  `3201d433df727a5d5fddf8e68a0f69ea1654057e04cfad7833fd3ed7dc241a34`.
+- The SHA was independently recomputed by streaming the artifact ZIP entry
+  in this local review. ZIP SHA-256 is not a substitute for inner EXE SHA.
+
+Once separately authorized, the only new acceptance step is one no-sign
+PowerShell check on Windows 2022 and 2025 for this exact unsigned EXE. This is
+NOT an Electron/Edge re-test, not an Authenticode signature or signed-EXE test,
+not an update/rollback test, and not permission to publish or merge.
