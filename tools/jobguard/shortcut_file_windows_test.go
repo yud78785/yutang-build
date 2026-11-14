@@ -97,6 +97,10 @@ func TestShortcutHandleExistingWriterPreventsLock(t *testing.T) {
 	if _, err := openLockedShortcutFile(shortcut); err == nil { t.Fatal("lock opened while writer handle existed") }
 }
 
+func isShortcutDestinationExists(err error) bool {
+	return errors.Is(err, syscall.Errno(80)) || errors.Is(err, syscall.Errno(183))
+}
+
 func TestShortcutHandleNoReplacePreservesConcurrentCreator(t *testing.T) {
 	shortcut, backup, temporary, _ := shortcutTestPaths(t)
 	shortcutWrite(t, shortcut, "old shortcut")
@@ -109,8 +113,13 @@ func TestShortcutHandleNoReplacePreservesConcurrentCreator(t *testing.T) {
 	defer next.Close()
 	if err := old.RenameNoReplace(backup); err != nil { t.Fatal(err) }
 	shortcutWrite(t, shortcut, "user created shortcut")
-	if err := next.RenameNoReplace(shortcut); err == nil { t.Fatal("rename replaced concurrent user file") }
+	err = next.RenameNoReplace(shortcut)
+	if err == nil || !isShortcutDestinationExists(err) { t.Fatalf("no-replace rename error=%v, want destination-exists", err) }
 	if got := shortcutRead(t, shortcut); got != "user created shortcut" { t.Fatalf("user file overwritten: %q", got) }
+	if got, hashErr := old.SHA256(); hashErr != nil || got != shortcutTestHash([]byte("old shortcut")) {
+		t.Fatalf("pinned old file hash=%s err=%v", got, hashErr)
+	}
+	if err := old.Close(); err != nil { t.Fatal(err) }
 	if got := shortcutRead(t, backup); got != "old shortcut" { t.Fatalf("backup changed: %q", got) }
 }
 
@@ -140,8 +149,13 @@ func TestShortcutHandleRestoreNoReplaceWhenUserCreatesDuringGap(t *testing.T) {
 	if err != nil { t.Fatal(err) }
 	defer old.Close()
 	shortcutWrite(t, shortcut, "user created shortcut")
-	if err := old.RenameNoReplace(shortcut); err == nil { t.Fatal("restore replaced user-created path") }
+	err = old.RenameNoReplace(shortcut)
+	if err == nil || !isShortcutDestinationExists(err) { t.Fatalf("no-replace restore error=%v, want destination-exists", err) }
 	if got := shortcutRead(t, shortcut); got != "user created shortcut" { t.Fatalf("user path overwritten: %q", got) }
+	if got, hashErr := old.SHA256(); hashErr != nil || got != shortcutTestHash([]byte("old shortcut")) {
+		t.Fatalf("pinned backup hash=%s err=%v", got, hashErr)
+	}
+	if err := old.Close(); err != nil { t.Fatal(err) }
 	if got := shortcutRead(t, backup); got != "old shortcut" { t.Fatalf("backup changed: %q", got) }
 }
 
