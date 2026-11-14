@@ -20,7 +20,9 @@ concurrency:
 
 jobs:
   windows-nosign:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/experiment/windows-147-nosign-run-20261114'
+    # A push.after is not a grant of approval. Require a push FROM the pre-authorized seed.
+    # Job-level if runs before the Windows matrix; repeat pushes are SKIPPED, not PASS.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/experiment/windows-147-nosign-run-20261114' && github.event.before == 'ee411c1a9c2684d6fdc82cfa8c2542de83fd776f' && github.event.created == false && github.event.forced == false && github.event.deleted == false
     name: ${{ matrix.os }} - accepted unsigned EXE no-sign PowerShell
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
@@ -29,13 +31,13 @@ jobs:
       matrix:
         os: [windows-2022, windows-2025]
     steps:
-      - name: Refuse workflow modification or reactivation as the one-shot event
+      - name: Recheck approved activation base SHA before checkout
         shell: powershell
         env:
-          FIRST_ADDITION: ${{ contains(github.event.head_commit.added, '.github/workflows/windows-147-nosign-one-shot.yml') }}
+          ACTIVATION_BEFORE: ${{ github.event.before }}
         run: |
-          if ($env:FIRST_ADDITION -cne 'true') {
-            throw 'ONE_SHOT_ACTIVATION_MUST_BE_NEW_WORKFLOW_FILE'
+          if ($env:ACTIVATION_BEFORE -cne 'ee411c1a9c2684d6fdc82cfa8c2542de83fd776f') {
+            throw 'ONE_SHOT_ACTIVATION_NOT_FROM_APPROVED_BASE'
           }
 
       - name: Checkout immutable no-sign preflight code

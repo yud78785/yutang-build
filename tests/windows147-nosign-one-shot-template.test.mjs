@@ -33,3 +33,11 @@ test('job is read-only and makes no release or signing changes',()=>{
   assert.match(text,/PASS_WINDOWS_POWERSHELL_NOSIGN_ONLY/);
   assert.doesNotMatch(text,/(?:^|\s)-Sign(?:\s|$)|signtool\.exe|Start-Process|upload-artifact|create-release|publish release/im);
 });
+
+
+test('one-shot job uses supported push.before rather than unavailable commit.added metadata',()=>{
+  assert.match(text,/github\.event\.before == 'ee411c1a9c2684d6fdc82cfa8c2542de83fd776f'/);
+  assert.match(text,/github\.event\.created == false/);
+  assert.match(text,/github\.event\.forced == false/);
+  assert.doesNotMatch(text,/head_commit\.added/);
+});

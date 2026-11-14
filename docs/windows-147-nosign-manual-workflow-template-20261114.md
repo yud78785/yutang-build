@@ -59,10 +59,36 @@ To avoid changing executable dependencies unexpectedly between preparation and l
 - `actions/checkout@11d5960a326750d5838078e36cf38b85af677262`
 - `actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093`
 
-Each template also compares `git rev-parse HEAD` against the audited code commit `c8cf9be7c175d00774e7e5cc5a763d587b77ec6e` before downloading the unsigned artifact. The branch-push template additionally fails immediately unless GitHub's push event reports the **first addition** of `.github/workflows/windows-147-nosign-one-shot.yml`; ordinary later modifications will fail rather than appear successful.
+Each template also compares `git rev-parse HEAD` against the audited code commit `c8cf9be7c175d00774e7e5cc5a763d587b77ec6e` before downloading the unsigned artifact. **Correction:** the older branch-push template used `github.event.head_commit.added` to detect the first workflow-file addition. GitHub's official Actions documentation explicitly states that `added` / `modified` / `removed` commit fields are not included in the Actions `push` event payload. That original check was unusable and must never be activated.
 
-**Limitation:** the first-addition condition is NOT a permanent exactly-once guarantee. Re-adding the workflow after deletion, or recreating its branch, could cause a new eligible event. Executing and removing any active workflow still requires an independently approved, explicitly bounded Windows Actions action. Never interpret a skipped, queued, or successful template-only run as PowerShell or signed EXE acceptance.
+**Replacement guard:** the branch-push template now pins the approved push `before` SHA, rejects branch creation / deletion / forced pushes, and checks the source branch name at the job-level `if`. This is a controlled single-transition gate, not a global exactly-once guarantee: the branch could be deleted and recreated from the same seed, or an administrator could rewrite history. GitHub may show skipped jobs as `Success`; a skipped job is NEVER a Windows PowerShell PASS or signed-EXE acceptance. Executing and removing any active workflow still requires an independently approved, explicitly bounded Windows Actions action.
 
 Local Node.js 22.16.0 isolated regression: `13/13` template assertions passed (old 7 plus new 6), `0` failures; both YAML documents loaded with PyYAML BaseLoader and had read-only GitHub permission, Windows 2022/2025 matrix and expected steps. Local TAP log SHA-256: `6109d89ab2ca2716aff837307d815e3d5e5c2c39b31069eea79f8209f6c7579e`.
 
 The pinned dependency changes do not alter the already accepted unsigned EXE SHA `3201d433df727a5d5fddf8e68a0f69ea1654057e04cfad7833fd3ed7dc241a34`. PowerShell runtime, real signing and signed EXE acceptance are still **NOT RUN**.
+
+## 2026-11-14 corrective fix: gate on supported push.before instead of unavailable head_commit.added
+
+Verified against official GitHub Docs:
+- Actions `push` payload removes commit-level `added`, `modified`, and `removed` attributes.
+- `push.before`, `created`, `forced`, and `deleted` are documented webhook fields.
+- A job-level `if` is evaluated before `strategy.matrix`, so a rejected event is skipped before Windows runner allocation.
+- A skipped job can appear as `Success` in the GitHub UI. Treat it as NOT RUN, not passing.
+
+The revised inert branch-push template now requires:
+- Branch `experiment/windows-147-nosign-run-20261114` and event `push`.
+- **Before commit exactly** `ee411c1a9c2684d6fdc82cfa8c2542de83fd776f`.
+- `created == false`, `forced == false`, `deleted == false`.
+- The existing exact workflow path filter `.github/workflows/windows-147-nosign-one-shot.yml`.
+- A redundant Windows step checking the same `before` SHA if a Windows job is allowed to start.
+
+**Activation protocol is not executed:** only after express approval for Windows Actions, create the dedicated run branch AT the pinned before-SHA in one operation, then submit a separate, reviewed single commit adding the exact workflow file. Do not create a new branch and add the active workflow simultaneously; that is explicitly rejected. Any changes to code/seed or direct reactivation require a separately reviewed new gate. No active workflow is registered now.
+
+The correction was tested locally with Node.js v22.16.0 and PyYAML BaseLoader:
+- Three template suites, **15/15 pass, 0 fail, 0 skipped**; all tests are offline, not Actions runs.
+- Local TAP log SHA-256: `9dc4e59ae8a15a55d591b8e67295df8edf777e12cc7d479f083f92c99cdc5916`.
+- Exact branch template blob: `29a53a8cd29aea58e0e1301d5519116d04a350d6`.
+- Security template tests blob: `7a6ced182f4e0396c840a2496c5b06cfcd977ce9`.
+- One-shot tests blob: `467c156a31bcecdd869a2a33c4078e7dde7a7014`.
+
+This changes only an inert workflow template, tests, and documentation. It does not modify the accepted unsigned EXE, build/runtime sources, main, updater trust settings, or release state. Genuine Windows PowerShell preflight is still pending.

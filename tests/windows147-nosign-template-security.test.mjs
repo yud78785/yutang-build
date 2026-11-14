@@ -40,13 +40,19 @@ test('checkout is byte-addressed and verified before downloading the candidate',
   }
 });
 
-test('one-shot variant accepts only first addition of the exact workflow file',()=>{
+test('one-shot variant uses supported push.before SHA instead of missing added fields',()=>{
   const text=byType['branch-one-shot'];
-  assert.match(text,/FIRST_ADDITION: \$\{\{ contains\(github\.event\.head_commit\.added, '\.github\/workflows\/windows-147-nosign-one-shot\.yml'\) \}\}/);
-  assert.match(text,/ONE_SHOT_ACTIVATION_MUST_BE_NEW_WORKFLOW_FILE/);
-  assert.ok(text.indexOf('Refuse workflow modification or reactivation')<text.indexOf('Checkout immutable no-sign preflight code'));
+  const seed='ee411c1a9c2684d6fdc82cfa8c2542de83fd776f';
+  const gate=text.split('\n').find(line => line.trim().startsWith('if: github.event_name'));
+  assert.ok(gate);
+  assert.ok(gate.includes("github.event.before == '"+seed+"'"));
+  assert.ok(gate.includes('github.event.created == false'));
+  assert.ok(gate.includes('github.event.forced == false'));
+  assert.ok(gate.includes('github.event.deleted == false'));
+  assert.doesNotMatch(text,/head_commit\.added|FIRST_ADDITION/);
+  assert.ok(text.indexOf('Recheck approved activation base SHA')<text.indexOf('Checkout immutable no-sign preflight code'));
+  assert.match(text,/ONE_SHOT_ACTIVATION_NOT_FROM_APPROVED_BASE/);
   assert.match(text,/^\s+branches:\n\s+- experiment\/windows-147-nosign-run-20261114/m);
-  assert.match(text,/if: github\.event_name == 'push'/);
 });
 
 test('both templates pin unsigned source artifact ID, byte count and digest',()=>{
@@ -69,3 +75,20 @@ test('no signing, release, untrusted dynamic checkout or secret persistence',()=
     assert.match(text,/UNSIGNED_EXE_CHANGED_AFTER_PREFLIGHT/);
   }
 });
+
+
+test('synthetic push-state matrix rejects repeats, creation, force pushes and unrelated branches',()=>{
+  // JS reproduces the reviewed boolean condition; it does not execute Actions.
+  const branch='refs/heads/experiment/windows-147-nosign-run-20261114';
+  const seed='ee411c1a9c2684d6fdc82cfa8c2542de83fd776f';
+  const schedule=({event='push',ref=branch,before=seed,created=false,forced=false,deleted=false}={}) =>
+    event==='push' && ref===branch && before===seed && !created && !forced && !deleted;
+  assert.equal(schedule(),true);
+  assert.equal(schedule({before:'f'.repeat(40)}),false);
+  assert.equal(schedule({created:true}),false);
+  assert.equal(schedule({forced:true}),false);
+  assert.equal(schedule({deleted:true}),false);
+  assert.equal(schedule({ref:'refs/heads/main'}),false);
+  assert.equal(schedule({event:'workflow_dispatch'}),false);
+});
+
