@@ -41,3 +41,11 @@ Each Windows runner would download the pinned unsigned candidate, verify its has
 5. Automatic update trust key and publisher thumbprint remain unconfigured; `main`, old EXE, formal releases and all sensitive credentials remain untouched.
 
 Do not promote or run this template without explicit permission.
+
+## One-shot branch-only alternative (preferred without touching main)
+
+The additional inert template `docs/templates/windows-147-nosign-preflight.branch-one-shot.yml` is designed to be promoted ONLY after a separate, explicit authorization to spend Windows Actions quota. It has an exact `push` branch+path filter for `experiment/windows-147-nosign-run-20261114` and `.github/workflows/windows-147-nosign-one-shot.yml`. Unlike `workflow_dispatch`, the restricted `push` trigger can operate solely on its feature branch and does not require putting the workflow on `main`.
+
+**Not activated:** no such runnable workflow is being installed under `.github/workflows`, and the one-shot run branch is not created or pushed by this change. Do not start the Windows jobs until authorized. The planned jobs only download the accepted unsigned artifact and execute no-sign PowerShell checks; real signing and signed-EXE validation remain separate.
+
+Offline YAML parse/structure checks and `tests/windows147-nosign-one-shot-template.test.mjs` passed **3/3** on Linux Node.js 22.16.0; this is NOT Windows runtime evidence. Tested one-shot template blob: `e007340ecfb17caa7c5afce1abc2e8c6ff395b74`; test blob: `6c528ffb9d2d9969616db097b4456ff28655bd2a`.
