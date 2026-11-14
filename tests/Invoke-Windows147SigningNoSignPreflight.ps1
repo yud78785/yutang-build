@@ -30,7 +30,20 @@ function Expect-Rejection([string]$scenario, [string]$inputExe, [string]$inputSh
 }
 
 Assert-True (Test-Path -LiteralPath $signerScript -PathType Leaf) 'SIGNER_SCRIPT_NOT_FOUND'
-$signerSha = (Get-FileHash -LiteralPath $signerScript -Algorithm SHA256).Hash.ToLowerInvariant()
+# Git checkout may write CRLF on Windows while the immutable Git blob uses LF.
+# Canonicalize ONLY CRLF to LF before hashing: any other byte/line change fails closed.
+# This is not a signature check or permission to ignore changes to the source.
+$utf8Strict = [System.Text.UTF8Encoding]::new($false, $true)
+$signerRaw = [System.IO.File]::ReadAllBytes($signerScript)
+$signerText = $utf8Strict.GetString($signerRaw)
+$signerCanonical = $signerText.Replace("`r`n", "`n")
+Assert-True (-not $signerCanonical.Contains("`r")) 'SIGNER_SCRIPT_UNEXPECTED_LINE_ENDINGS'
+$signerHashAlgorithm = [System.Security.Cryptography.SHA256]::Create()
+try {
+  $signerSha = [System.BitConverter]::ToString(
+    $signerHashAlgorithm.ComputeHash($utf8Strict.GetBytes($signerCanonical))
+  ).Replace('-', '').ToLowerInvariant()
+} finally { $signerHashAlgorithm.Dispose() }
 Assert-True ($signerSha -ceq $expectedSignerSha256) 'SIGNER_SCRIPT_SHA256_MISMATCH'
 
 $exe = [System.IO.Path]::GetFullPath($UnsignedExe)
