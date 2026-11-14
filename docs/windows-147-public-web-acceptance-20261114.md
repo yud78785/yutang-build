@@ -42,8 +42,17 @@ Current focus remains functional Windows startup/security acceptance. Certificat
 
 ## 2026-11-14 latest test-harness audit
 
-- Exact reviewed probe code commit `59e1e0cba6804eb0c2498166d3e137189a689fc1`; no change to the original EXE or bundled product runtime.
+- Exact reviewed probe code commit `de28dd978f6ded50753e3dd720a434a0d76918fb`; no change to the original EXE or bundled product runtime.
 - Online success marker is emitted **only after** the spawned EXE/worker/host/Edge and CDP socket disappear, and disposable state directories are removed. Both cleanup phases fail closed rather than hiding exceptions.
 - HTTP status must equal exactly 200; 201, 204, redirects, challenge pages, wrong origin, missing sandbox or incomplete cleanup are rejected.
 - Local Node 22 offline tests using a test-only lifecycle stub: **23/23 passed**, with local TAP SHA-256 `a3dfe4b495ef005586b6f21d907bdf24d35274ff0e2f7c0d5e36375d89ac2ec6`.
-- **Not run in Windows/online yet**. The dormant workflow pin is now aligned with the corrected source commit `59e1e0cba6804eb0c2498166d3e137189a689fc1`.
+- **Not run in Windows/online yet**. The dormant workflow pin is now aligned with the corrected source commit `de28dd978f6ded50753e3dd720a434a0d76918fb`.
+
+
+## 2026-11-14 descendant-PID cleanup protection
+
+Final audited test source commit: `de28dd978f6ded50753e3dd720a434a0d76918fb`. Prior test checks could miss orphaned Renderer subprocesses that no longer display the candidate profile path in their Windows command line. The updated probe records every Edge descendant PID using the **original accepted** `hasHostAncestor` lineage check before and after homepage rendering, then requires all recorded Edge subprocess PIDs to be absent after shutdown, in addition to existing isolated-profile, API worker, Job Guard and CDP listener checks. It does NOT kill unrelated Edge processes.
+
+The new pure/static Node 22 local tests explicitly verify a renderer with no profile flag is captured by lineage and that an orphaned renderer remains a release-blocking survivor. **25/25 offline tests passed, 0 skipped**. Local TAP SHA-256: `b676b4b2f7f0a0eb5613deede85fd7cb02a052dfc40558cfe078683a30398bb4`. Git blob SHA-1: audited probe `eba73997c8c01042bf2e287561a8cf1e28056ec6`, tests `96d8e10579dc25afc7f46b30f253f88926d0ab76`. Offline results do not constitute Windows EXE online acceptance.
+
+The workflow template remains **inactive**, and now uses `github.event.before` and checkout SHA `de28dd978f6ded50753e3dd720a434a0d76918fb`. No Windows Actions job, real account, EXE release, signing or `main` modification has been triggered by this correction.
