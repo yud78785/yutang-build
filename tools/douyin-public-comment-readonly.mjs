@@ -18,8 +18,10 @@ function validPublicVideoRoute(value, expectedVideoId) {
     const u = new URL(value);
     // An active video on the recommendation page is insufficient to attribute
     // an independently rendered comment drawer to the same work.
+    const workQuery = ['modal_id', 'aweme_id'];
+    const matchedQuery = workQuery.every(key => u.searchParams.getAll(key).every(value => value === expectedVideoId));
     return u.origin === ORIGIN && !u.username && !u.password &&
-      u.pathname === `/video/${expectedVideoId}` && !u.hash;
+      u.pathname === `/video/${expectedVideoId}` && !u.hash && matchedQuery;
   } catch { return false; }
 }
 function canonicalVideoUrl(value, expectedVideoId) {
@@ -67,6 +69,7 @@ export function classifyPublicCommentEvidence({ stateBefore, stateAfter, comment
   for (const item of commentRows.rows) {
     if (!item || typeof item !== 'object' || Array.isArray(item) || item.videoId !== expectedVideoId ||
         typeof item.text !== 'string' || item.text.length > 512 ||
+        ['mine', 'sent', 'pending', 'failed'].some(key => typeof item[key] !== 'boolean') ||
         (item.commentId != null && (typeof item.commentId !== 'string' || !/^\d{1,64}$/.test(item.commentId)))) {
       return fail('COMMENT_ROW_NOT_BOUND_TO_VIDEO', expectedVideoId);
     }
