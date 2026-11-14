@@ -94,3 +94,19 @@ The Windows `Get-AuthenticodeSignature` API can select a catalog signature; for 
 - Windows certificate, timestamp, SDK tool authenticity and signer identity must all still be **checked independently in the future real signing environment**.
 - Original unsigned EXE SHA `3201d433df727a5d5fddf8e68a0f69ea1654057e04cfad7833fd3ed7dc241a34` remains unchanged. Previously passed fifth Run `43643545361` remains its only real public-web Windows 2025 acceptance. A signed EXE will have a different SHA and must undergo separate Windows 2022/2025 packaged testing.
 - No GitHub Actions rerun, credential access, certificate purchase, signing, `main` change, merge, release or auto-update activation.
+
+## 9. V4 canonical Ed25519 client public-key pin — LATEST source-only state
+
+Current signing-manifest source `tools/windows147-release-manifest-kit.mjs` **V4**. The V3 23/23 test and SHA records above are historical and remain accurate for V3; **do not treat them as V4 test receipts**.
+
+The actual update-service `tools/windows147-update-patched/update-service.mjs` has `UPDATE_MANIFEST_PUBLIC_KEY = ''` in Git blob `b00c130f081cbe80bec3200bcfc024a738631784`. V3 only self-verified its newly derived Ed25519 public/private key pair, which is insufficient to prove the future installed client trusts this key. V4 now requires non-secret configuration `expectedManifestPublicKeySpkiSha256` and compares it against SHA-256 of canonical DER SPKI exported from the actual signing key **before creating a detached signature or any output directory**. Missing pin or wrong-but-valid key fail closed. The field is not added to signed manifest v1 schema.
+
+- Source Git commit: `628fd781988c2b88021e43a80ee458b4b5921396` (experiment branch).
+- Source file Git blob SHA-1: `9ac069666a6fc8dc6513acf38bd9e5d49ca9d3bc`.
+- Test file Git blob SHA-1: `b4ff3efb01b24fb32f997d2ce2066a09fd77bd62`.
+- Documentation `docs/windows-147-release-manifest-kit-v4.md`; acceptance record `docs/windows-147-release-signing-v4-client-key-preflight-20261115.md`.
+- Linux Node.js v22.16.0 source syntax and **27/27 mock-backed tests pass**, 0 fail, 0 skip. TAP SHA-256 `8240c9bdc97940c6f3012f426e7eb131f8cba35d25c22cb36101a8d6aecc7809`.
+- Local ZIP SHA-256 `d4cdd6a4fb2a149c964063777cb974db964528d0487f54324f9bcd18394ad7b6`, size 16563 bytes; private Drive backup https://drive.google.com/file/d/1PlEQyVDOoH_sTkn-Di1KHWXXzvpwIzGQ/view?usp=drivesdk .
+- **Still blocked:** the expected public-key pin must be independently derived from the **exact future update-enabled, accepted client**, not copied from whatever local key the signer happens to choose. The currently accepted unsigned original EXE (SHA-256 `3201d433df727a5d5fddf8e68a0f69ea1654057e04cfad7833fd3ed7dc241a34`) intentionally has no trust key; signing it without rebuilding cannot enable the updater.
+- This V4 test uses only a synthetic EXE, temporary Ed25519 keys and mock Windows Authenticode/SignTool responses. It has **not** verified native SignTool, the Certum CA, a real signed EXE, the packaged future public key, or real upgrade/rollback. No additional Windows CI was authorized.
+- No certificate purchased; no passport, address, passwords or keys uploaded. No `main` change, merge, published Release, or automatic update activation. The Windows 2025 fifth-run success `43643545361` remains tied exclusively to the old unsigned SHA.
