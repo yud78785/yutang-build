@@ -1,0 +1,102 @@
+# INERT ONE-SHOT TEMPLATE ONLY: it is NOT in .github/workflows.
+# Activating it starts a SECOND Windows run and requires separate user authorization.
+# DO NOT promote or push an active copy without explicit authorization.
+name: YuTang 1.4.7 unsigned EXE no-sign LF checkout verification - retry NOT RELEASE
+
+on:
+  push:
+    branches:
+      - experiment/windows-147-nosign-eol-retest-20261114
+    paths:
+      - .github/workflows/windows-147-nosign-eol-retest.yml
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: yutang-nosign-preflight-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  windows-nosign:
+    # A push.after is not a grant of approval. Require a push FROM the pre-authorized seed.
+    # Job-level if runs before the Windows matrix; repeat pushes are SKIPPED, not PASS.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/experiment/windows-147-nosign-eol-retest-20261114' && github.event.before == '27da129f96a2e7a343933147096cab947b0f2293' && github.event.created == false && github.event.forced == false && github.event.deleted == false
+    name: ${{ matrix.os }} - accepted unsigned EXE no-sign PowerShell
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-2025]
+    steps:
+      - name: Recheck approved activation base SHA before checkout
+        shell: powershell
+        env:
+          ACTIVATION_BEFORE: ${{ github.event.before }}
+        run: |
+          if ($env:ACTIVATION_BEFORE -cne '27da129f96a2e7a343933147096cab947b0f2293') {
+            throw 'ONE_SHOT_ACTIVATION_NOT_FROM_APPROVED_BASE'
+          }
+
+      - name: Checkout immutable no-sign preflight code
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: 27da129f96a2e7a343933147096cab947b0f2293
+          persist-credentials: false
+
+      - name: Confirm immutable audited checkout
+        shell: powershell
+        run: |
+          $actualCommit = (& git rev-parse HEAD).Trim()
+          if ($actualCommit -cne '27da129f96a2e7a343933147096cab947b0f2293') {
+            throw 'AUDITED_CODE_CHECKOUT_SHA_MISMATCH'
+          }
+
+      - name: Check exact signer LF SHA before candidate download
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $signer = Join-Path '${{ github.workspace }}' 'tools\signing\Sign-YuTangCandidate.ps1'
+          $actualSignerSha = (Get-FileHash -LiteralPath $signer -Algorithm SHA256).Hash.ToLowerInvariant()
+          Write-Host ('WINDOWS_SIGNER_ACTUAL_SHA256=' + $actualSignerSha)
+          if ($actualSignerSha -cne '2d4285879872bd2ae26592c0473ad111b11aa77b9a304facd9e3536b23c482b1') {
+            throw 'AUDITED_SIGNER_LF_CHECKOUT_SHA_MISMATCH'
+          }
+
+      - name: Download exact accepted unsigned Windows 2025 candidate
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          repository: yud78785/yutang-build
+          run-id: 43541915930
+          name: YuTang-OpenRouter-Desktop-1.4.7-SecurityHardening-windows-2025-CANDIDATE-NOT-RELEASE
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/yutang-unsigned-147
+
+      - name: Verify unsigned EXE digest and run PowerShell no-sign checks
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Join-Path '${{ runner.temp }}' 'yutang-unsigned-147\desktop\release-api\Dafeiyu-Douyin-API-1.4.7-win-x64.exe'
+          if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) {
+            throw 'PINNED_UNSIGNED_EXE_NOT_FOUND'
+          }
+          $expectedSha = '3201d433df727a5d5fddf8e68a0f69ea1654057e04cfad7833fd3ed7dc241a34'
+          $before = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($before -cne $expectedSha) { throw 'UNSIGNED_EXE_SHA256_MISMATCH' }
+          if ((Get-Item -LiteralPath $exe).Length -ne 125446071) { throw 'UNSIGNED_EXE_SIZE_MISMATCH' }
+          $harness = Join-Path '${{ github.workspace }}' 'tests\Invoke-Windows147SigningNoSignPreflight.ps1'
+          $receiptText = & powershell.exe -NoLogo -NoProfile -NonInteractive -File $harness -UnsignedExe $exe
+          if ($LASTEXITCODE -ne 0) { throw 'WINDOWS_POWERSHELL_NOSIGN_PREFLIGHT_FAILED' }
+          $receipt = $receiptText | ConvertFrom-Json
+          if ($receipt.status -cne 'PASS_WINDOWS_POWERSHELL_NOSIGN_ONLY' -or
+              $receipt.authenticodeSigned -ne $false -or
+              $receipt.signedExeAcceptance -ne $false -or
+              $receipt.publicationAuthorized -ne $false) {
+            throw 'NONSIGN_RECEIPT_REJECTED'
+          }
+          $after = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($after -cne $expectedSha) { throw 'UNSIGNED_EXE_CHANGED_AFTER_PREFLIGHT' }
+          # This message is NOT a signed EXE acceptance or a release approval.
+          Write-Host ('WINDOWS_NOSIGN_ONLY_RECEIPT ' + ($receipt | ConvertTo-Json -Compress -Depth 4))
