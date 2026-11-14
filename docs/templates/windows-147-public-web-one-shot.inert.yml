@@ -20,7 +20,7 @@ jobs:
   public-homepage:
     # Job-level gating occurs before matrix runner allocation.
     # Subsequent edits, branch creation, forced pushes and deletion are SKIPPED not PASS.
-    if: github.event_name == 'push' && github.ref == 'refs/heads/experiment/windows-147-public-web-run-20261114' && github.event.before == '7d5517679d80059d2be405112a06b85ff90dee51' && github.event.created == false && github.event.forced == false && github.event.deleted == false
+    if: github.event_name == 'push' && github.ref == 'refs/heads/experiment/windows-147-public-web-run-20261114' && github.event.before == '59e1e0cba6804eb0c2498166d3e137189a689fc1' && github.event.created == false && github.event.forced == false && github.event.deleted == false
     name: ${{ matrix.os }} - original EXE real homepage read-only probe
     runs-on: ${{ matrix.os }}
     timeout-minutes: 35
@@ -33,13 +33,13 @@ jobs:
       - name: Checkout immutable inspected test source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: 7d5517679d80059d2be405112a06b85ff90dee51
+          ref: 59e1e0cba6804eb0c2498166d3e137189a689fc1
           persist-credentials: false
 
       - name: Verify exact checked-out code SHA
         shell: pwsh
         run: |
-          if ((& git rev-parse HEAD).Trim() -cne '7d5517679d80059d2be405112a06b85ff90dee51') {
+          if ((& git rev-parse HEAD).Trim() -cne '59e1e0cba6804eb0c2498166d3e137189a689fc1') {
             throw 'PUBLIC_WEB_PROBE_SOURCE_SHA_MISMATCH'
           }
 

@@ -24,7 +24,7 @@ Date: 2026-11-14. Scope: Windows startup/security project only. No SSLmentor, ce
 2. Use a disposable GitHub Windows runner only. Preserve native Windows profile environment, redirect only YuTang data and memory to an isolated candidate directory; remove CI tokens and model keys from the EXE environment. Refuse an existing occupied CDP port or pre-existing candidate data directory.
 3. Launch exactly this EXE with its `DOUYIN_DESKTOP_SMOKE` mode; verify Electron desktop ready, local API bootstrap, and `configured:false` with no model API key.
 4. Invoke the product's actual `/api/browser/open` API. IMPORTANT: that production endpoint navigates the public `https://www.douyin.com/` homepage. The test cannot honestly substitute `example.com` without changing the app. It performs NO login, search, click, CAPTCHA bypass, private order lookup or model inference.
-5. Over the verified dedicated loopback CDP, reload only the existing public homepage and require a real HTTP 2xx document response, correct page origin, a non-empty DOM and a PNG paint result (checked in memory, not uploaded). Reject login/challenge signals and failures; host geoblocking/CDN denial is a BLOCKER rather than an EXE security PASS.
+5. Over the verified dedicated loopback CDP, reload only the existing public homepage and require a real HTTP 200 top-level document response, correct page origin, a non-empty DOM and a PNG paint result (checked in memory, not uploaded). Reject login/challenge signals and failures; host geoblocking/CDN denial is a BLOCKER rather than an EXE security PASS.
 6. Recheck renderer AppContainer and Network Service Windows token AppContainer/Low Integrity, dedicated Edge profile lineage, CDP listener bound solely to loopback and owned by Edge child.
 7. Close the dedicated browser and stop only the exact spawned EXE process; verify zero owned Edge/host/API worker/Job Guard processes and zero 9227 listeners. Leave failure evidence rather than killing unrelated user processes.
 
@@ -39,3 +39,11 @@ Possible only success marker: `PASS_WINDOWS_EXE_PUBLIC_WEB_ONLY` WITH exact EXE 
 - Before any real Actions run, the workflow must be reviewed for read-only rights, pinned action SHAs, artifact identity, both standard Windows runner labels, no signing and no release. A NEW explicit run authorization is required; no background polling is configured.
 
 Current focus remains functional Windows startup/security acceptance. Certificate purchase and vendor communications are suspended.
+
+## 2026-11-14 latest test-harness audit
+
+- Exact reviewed probe code commit `59e1e0cba6804eb0c2498166d3e137189a689fc1`; no change to the original EXE or bundled product runtime.
+- Online success marker is emitted **only after** the spawned EXE/worker/host/Edge and CDP socket disappear, and disposable state directories are removed. Both cleanup phases fail closed rather than hiding exceptions.
+- HTTP status must equal exactly 200; 201, 204, redirects, challenge pages, wrong origin, missing sandbox or incomplete cleanup are rejected.
+- Local Node 22 offline tests using a test-only lifecycle stub: **23/23 passed**, with local TAP SHA-256 `a3dfe4b495ef005586b6f21d907bdf24d35274ff0e2f7c0d5e36375d89ac2ec6`.
+- **Not run in Windows/online yet**. The dormant workflow pin is now aligned with the corrected source commit `59e1e0cba6804eb0c2498166d3e137189a689fc1`.
