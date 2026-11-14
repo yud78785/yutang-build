@@ -4,7 +4,7 @@
   "as_of_date": "2026-11-15",
   "repository": "yud78785/yutang-build",
   "experiment_branch": "experiment/yutang-public-comment-readonly-20261115",
-  "source_baseline_commit": "7dbc6ebadb238dee39d5d4eb27be5bdfbcfa7516",
+  "source_baseline_commit": "05fab09827765ba1493e4578a3aedb27b3ed4f73",
   "latest_completed_window_ci": {
     "run_id": 43643545361,
     "runner": "windows-2025",
@@ -36,9 +36,16 @@
       "blob": "c6cb78af8e91f24b4af5af0d18d8496a196e33a7",
       "path": "tools/douyin-existing-browser-readonly.mjs"
     },
-    "passed_total": 54,
+    "passed_total": 68,
     "failed_total": 0,
-    "scope_limitation": "unit/integration mock browser objects; no actual Douyin browser exercised"
+    "scope_limitation": "68 passing Node.js 22.16.0 isolated Linux checks: mocked Playwright objects and one real environment-gate CLI invocation. No live Douyin browser or Windows Edge session exercised.",
+    "source_preflight_cli": {
+      "passed": 14,
+      "path": "tools/run-douyin-existing-browser-readonly.mjs",
+      "blob": "75ef1d4a463b88582d0519a2b9c400d29580920c",
+      "tests_path": "tests/douyin-existing-browser-cli.test.mjs",
+      "tests_blob": "8d9fe7075a8126e062c047aed5aaa40697c3238c"
+    }
   },
   "site_and_browser_access": {
     "public_web_index_douyin_comments_observed": true,
@@ -47,7 +54,9 @@
     "live_douyin_video_loaded_and_verified": false,
     "live_comment_dom_verified": false,
     "live_ai_iframe_entry_verified": false,
-    "generated_ai_summary_text_verified": false
+    "generated_ai_summary_text_verified": false,
+    "existing_browser_one_shot_cli_added": true,
+    "existing_browser_one_shot_cli_windows_validated": false
   },
   "safety_policy_for_next_step": {
     "do_not_modify_main": true,
@@ -59,5 +68,5 @@
     "use_existing_dedicated_edge_only": true,
     "no_claim_of_real_success_without_raw_browser_receipt": true
   },
-  "next_acceptance": "On a separately available authorized Windows execution surface, reuse the already-running verified dedicated YuTang Edge containing one known public /video/{id} page, call the three-source reader once with pinned upstream BrowserController/readPageState/readCommentDom, verify result and process identity, and record authentic public comment and iframe evidence; report BLOCKED if browser inaccessible. Do not start CI or release based on this JSON alone."
+  "next_acceptance": "When a separately authorized Windows executor with an existing dedicated YuTang Edge and a clean pinned upstream source tree is available, invoke the committed one-shot read-only entry on a known publicly accessible /video/{id} page and inspect original receipt. Do not install upstream, launch browser, click, login, use CI, modify main or release from this chat. Until then report BLOCKED, not PASS."
 }
