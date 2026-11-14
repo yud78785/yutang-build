@@ -4,9 +4,11 @@
 
 仓库：`yud78785/yutang-build`
 
-当前工作分支：`experiment/windows-147-release-preflight-20261114`
+当前工作分支：`experiment/windows-147-update-recovery-20261114`
 
-基线：`ce9aa5efa410d881670aee14842ee9ce2e46f634`
+最新验收提交：`c169cadb05c1ad8a6cc6139971e65dcf697e8bdd`
+
+`main` 保持：`4745ed23cbb748cb4b070ed70390703d1261aea0`
 
 本文件只记录发布准备，不创建 Release、不签名、不合并、不修改 `main`，也不触碰用户电脑。
 
@@ -216,3 +218,90 @@ Workflow Run `43513624284` 在隔离实验分支 `experiment/windows-147-update-
 每个平台均通过 17 项更新器模板测试、最终 EXE 启动与 README 打包断言、Edge 沙盒、AppContainer + Low Integrity、loopback CDP、正常重启及三种强制退出零残留。跨平台交叉 job 从 Windows 2025 Artifact 下载 EXE，核对源回执和 SHA-256 sidecar 后，在 Windows 2022 直接运行；没有重建 EXE。
 
 正式 Authenticode 签名与 Ed25519 manifest 公钥仍未配置，更新器保持关闭。因此真实在线升级与真实 EXE 崩溃回滚仍未端到端验收，不能对外宣称已通过。三个 Artifact 均为 NOT-RELEASE 候选；`main` 未修改、未合并、未发布。
+
+
+## 10. 2026-11-14 最新候选交叉验收完成；签名仍保持关闭
+
+本节覆盖前文“同一候选交叉验收尚未运行”的历史状态。旧候选 SHA 和旧 Run 保留作历史记录。
+
+### 10.1 最新验收身份
+
+- Workflow Run：[43527451048](https://github.com/yud78785/yutang-build/actions/runs/43527451048)，completed / success
+- 实验分支：experiment/windows-147-update-recovery-20261114
+- 提交：c169cadb05c1ad8a6cc6139971e65dcf697e8bdd
+- Windows 2022 独立构建：job 132236632750，Artifact 14086985331，SHA-256 bf29a3d4800353dad8f45582ffaa8d016b98e356fb6a9d077aad73133fc96b40
+- Windows 2025 独立构建：job 132236633032，Artifact 14085768864，SHA-256 78060ca7f4cf9624166048a702e14b1652c35e956b5ab17cbe111d782890b058
+- Windows 2022 对同一 Windows 2025 EXE 的交叉测试：job 132241895531，Artifact 14087061013，结论 success。
+- 三个 job 全部成功；独立构建各 25/25 steps，交叉测试 15/15 steps。
+- main 未修改；没有 PR 合并、正式 Release 或用户电脑安装。
+
+### 10.2 同一个二进制文件的核验
+
+唯一用于跨平台交叉测试的候选来自 Windows 2025 Artifact 14085768864：
+
+- 产品版本：1.4.7
+- 文件大小：125,320,473 bytes
+- SHA-256：78060ca7f4cf9624166048a702e14b1652c35e956b5ab17cbe111d782890b058
+- Windows 2022 直接下载此 Artifact，不重新构建。
+- 交叉回执 sameBinaryAsWindows2025=true，并且 sourceCandidateReceiptVerified=true。
+- 独立下载 Artifact ZIP 后重新计算 EXE SHA-256，仍与候选回执、sidecar、交叉回执完全一致。
+
+Windows 2022 自己的独立构建 SHA 为 bf29a3d4...fc96b40，它是另一份文件；不要与 Windows 2025 同一候选的 SHA 混用。
+
+### 10.3 同一候选安全实测
+
+Windows 2022 对 Windows 2025 候选复测通过：
+
+- Renderer AppContainer + Lockdown + Untrusted。
+- Network Service 的 Windows Token：AppContainer + Low Integrity，RID 4096。
+- Network Service 的 edge://sandbox Lockdown 仍显示 None，不能称为 LPAC 或完整 Lockdown。
+- CDP loopback、本机进程归属、独立浏览器 profile。
+- 正常启动、两次重启、关闭与清理。
+- browser-host、Job Object guard、Electron 主进程三种强制退出。
+- 每种强杀后 tracked processes、profile processes、CDP listeners 均为 0，无关 Edge 进程存活。
+- Edge 外网阻断，未执行真实抖音视频播放或模型调用。
+
+### 10.4 当前签名路线建议（不启动身份验证）
+
+Microsoft 官方文档当前区分：
+
+- Azure Artifact Signing Public Trust：组织发行主体只在其列明支持地区可申请；个人开发者目前限美国和加拿大。其官方地区列表不包含塞尔维亚。
+- 受支持地区的组织可优先评估 Azure Artifact Signing + GitHub Actions OIDC（开放身份连接），不需要把长期 Azure 客户端密码写入仓库。
+- 如果正式发行主体注册在不支持地区，Microsoft 的 Windows 开发者文档建议评估受信任 CA 的 OV Code Signing Certificate。文档给出的典型费用约为 USD 150–300/年；OV 私钥须由 HSM 或硬件令牌保护。
+- EV 证书现在不再带来 SmartScreen 即时绕过，不应仅为了绕过 SmartScreen 购买 EV。
+- 自签证书仅适合开发/测试，不适合公开分发。
+
+官方依据：
+- [Microsoft Artifact Signing Public Trust 地区与身份验证要求](https://learn.microsoft.com/en-us/azure/artifact-signing/quickstart)
+- [Microsoft Windows 应用代码签名选项、OV 费用与 HSM 要求](https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/code-signing-options)
+
+当前不购买证书、不开始身份验证、不要求在聊天中发送任何身份证件或法律材料。需要由正式发行主体自行确认其法律类型和注册司法辖区。若发行主体为塞尔维亚注册公司，应先按 OV 代码签名路线评估；若发行主体是其他地区的组织，则按 Microsoft 官方资格清单核对 Azure Public Trust 资格。不能根据操作者当前所在位置推断发行主体。
+
+### 10.5 更新器状态与真实升级阻塞
+
+当前候选回执确认：
+- manifestPublicKeyConfigured=false
+- authenticodePublisherThumbprintConfigured=false
+- updatesDisabledUntilTrustConfigured=true
+- postSwitchRollbackWindowMs=30000
+- startupCrashRecovery=true
+- recoveryDoesNotOverwriteUnknownShortcut=true
+- release=false
+
+Windows 2022 和 Windows 2025 均执行了：
+- 更新信任 / 健康 / 回滚合成测试：17 项通过，0 失败。
+- 更新事务崩溃恢复测试：12 项通过，0 失败。
+
+这些测试证明合成清单、签名拒绝、健康握手、快捷方式事务与文件系统崩溃恢复路径；它们不等于使用真实发布者证书完成真实在线下载、真实 EXE 安装切换或真实 EXE 启动失败回滚。
+
+### 10.6 后续执行顺序
+
+1. 保持当前 1.4.7 候选未签名、自动更新关闭。
+2. 正式发行主体自行确定 Authenticode 证书/签名服务；不在聊天中传递私钥、证书密码或身份材料。
+3. 固定客户端 Ed25519 公钥与 Publisher thumbprint，私钥留在受保护的签名服务。
+4. 生成与 YuTang 补丁提交、上游提交、EXE SHA、Artifact/Run ID 和 Publisher thumbprint 绑定的签名 manifest。
+5. 签名后重新计算 EXE SHA，并对同一签名 EXE 在 Windows 2022 与 Windows 2025 重新验收。
+6. 再单独进行真实在线更新、错误签名拒绝、成功升级、启动失败回滚和用户数据保留端到端测试。
+7. 正式 Release 仍需单独授权。
+
+本次跨平台启动与 Edge 安全验收已完成；下一项阻塞不是再跑旧候选，而是正式发布者信任身份。没有真实身份和签名配置时，保持 fail closed 是正确行为。
