@@ -59,3 +59,22 @@ Official policy page: https://www.sslmentor.rs/ssl/tc-mbg (CODE certificate sect
 - This is **not** permission to order or submit a passport, residency document, lease agreement, bank statement or payment credential. Await written final invoice and case-specific refund response if considering payment.
 
 New decision: prefer evaluating **one-year Certum Individual (€117 website price)** rather than committing to 2–3 years until the issuing CA, refund exposure, manual SimplySign operation and public personal certificate subject are acceptable. No orders have been made.
+
+## 7. 2026-11-15 SOURCE-ONLY-V2 follow-up: local output-path guard + actual source in GitHub
+
+The earlier V1 package described in section 3 remains a historical 17-test source-only result. Do not silently replace it or claim it was Windows-accepted.
+
+**V2 fixes:** `tools/windows147-release-manifest-kit.mjs` resolves the actual parent filesystem path using `fs.realpath` before writing a manifest and refuses a destination whose real target is inside the source project. It prevents a symlinked intermediate path from bypassing the prior lexical output-directory restriction. This is a defense against common local mistakes, **not an atomic guarantee against a concurrent malicious writer changing directory entries**.
+
+**New repository contents (experiment branch only):**
+- Source file `tools/windows147-release-manifest-kit.mjs`: Git blob SHA-1 `f08ec6aacb685157179737c4ab696cb674e9a00b`.
+- Test file `tests/windows147-release-manifest-kit.test.mjs`: Git blob SHA-1 `6dae02ff3dca4684efa3e26f34dfeef7bc6d55f0`.
+- Instructions `docs/windows-147-release-manifest-kit-v2.md`.
+- Exact-source Git commit: `02740cf1e21ca67af472dbaafb9be45de662822d`.
+- Local Linux Node.js v22.16.0 syntax + `node --test`: **19/19 pass**, 0 fail, 0 skipped, including the new symlink redirection negative case and legitimate output success case.
+- V2 TAP SHA-256: `2531addb0e773155aaae3b811a4ec1aa8ffe058c0e7dffba9190b484ab53ec47`.
+- V2 standalone ZIP SHA-256: `bc99b50daa144e1bf72a634b21a1c3a8d0eca112ad2a04c4315ef298bb21635c`.
+- V2 backup in owner-only Drive folder `YuTang-Cloud-Build`: https://drive.google.com/file/d/1wenAF_EXc3h6FUprdkgVPN-ZTVBocaM8/view?usp=drivesdk ; Drive metadata returned `shared=false`.
+- No signature secret or identity document is included in the ZIP or repository.
+
+**Release remains BLOCKED:** the test suite invokes a synthetic Authenticode verification callback with fixture keys, not Microsoft's native Windows signature engine. Before any genuine release, the Windows tool must be tested against a real signed EXE with actual Certum certificate validation, signer thumbprint, EKU and RFC3161 timestamp; then the **new signed EXE SHA** must complete Windows 2022/2025 full tests, updater public-key/bootstrap, malicious-signature rejection, upgrade and rollback. No certificate has been purchased, no real EXE signed, no Windows Actions run authorized or executed by V2, and no `main` change.
