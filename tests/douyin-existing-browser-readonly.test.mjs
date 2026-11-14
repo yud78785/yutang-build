@@ -26,6 +26,7 @@ function make({urls=[address],labels=['deepseek-douyin-api'],connected=true,cont
  const observeComments=async opts=>{calls.push('comments.read');assert.equal(opts.page,pages[0]);if(mutate==='afterComments')pages[0]._url='https://www.douyin.com/';
   return commentStatus==='blocked'?{status:'blocked',reasonCode:'LOGIN_REQUIRED'}:{status:commentStatus,videoId:id,source:'visible_public_comment_dom',observationScope:'currently_visible_loaded_rows_only',comments:commentStatus==='ok'?[{text:'看到了公开评论',commentId:'123'}]:[],visibleCommentCount:commentStatus==='ok'?1:0};};
  const inspectSummary=async opts=>{calls.push('ai-entry.read');assert.equal(opts.page,pages[0]);if(mutate==='afterSummary')pages[0]._closed=true;if(mutate==='reloadSameUrl')pages[0]._epoch+=1;
+  if(mutate==='addOwnedTabAfterSummary')pages.push({...pages[0],_url:'https://www.douyin.com/video/7523456789012345678'});
   return aiStatus==='blocked'?{status:'blocked',reasonCode:'AI_FRAME_CHANGED_AFTER_READ'}:{status:aiStatus,videoId:id,evidenceSource:'visible_official_ai_iframe_entry_only',matchingFrameCount:aiStatus==='entry_visible'?1:0,aiSummaryEntryVisible:aiStatus==='entry_visible',aiSummaryGenerated:false,aiSummaryText:null};};
  const run=()=>inspect({controller,readPageState,readCommentDom,observeComments,inspectSummary,expectedVideoId:id,signal:abort});
  return{run,calls,browser,controller,pages};
@@ -54,6 +55,19 @@ test('duplicate owner claims are rejected',async()=>{
  const f=make({urls:[address,address],labels:['deepseek-douyin-api','deepseek-douyin-dsh']});
  const r=await f.run();assert.equal(r.reasonCode,'OWNED_VIDEO_PAGE_AMBIGUOUS');assert.ok(!f.calls.includes('comments.read'));
 });
+test('another owned tab for a different public video blocks the target, not just duplicate target URLs',async()=>{
+ const other='https://www.douyin.com/video/7523456789012345678';
+ const f=make({urls:[address,other],labels:['deepseek-douyin-api','deepseek-douyin-dsh']});
+ const r=await f.run();assert.equal(r.reasonCode,'OWNED_VIDEO_PAGE_AMBIGUOUS');
+ assert.deepEqual(r.comments,[]);assert.ok(!f.calls.includes('comments.read'));
+});
+test('another owned Douyin homepage blocks the target, but personal and offsite tabs are ignored',async()=>{
+ const conflict=make({urls:[address,'https://www.douyin.com/'],labels:['deepseek-douyin-api','deepseek-douyin-api']});
+ assert.equal((await conflict.run()).reasonCode,'OWNED_VIDEO_PAGE_AMBIGUOUS');
+ const personal=make({urls:[address,'https://www.douyin.com/','https://private.example/account'],
+  labels:['deepseek-douyin-api','personal-tab','deepseek-douyin-api']});
+ assert.equal((await personal.run()).status,'read_only_evidence');
+});
 test('missing visible comments and AI entry are valid but never called summary content',async()=>{
  const f=make({commentStatus:'no_visible_comments',aiStatus:'not_observed'});const r=await f.run();
  assert.equal(r.publicCommentsStatus,'no_visible_comments');assert.deepEqual(r.comments,[]);
@@ -71,6 +85,11 @@ test('page changed or closed during read invalidates the whole receipt',async()=
 test('reloading identical URL invalidates previous document-bound evidence',async()=>{
  const f=make({mutate:'reloadSameUrl'}),r=await f.run();
  assert.equal(r.reasonCode,'DOCUMENT_CHANGED_DURING_INSPECTION');assert.deepEqual(r.comments,[]);
+});
+test('an extra upstream-owned video page added DURING the read invalidates all earlier comments',async()=>{
+ const f=make({mutate:'addOwnedTabAfterSummary'}),r=await f.run();
+ assert.equal(r.reasonCode,'OWNED_VIDEO_PAGE_CHANGED_DURING_INSPECTION');
+ assert.deepEqual(r.comments,[]);assert.equal(r.aiSummaryEntryVisible,false);
 });
 test('abort signal stops work before reading page or after connecting',async()=>{
  const signal={aborted:true},f=make({abort:signal}),r=await f.run();assert.equal(r.reasonCode,'CANCELLED_BEFORE_READ');assert.equal(f.calls.length,0);
