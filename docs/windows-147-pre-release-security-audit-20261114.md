@@ -549,3 +549,89 @@ README 的修改仍需随下一版便携 EXE 构建后，检查 `app.asar` 内�
 - 验收时 `main`：`4745ed23cbb748cb4b070ed70390703d1261aea0`
 - `main` 未修改；没有合并、没有 PR 发布、没有 GitHub Release。
 - Windows 2022、Windows 2025 与同一 EXE 跨平台三项均为独立 job 成功结果，不能把任何一个候选 SHA 的结果移植到另一个 SHA。
+
+
+---
+
+## 15. 2026-11-14 最新候选：三任务 Windows 验收及同一 EXE 跨平台复测全部通过
+
+本节为当前最新状态，覆盖本文件前面章节中“同一候选交叉测试尚未运行/待验证”的历史记录。前述旧 SHA 和旧 Run 保留作历史证据，不再代表当前候选。
+
+### 15.1 最终工作流与提交
+
+- Workflow Run：[43527451048](https://github.com/yud78785/yutang-build/actions/runs/43527451048)
+- 最终结论：completed / success
+- 实验分支：experiment/windows-147-update-recovery-20261114
+- 本轮提交：c169cadb05c1ad8a6cc6139971e65dcf697e8bdd
+- Windows 2022 独立构建 job：132236632750，success，25/25 steps
+- Windows 2025 独立构建 job：132236633032，success，25/25 steps
+- Windows 2022 同一文件交叉测试 job：132241895531，success，15/15 steps
+- main：4745ed23cbb748cb4b070ed70390703d1261aea0，未修改。
+
+### 15.2 两个独立构建产物身份
+
+| 构建平台 | Artifact ID | 文件大小 | EXE SHA-256 | Authenticode |
+|---|---:|---:|---|---|
+| Windows 2022 | 14086985331 | 125,319,905 bytes | bf29a3d4800353dad8f45582ffaa8d016b98e356fb6a9d077aad73133fc96b40 | NotSigned |
+| Windows 2025 | 14085768864 | 125,320,473 bytes | 78060ca7f4cf9624166048a702e14b1652c35e956b5ab17cbe111d782890b058 | NotSigned |
+
+两台 runner 独立构建的 EXE 哈希不同。Windows 2022 独立构建的 SHA 不得冒充 Windows 2025 候选，也不能把两份独立构建的结果拼接成同一个二进制文件的交叉验收。
+
+### 15.3 同一个 Windows 2025 EXE 在 Windows 2022 复测
+
+- 来源：本次同一 Workflow Run 的 Windows 2025 Artifact 14085768864。
+- 交叉测试 Artifact：14087061013，名称为 YuTang-1.4.7-Same-Windows-2025-Candidate-Windows-2022-Cross-Test-NOT-RELEASE。
+- 交叉 job：132241895531，结论 success。
+- 下载文件大小：125,320,473 bytes。
+- Windows 2022 交叉回执 SHA-256：78060ca7f4cf9624166048a702e14b1652c35e956b5ab17cbe111d782890b058。
+- 交叉回执字段：sameBinaryAsWindows2025=true、sourceCandidateReceiptVerified=true、release=false。
+
+另外，已把三个 Artifact 下载到独立审计容器，重新计算 Windows 2025 ZIP 内 EXE 的 SHA-256；结果与 Windows 2025 候选回执、sidecar 以及 Windows 2022 交叉回执完全一致。Windows 2022 自己构建的文件另有不同 SHA，未混淆。
+
+### 15.4 当前同一 EXE 的 Windows 2022 安全证据
+
+- Renderer：3 个 Renderer 进程均为 AppContainer + Lockdown + Untrusted。
+- Network Service：真实 Windows Token 查询确认 AppContainer SID 与目标进程匹配；integrityRid=4096、integrityLevel=Low。
+- 必须保留 UI 与 Token 的区别：edge://sandbox 中 Network Service 的 Lockdown 为 None、Integrity 列为 Default。准确结论是 AppContainer + Low Integrity，不是 LPAC，也不是完整 Lockdown。
+- CDP：只监听 loopback；浏览器进程归属、专用 profile 与命令行参数检查通过。
+- 正常生命周期：3 次启动、3 次关闭、两次重启；每次关闭后进程和监听残留为 0。
+- 三种强制退出均通过：kill-host-only、kill-jobguard-only、kill-electron-main-only。
+- 每种强杀后的 tracked processes、profile processes、CDP listeners 均为 0；无关 Edge 进程保持存活；未使用递归 taskkill。
+- 交叉测试回执中的四份 Edge 结果（normal、force-host、force-guard、force-desktop）均绑定相同 SHA-256，并通过工作流的哈希及清理字段检查。
+
+### 15.5 更新器回归与真实更新边界
+
+Windows 2022 和 Windows 2025 的独立构建 job 均实际执行：
+
+- 更新信任 / 健康 / 回滚合成回归：17 项通过，0 失败。
+- 更新事务崩溃恢复回归：12 项通过，0 失败。
+- 新增桌面路径回归：优先使用 Electron Desktop 路径；缺失时回退到用户 Home 下的 Desktop；两者都不可用时 fail closed。
+- 更新器健康握手、暂存快捷方式、30 秒稳定观察期、崩溃回滚、持久化事务和启动崩溃恢复逻辑均已进入本轮候选 EXE。
+
+但是：
+- Authenticode：仍为 NotSigned。
+- Ed25519 清单公钥：未配置。
+- Publisher thumbprint：未配置。
+- updatesDisabledUntilTrustConfigured=true。
+- 没有真实在线下载、签名安装、真实 EXE 升级或真实 EXE 崩溃回滚端到端测试。
+- 17 + 12 项是 Windows runner 上执行的合成/文件系统回归测试，不等于真实发布信任链已通过。
+
+### 15.6 网络隔离与清理证据的准确表述
+
+Edge 外网在本轮被主动阻断；真实 Douyin 导航返回 ERR_NETWORK_ACCESS_DENIED 是预期隔离结果，不是浏览器启动故障。没有真实账号、模型密钥、模型请求、视频播放或消息发送。
+
+临时防火墙规则的删除命令已在三个 Windows job 中执行，相关 cleanup step 成功结束；但该工作流没有在删除后再次查询规则是否不存在。因此审计只记为“清理命令已执行”，不声称有独立的删除后状态断言。GitHub hosted runner 为一次性环境，不涉及用户电脑上的防火墙配置。未来工作流可增加删除后查询断言。
+
+### 15.7 当前结论与后续阻塞
+
+已完成且有当前 SHA 证据：Windows 2022、Windows 2025 各自 EXE 验收；Windows 2025 同一个 EXE 在 Windows 2022 的交叉验收；Renderer / Network Service 令牌、CDP、重启、三种强杀与清理；更新器合成测试。
+
+仍未完成：
+1. 真实 Authenticode 发布者证书 / 受控签名服务。
+2. 固定客户端 Ed25519 manifest 公钥和 Publisher thumbprint。
+3. YuTang 正式签名 Release。
+4. 真实在线下载、签名拒绝、成功升级、失败回滚和用户数据保留端到端验收。
+
+签名资格取决于正式发行主体的法律类型与注册司法辖区，不能用当前操作者的地理位置推断。Microsoft Artifact Signing Public Trust 对组织与个人的地区要求不同；若发行主体在不支持地区，应评估受信任 CA 的 OV 代码签名证书。自签证书只可用于测试，不可冒充公开发布者信任。
+
+在真实信任配置完成前，当前候选保持 CANDIDATE-NOT-RELEASE，自动更新保持关闭；不合并、不发布、不安装到用户电脑。
