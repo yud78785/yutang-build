@@ -1,0 +1,3 @@
+# Pin audited PowerShell script bytes across Windows and Unix Git checkouts.
+tools/signing/Sign-YuTangCandidate.ps1 text eol=lf
+tests/Invoke-Windows147SigningNoSignPreflight.ps1 text eol=lf
