@@ -32,19 +32,26 @@
       "path": "tools/douyin-ai-summary-entry-readonly.mjs"
     },
     "existing_edge_reader": {
-      "passed": 15,
-      "blob": "c6cb78af8e91f24b4af5af0d18d8496a196e33a7",
-      "path": "tools/douyin-existing-browser-readonly.mjs"
+      "passed": 19,
+      "blob": "85e8a1fcdac48a97e22621e6f35598bb6aac1072",
+      "path": "tools/douyin-existing-browser-readonly.mjs",
+      "tests_path": "tests/douyin-existing-browser-readonly.test.mjs",
+      "tests_blob": "d064bc1a832ca6254909c70f3b2c66f1d81c1fb8"
     },
-    "passed_total": 68,
+    "passed_total": 72,
     "failed_total": 0,
-    "scope_limitation": "68 passing Node.js 22.16.0 isolated Linux checks: mocked Playwright objects and one real environment-gate CLI invocation. No live Douyin browser or Windows Edge session exercised.",
+    "scope_limitation": "72 passing deterministic checks with Node.js 22.16.0 on isolated Linux plus a real CLI environment-gate invocation returning WINDOWS_REQUIRED, exit=2. No actual Windows/Douyin browser run.",
     "source_preflight_cli": {
       "passed": 14,
       "path": "tools/run-douyin-existing-browser-readonly.mjs",
-      "blob": "75ef1d4a463b88582d0519a2b9c400d29580920c",
+      "blob": "81210460f95e5e7b680a8b2fc61849fe7f701d12",
       "tests_path": "tests/douyin-existing-browser-cli.test.mjs",
-      "tests_blob": "8d9fe7075a8126e062c047aed5aaa40697c3238c"
+      "tests_blob": "2aaebb17e1e702832492a805a30497bd31c4c2dc"
+    },
+    "regression_reproduced_pre_fix": {
+      "details": "Old source incorrectly accepted an expected video tab when an additional upstream-owned public Douyin tab was on another video or homepage.",
+      "red_tests_before_fix": 2,
+      "pass_after_fix": true
     }
   },
   "site_and_browser_access": {
@@ -56,7 +63,12 @@
     "live_ai_iframe_entry_verified": false,
     "generated_ai_summary_text_verified": false,
     "existing_browser_one_shot_cli_added": true,
-    "existing_browser_one_shot_cli_windows_validated": false
+    "existing_browser_one_shot_cli_windows_validated": false,
+    "no_visible_comment_or_ai_entry_is_success": false,
+    "no_content_receipt": "no_visible_evidence",
+    "no_content_cli_exit_code": 2,
+    "concurrent_upstream_operation_lock_held": false,
+    "concurrent_operations_race_eliminated": false
   },
   "safety_policy_for_next_step": {
     "do_not_modify_main": true,
@@ -68,5 +80,5 @@
     "use_existing_dedicated_edge_only": true,
     "no_claim_of_real_success_without_raw_browser_receipt": true
   },
-  "next_acceptance": "When a separately authorized Windows executor with an existing dedicated YuTang Edge and a clean pinned upstream source tree is available, invoke the committed one-shot read-only entry on a known publicly accessible /video/{id} page and inspect original receipt. Do not install upstream, launch browser, click, login, use CI, modify main or release from this chat. Until then report BLOCKED, not PASS."
+  "next_acceptance": "Actual Windows acceptance still requires a separately available Windows source host, a clean pinned upstream checkout and an already-running, verified dedicated YuTang Edge on one public /video/{id} tab. The source-only reader now blocks duplicate upstream-owned Douyin tabs before and after reading, and returns no_visible_evidence (exit 2) if neither comments nor AI entry is present. Upstream tab-api operation lock is NOT acquired because this no-write probe must not create lockfiles; no concurrent-operation safety guarantee is claimed. Do not run new CI, login, modify main/EXE or publish without separate instruction."
 }
