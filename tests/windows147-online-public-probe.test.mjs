@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import {validatePublicReceipt, ownedEdgePids, trackedEdgeSurvivors} from '../tools/windows147-online-public-probe.mjs';
+import path from 'node:path';
+import {validatePublicReceipt, validatePublicPageEvidence, verifyDesktopStopTarget, ownedEdgePids, trackedEdgeSurvivors} from '../tools/windows147-online-public-probe.mjs';
 const SHA='3201d433df727a5d5fddf8e68a0f69ea1654057e04cfad7833fd3ed7dc241a34';
 const s=fs.readFileSync(new URL('../tools/windows147-online-public-probe.mjs', import.meta.url),'utf8');
 const green={status:200,page:{origin:'https://www.douyin.com',ready:'complete',challenged:false,titleLength:8,bodyLength:220,bodyChildren:8,paintBytes:10000},sandbox:{rendererSandboxVerified:true,networkServiceWindowsTokenVerified:true,networkServiceLowIntegrityVerified:true,networkServiceProcessOwned:true},identity:{loopbackOnly:true,listenerMatchesEdge:true},cleaned:true};
@@ -60,4 +61,36 @@ test('orphaned renderer remains a blocker after its parent disappears',()=>{
  assert.deepEqual(survivors.map(r=>r.ProcessId),[12]);
  assert.match(s,/trackedEdgeSurvivors\(procs,trackedEdgePids\)/);
  assert.match(s,/trackedEdgeProcessCount:trackedEdgePids\.size/);
+});
+
+test('inner desktop stop target is verified by exact wrapper and API Job Object ownership',()=>{
+ const exe='C:\\candidate\\Dafeiyu-Douyin-API-1.4.7-win-x64.exe';
+ const rows=[
+  {ProcessId:100,ParentProcessId:1,Name:'Dafeiyu-Douyin-API-1.4.7-win-x64.exe',ExecutablePath:path.resolve(exe)},
+  {ProcessId:101,ParentProcessId:100,Name:'\u5927\u80a5\u9c7c\u6296\u97f3\u52a9\u624b.exe',ExecutablePath:'C:\\tmp\\inner.exe'},
+  {ProcessId:102,ParentProcessId:101,Name:'node.exe',CommandLine:'node api-worker.mjs'},
+  {ProcessId:103,ParentProcessId:101,Name:'jobguard.exe',CommandLine:'jobguard --owner-pid 101 --target-pid 102'}
+ ];
+ // The executable path check uses the host platform's path.resolve; an exact path still roundtrips.
+ const target=verifyDesktopStopTarget(rows,{exePid:100,exeFile:exe,backendPid:102});
+ assert.equal(target.pid,101);
+ assert.throws(()=>verifyDesktopStopTarget(rows,{exePid:100,exeFile:'not-the-candidate.exe',backendPid:102}));
+ assert.throws(()=>verifyDesktopStopTarget(rows.filter(p=>p.ProcessId!==103),{exePid:100,exeFile:exe,backendPid:102}));
+});
+test('probe stops verified inner Electron main nonrecursively, not only outer wrapper',()=>{
+ assert.match(s,/stopVerifiedDesktop\(desktopTarget\)/);
+ assert.match(s,/execFileSync\('taskkill\.exe',\['\/PID',String\(target\.pid\),'\/F'\]/);
+ assert.doesNotMatch(s,/execFileSync\('taskkill\.exe',\['\/PID',String\(target\.pid\),'\/T'/);
+ assert.match(s,/INNER_ELECTRON_IDENTITY_NOT_VERIFIED/);
+});
+test('page-only readiness is separate from entire lifecycle acceptance',()=>{
+ assert.equal(validatePublicPageEvidence({...green,cleaned:false}),true);
+ assert.throws(()=>validatePublicReceipt({...green,cleaned:false}));
+ assert.match(s,/WINDOWS_PUBLIC_PAGE_GATE_OK/);
+});
+test('cleanup diagnostic logs only bounded role and PID, not command line',()=>{
+ assert.match(s,/WINDOWS_PUBLIC_WEB_CLEANUP_DIAGNOSTIC/);
+ assert.match(s,/role:cleanupRole/);
+ assert.match(s,/remaining: left\.slice\(0,40\)/);
+ assert.doesNotMatch(s,/JSON\.stringify\(.*CommandLine/);
 });

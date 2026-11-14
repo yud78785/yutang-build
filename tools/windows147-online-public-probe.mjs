@@ -17,7 +17,7 @@ const PORT = 9227;
 const ORIGIN = 'https://www.douyin.com';
 const MAX_DELAY = 90000;
 
-export function validatePublicReceipt({status, page, sandbox, identity, cleaned}) {
+export function validatePublicPageEvidence({status, page, sandbox, identity}) {
   assert.equal(status, 200, 'PUBLIC_DOCUMENT_NOT_HTTP_200');
   assert.equal(page?.origin, ORIGIN, 'PUBLIC_PAGE_LEFT_APPROVED_ORIGIN');
   assert.equal(page?.ready, 'complete', 'PUBLIC_PAGE_NOT_FULLY_LOADED');
@@ -29,7 +29,11 @@ export function validatePublicReceipt({status, page, sandbox, identity, cleaned}
   assert.equal(sandbox?.networkServiceProcessOwned, true, 'NETWORK_PROCESS_NOT_OWNED');
   assert.equal(identity?.loopbackOnly, true, 'CDP_NOT_LOOPBACK_ONLY');
   assert.equal(identity?.listenerMatchesEdge, true, 'CDP_LISTENER_NOT_OWNED');
-  assert.equal(cleaned, true, 'PROCESSES_NOT_CLEANED');
+  return true;
+}
+export function validatePublicReceipt(receipt) {
+  validatePublicPageEvidence(receipt);
+  assert.equal(receipt.cleaned, true, 'PROCESSES_NOT_CLEANED');
   return 'PASS_WINDOWS_EXE_PUBLIC_WEB_ONLY';
 }
 
@@ -51,7 +55,7 @@ function windowsJson(psCode) {
   return Array.isArray(value) ? value : [value];
 }
 function processes() {
-  return windowsJson("Get-CimInstance Win32_Process -Filter \"Name = 'msedge.exe' OR Name = 'node.exe' OR Name = 'jobguard.exe' OR Name = 'Dafeiyu-Douyin-API-1.4.7-win-x64.exe'\" | Select-Object ProcessId,ParentProcessId,Name,CommandLine,ExecutablePath | ConvertTo-Json -Compress -Depth 4");
+  return windowsJson("Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,CommandLine,ExecutablePath | ConvertTo-Json -Compress -Depth 4");
 }
 function listeners() {
   return windowsJson("@(Get-NetTCPConnection -LocalPort 9227 -State Listen -ErrorAction SilentlyContinue | Select-Object OwningProcess,LocalAddress) | ConvertTo-Json -Compress");
@@ -166,10 +170,50 @@ export function trackedEdgeSurvivors(rows, trackedEdgePids) {
   return rows.filter(p=>/msedge\.exe$/i.test(String(p.Name||'')) &&
     trackedEdgePids.has(Number(p.ProcessId)));
 }
-async function waitCleanup({exePid,backendPid,hostPid,profile,controlDir,trackedEdgePids=new Set()}) {
-  return until(()=>{
+export function verifyDesktopStopTarget(rows, {exePid, exeFile, backendPid}) {
+  const wrapper=rows.find(r=>Number(r.ProcessId)===exePid);
+  assert.ok(wrapper && String(wrapper.ExecutablePath||'').toLowerCase()===path.resolve(exeFile).toLowerCase(),
+    'CANDIDATE_WRAPPER_IDENTITY_NOT_VERIFIED');
+  const backend=rows.find(r=>Number(r.ProcessId)===backendPid);
+  assert.ok(backend && /node\.exe$/i.test(String(backend.Name||'')) && /api-worker\.mjs/i.test(String(backend.CommandLine||'')),
+    'API_WORKER_IDENTITY_NOT_VERIFIED');
+  const desktopPid=Number(backend.ParentProcessId);
+  const desktop=rows.find(r=>Number(r.ProcessId)===desktopPid);
+  assert.ok(desktop && String(desktop.Name)==='\u5927\u80a5\u9c7c\u6296\u97f3\u52a9\u624b.exe' &&
+    hasHostAncestor(desktopPid,exePid,rows), 'INNER_ELECTRON_IDENTITY_NOT_VERIFIED');
+  const guards=rows.filter(r=>/jobguard\.exe$/i.test(String(r.Name||''))&&Number(r.ParentProcessId)===desktopPid);
+  assert.equal(guards.length,1,'DESKTOP_JOB_GUARD_NOT_VERIFIED');
+  assert.match(String(guards[0].CommandLine||''),new RegExp('--owner-pid\\s+'+desktopPid+'\\s+--target-pid\\s+'+backendPid+'(?:\\s|$)','i'),
+    'DESKTOP_JOB_GUARD_PAIR_MISMATCH');
+  return {pid:desktopPid,executablePath:String(desktop.ExecutablePath||'')};
+}
+function stopVerifiedDesktop(target) {
+  if (!target) return false;
+  const current=processes().find(p=>Number(p.ProcessId)===target.pid);
+  if (!current) return false;
+  assert.equal(String(current.Name),'\u5927\u80a5\u9c7c\u6296\u97f3\u52a9\u624b.exe',
+    'INNER_ELECTRON_CHANGED_BEFORE_STOP');
+  assert.equal(String(current.ExecutablePath||'').toLowerCase(),target.executablePath.toLowerCase(),
+    'INNER_ELECTRON_IMAGE_CHANGED_BEFORE_STOP');
+  // Matches the previously accepted Windows EXE lifecycle check: exact inner desktop PID, never /T.
+  execFileSync('taskkill.exe',['/PID',String(target.pid),'/F'],{windowsHide:true,timeout:10000,stdio:'ignore'});
+  return true;
+}
+function cleanupRole(p,{exePid,desktopPid,backendPid,hostPid,trackedEdgePids}) {
+  const pid=Number(p.ProcessId);
+  if(pid===exePid)return 'packaged-wrapper';
+  if(pid===desktopPid)return 'inner-electron';
+  if(pid===backendPid)return 'api-worker';
+  if(pid===hostPid)return 'browser-host';
+  if(trackedEdgePids.has(pid)&&/msedge\.exe$/i.test(String(p.Name||'')))return 'edge-descendant';
+  if(/jobguard\.exe$/i.test(String(p.Name||'')))return 'jobguard';
+  return 'owned-descendant';
+}
+async function waitCleanup({exePid,desktopPid,backendPid,hostPid,profile,controlDir,trackedEdgePids=new Set(),trackedOwnedPids=new Set()}) {
+  try {
+  return await until(()=>{
     const procs=processes();
-    const owned=procs.filter(p=>Number(p.ProcessId)===exePid ||
+    const owned=procs.filter(p=>trackedOwnedPids.has(Number(p.ProcessId)) || Number(p.ProcessId)===desktopPid || Number(p.ProcessId)===exePid ||
       (backendPid > 0 && Number(p.ProcessId)===backendPid) ||
       String(p.CommandLine||'').toLowerCase().includes(profile.toLowerCase()) ||
       String(p.CommandLine||'').toLowerCase().includes(controlDir.toLowerCase()) ||
@@ -177,6 +221,21 @@ async function waitCleanup({exePid,backendPid,hostPid,profile,controlDir,tracked
         (Number(p.ParentProcessId)===exePid || Number(p.ParentProcessId)===hostPid)));
     return !owned.length && trackedEdgeSurvivors(procs,trackedEdgePids).length===0 && listeners().length===0;
   },20000,'CANDIDATE_PROCESSES_OR_CDP_REMAIN');
+  } catch(error) {
+    try {
+      const rows=processes();
+      const left=rows.filter(p=>trackedOwnedPids.has(Number(p.ProcessId)) || Number(p.ProcessId)===desktopPid ||
+        Number(p.ProcessId)===exePid || Number(p.ProcessId)===backendPid ||
+        String(p.CommandLine||'').toLowerCase().includes(profile.toLowerCase()) ||
+        String(p.CommandLine||'').toLowerCase().includes(controlDir.toLowerCase()) ||
+        trackedEdgePids.has(Number(p.ProcessId)));
+      console.error('WINDOWS_PUBLIC_WEB_CLEANUP_DIAGNOSTIC '+JSON.stringify({
+        remaining: left.slice(0,40).map(p=>({pid:Number(p.ProcessId),role:cleanupRole(p,{exePid,desktopPid,backendPid,hostPid,trackedEdgePids})})),
+        remainingCount:left.length,cdpListenerCount:listeners().length
+      }));
+    } catch { console.error('WINDOWS_PUBLIC_WEB_CLEANUP_DIAGNOSTIC_UNAVAILABLE'); }
+    throw error;
+  }
 }
 export async function run(exe) {
   if(process.platform!=='win32'||process.env.GITHUB_ACTIONS!=='true'||process.env.YUTANG_PUBLIC_WEB_TEST_AUTHORIZED!=='yes'||!process.env.RUNNER_TEMP)
@@ -200,7 +259,9 @@ export async function run(exe) {
   assert.ok(!('GITHUB_TOKEN' in env)&&!('GH_TOKEN' in env),'CI_CREDENTIAL_PROPAGATION');
   const child=spawn(exe,['--remote-debugging-port=0','--remote-debugging-address=127.0.0.1'],{env,windowsHide:true,shell:false,stdio:'ignore'});
   let childError=null,exited=false,hostPid=0,backendPid=0,cleaned=false;
+  let desktopTarget=null;
   const trackedEdgePids=new Set();
+  const trackedOwnedPids=new Set();
   child.once('error',e=>{childError=e;});child.once('exit',()=>{exited=true;});
   try {
     const desktop=await until(async()=>{
@@ -231,11 +292,19 @@ export async function run(exe) {
     const initialSnapshot=processes();
     const identity=verifyProcessSnapshot({processes:initialSnapshot,hostPid,profile,
       listenerPids:sock.map(x=>Number(x.OwningProcess)),portAddresses:sock.map(x=>x.LocalAddress)});
+    desktopTarget=verifyDesktopStopTarget(initialSnapshot,{exePid:child.pid,exeFile:exe,backendPid});
+    for(const p of initialSnapshot)if(Number(p.ProcessId)===child.pid || Number(p.ProcessId)===desktopTarget.pid ||
+      hasHostAncestor(Number(p.ProcessId),desktopTarget.pid,initialSnapshot))trackedOwnedPids.add(Number(p.ProcessId));
     for(const pid of ownedEdgePids(initialSnapshot,hostPid)) trackedEdgePids.add(pid);
     assert.ok(trackedEdgePids.size>0,'CANDIDATE_EDGE_PROCESS_IDS_NOT_CAPTURED');
     const sandbox=await inspectRendererSandbox(PORT,{profile,hostPid});
     const online=await inspectOnlinePage();
-    for(const pid of ownedEdgePids(processes(),hostPid)) trackedEdgePids.add(pid);
+    validatePublicPageEvidence({status:online.status,page:online.page,sandbox,identity});
+    console.log('WINDOWS_PUBLIC_PAGE_GATE_OK '+JSON.stringify({exeSha256:SHA,httpStatus:online.status,rendered:true,cleanupPending:true}));
+    const beforeClose=processes();
+    for(const p of beforeClose)if(hasHostAncestor(Number(p.ProcessId),desktopTarget.pid,beforeClose))
+      trackedOwnedPids.add(Number(p.ProcessId));
+    for(const pid of ownedEdgePids(beforeClose,hostPid)) trackedEdgePids.add(pid);
     await closeDedicatedBrowser();
     await until(()=>{
       const rows=processes();
@@ -243,9 +312,10 @@ export async function run(exe) {
         !rows.some(p=>String(p.CommandLine||'').toLowerCase().includes(profile.toLowerCase())) &&
         trackedEdgeSurvivors(rows,trackedEdgePids).length===0;
     },20000,'BROWSER_NOT_CLEANED');
-    // Terminate ONLY the process handle spawned from this exact pinned EXE, not another app.
+    // The verified inner Electron main, not the outer portable wrapper, owns the API Job Object.
+    stopVerifiedDesktop(desktopTarget);
     if(!exited)child.kill();
-    cleaned=await waitCleanup({exePid:child.pid,backendPid,hostPid,profile,controlDir,trackedEdgePids});
+    cleaned=await waitCleanup({exePid:child.pid,desktopPid:desktopTarget.pid,backendPid,hostPid,profile,controlDir,trackedEdgePids,trackedOwnedPids});
     const status=validatePublicReceipt({status:online.status,page:online.page,sandbox,identity,cleaned});
     const receipt={status,exeSha256:SHA,exeBytes:BYTES,sourceCandidate:'9cc16d7e64d59dc141e9c6687b8dd461934fcc35',
       documentHttpStatus:online.status,renderedPage:true,rendererSandboxVerified:true,
@@ -257,10 +327,11 @@ export async function run(exe) {
     console.error('WINDOWS_PUBLIC_WEB_STAGE_FAILED '+String(error?.message||'unknown').slice(0,180));
     throw error;
   } finally {
-    if(!exited)try{child.kill();}catch{}
     let cleanupError=null;
+    if(desktopTarget)try{stopVerifiedDesktop(desktopTarget);}catch{cleanupError=new Error('VERIFIED_DESKTOP_STOP_FAILED');}
+    if(!exited)try{child.kill();}catch{}
     try {
-      await waitCleanup({exePid:child.pid,backendPid,hostPid,profile,controlDir,trackedEdgePids});
+      await waitCleanup({exePid:child.pid,desktopPid:desktopTarget?.pid||0,backendPid,hostPid,profile,controlDir,trackedEdgePids,trackedOwnedPids});
       cleaned=true;
     } catch { cleanupError=new Error('CANDIDATE_PROCESS_CLEANUP_UNVERIFIED'); }
     if(cleaned) {
