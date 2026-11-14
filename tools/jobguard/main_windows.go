@@ -186,6 +186,18 @@ func runGuard() error {
 }
 
 func main() {
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "--shortcut-commit", "--shortcut-restore", "--shortcut-delete":
+			if err := runShortcutOperation(os.Args[1:], os.Getppid()); err != nil {
+				_, _ = fmt.Fprintln(os.Stdout, "ERROR SHORTCUT_OPERATION_FAILED")
+				_, _ = fmt.Fprintln(os.Stderr, "YuTang shortcut operation failed:", err)
+				os.Exit(2)
+			}
+			_, _ = fmt.Fprintln(os.Stdout, "SHORTCUT_OPERATION_OK", os.Args[1])
+			return
+		}
+	}
 	if err := runGuard(); err != nil {
 		_, _ = fmt.Fprintf(os.Stdout, "ERROR JOB_GUARD_FAILED\n")
 		_, _ = fmt.Fprintln(os.Stderr, "YuTang Job Object guard failed:", err)
