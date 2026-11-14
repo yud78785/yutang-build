@@ -29,7 +29,7 @@ async function withFixture(t) {
   const meta = { repository: 'yud78785/yutang-build', version: '1.4.7', tag: 'v1.4.7',
     authenticodeThumbprint: THUMB,
     source: { upstreamCommit: upstream, yutangPatchCommit: patch },
-    candidate: { workflowRunId: 43541915930, artifactId: 14092434238 } };
+    candidate: { workflowRunId: 1001, artifactId: 2002 } };
   const write = async () => {
     await fs.writeFile(receipt, JSON.stringify(rec));
     await fs.writeFile(metadata, JSON.stringify(meta));
@@ -47,7 +47,7 @@ test('offline signing binds updater schema, raw Ed25519 base64 and EXE hash', as
   const manifest = JSON.parse(await fs.readFile(f.verifyOpts.manifest, 'utf8'));
   assert.deepEqual(Object.keys(manifest), ['schema','repository','tag','version','asset','source','candidate','authenticode']);
   assert.equal(manifest.asset.sha256, result.exeSha256);
-  assert.equal(manifest.candidate.artifactId, 14092434238);
+  assert.equal(manifest.candidate.artifactId, 2002);
   assert.equal(manifest.authenticode.thumbprint, THUMB);
   assert.equal(Buffer.from((await fs.readFile(f.verifyOpts.signature, 'utf8')).trim(), 'base64').length, 64);
   assert.equal((await verifyOnly(f.verifyOpts)).status, 'OFFLINE_MANIFEST_AND_HASH_VALID_AUTHENTICODE_NOT_CHECKED');
@@ -87,7 +87,7 @@ test('source provenance and artifact must be valid', async t => {
   const f = await withFixture(t);
   f.meta.candidate.artifactId = 0; await f.write();
   await assert.rejects(build(f.opts), /MANIFEST_CANDIDATE_INVALID/);
-  f.meta.candidate.artifactId = 14092434238; f.meta.source.yutangPatchCommit = 'bad'; await f.write();
+  f.meta.candidate.artifactId = 2002; f.meta.source.yutangPatchCommit = 'bad'; await f.write();
   await assert.rejects(build(f.opts), /MANIFEST_SOURCE_INVALID/);
 });
 test('schema rejects wrong repository and filename', () => {
@@ -98,4 +98,16 @@ test('schema rejects wrong repository and filename', () => {
   assert.ok(validatedManifest(basic, THUMB));
   assert.throws(() => validatedManifest({...basic,repository:'someone/else'}, THUMB), /MANIFEST_IDENTITY_INVALID/);
   assert.throws(() => validatedManifest({...basic,asset:{...basic.asset,name:'wrong.exe'}}, THUMB), /MANIFEST_ASSET_INVALID/);
+});
+
+test('unsigned Windows run and artifact IDs cannot be reused for a signed 1.4.7 manifest', async t => {
+  const f = await withFixture(t);
+  f.meta.candidate.workflowRunId = 43541915930; await f.write();
+  await assert.rejects(build(f.opts), /UNSIGNED_CANDIDATE_IDS_NOT_SIGNED_PROVENANCE/);
+  f.meta.candidate.workflowRunId = 1001;
+  for (const artifactId of [14092434238, 14092741259, 14093021418]) {
+    f.meta.candidate.artifactId = artifactId;
+    await f.write();
+    await assert.rejects(build(f.opts), /UNSIGNED_CANDIDATE_IDS_NOT_SIGNED_PROVENANCE/);
+  }
 });
