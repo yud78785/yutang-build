@@ -6,9 +6,15 @@ const id='7512345678901234567';
 const address=`https://www.douyin.com/video/${id}`;
 function make({urls=[address],labels=['deepseek-douyin-api'],connected=true,contextsCount=1,abort,commentStatus='ok',aiStatus='entry_visible',mutate,afterStart}={}){
  const calls=[],pages=urls.map((url,i)=>({
-  _url:url,_label:labels[i]||'no-owner',_closed:false,
+  _url:url,_label:labels[i]||'no-owner',_closed:false,_epoch:1000000,
   url(){calls.push('page.url');return this._url},isClosed(){calls.push('page.isClosed');return this._closed},
-  async evaluate(){calls.push('page.evaluate.window_name');return this._label},
+  async evaluate(fn){
+   if(String(fn).includes('documentOrigin')){
+    calls.push('page.evaluate.document_identity');
+    return{label:this._label,documentOrigin:this._epoch,locationHref:this._url};
+   }
+   calls.push('page.evaluate.window_name');return this._label;
+  },
   goto(){throw Error('NAVIGATE_FORBIDDEN')},click(){throw Error('CLICK_FORBIDDEN')},fill(){throw Error('FILL_FORBIDDEN')},
  }));
  const browser={isConnected(){calls.push('browser.isConnected');return connected},contexts(){calls.push('browser.contexts');return Array.from({length:contextsCount},(_,i)=>({pages(){calls.push('context.pages');return i===0?pages:[]}}));},
@@ -19,7 +25,7 @@ function make({urls=[address],labels=['deepseek-douyin-api'],connected=true,cont
  const readPageState=()=>{},readCommentDom=()=>{};
  const observeComments=async opts=>{calls.push('comments.read');assert.equal(opts.page,pages[0]);if(mutate==='afterComments')pages[0]._url='https://www.douyin.com/';
   return commentStatus==='blocked'?{status:'blocked',reasonCode:'LOGIN_REQUIRED'}:{status:commentStatus,videoId:id,source:'visible_public_comment_dom',observationScope:'currently_visible_loaded_rows_only',comments:commentStatus==='ok'?[{text:'看到了公开评论',commentId:'123'}]:[],visibleCommentCount:commentStatus==='ok'?1:0};};
- const inspectSummary=async opts=>{calls.push('ai-entry.read');assert.equal(opts.page,pages[0]);if(mutate==='afterSummary')pages[0]._closed=true;
+ const inspectSummary=async opts=>{calls.push('ai-entry.read');assert.equal(opts.page,pages[0]);if(mutate==='afterSummary')pages[0]._closed=true;if(mutate==='reloadSameUrl')pages[0]._epoch+=1;
   return aiStatus==='blocked'?{status:'blocked',reasonCode:'AI_FRAME_CHANGED_AFTER_READ'}:{status:aiStatus,videoId:id,evidenceSource:'visible_official_ai_iframe_entry_only',matchingFrameCount:aiStatus==='entry_visible'?1:0,aiSummaryEntryVisible:aiStatus==='entry_visible',aiSummaryGenerated:false,aiSummaryText:null};};
  const run=()=>inspect({controller,readPageState,readCommentDom,observeComments,inspectSummary,expectedVideoId:id,signal:abort});
  return{run,calls,browser,controller,pages};
@@ -61,6 +67,10 @@ test('AI entry mismatch invalidates all previous comment evidence',async()=>{
 });
 test('page changed or closed during read invalidates the whole receipt',async()=>{
  for(const mutate of ['afterComments','afterSummary']){const f=make({mutate}),r=await f.run();assert.equal(r.status,'blocked');assert.deepEqual(r.comments,[]);}
+});
+test('reloading identical URL invalidates previous document-bound evidence',async()=>{
+ const f=make({mutate:'reloadSameUrl'}),r=await f.run();
+ assert.equal(r.reasonCode,'DOCUMENT_CHANGED_DURING_INSPECTION');assert.deepEqual(r.comments,[]);
 });
 test('abort signal stops work before reading page or after connecting',async()=>{
  const signal={aborted:true},f=make({abort:signal}),r=await f.run();assert.equal(r.reasonCode,'CANCELLED_BEFORE_READ');assert.equal(f.calls.length,0);
