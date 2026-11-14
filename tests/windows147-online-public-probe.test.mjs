@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import {validatePublicReceipt, validatePublicPageEvidence, verifyDesktopStopTarget, identityReasonCode, ownedEdgePids, trackedEdgeSurvivors, cleanupRole, ownedJobGuardForCleanup, summarizeIdentityTopology} from '../tools/windows147-online-public-probe.mjs';
+import {validatePublicReceipt, validatePublicPageEvidence, verifyDesktopStopTarget, identityReasonCode, ownedEdgePids, trackedEdgeSurvivors, cleanupRole, ownedJobGuardForCleanup, summarizeIdentityTopology, safeProcessSnapshot} from '../tools/windows147-online-public-probe.mjs';
 const SHA='3201d433df727a5d5fddf8e68a0f69ea1654057e04cfad7833fd3ed7dc241a34';
 const s=fs.readFileSync(new URL('../tools/windows147-online-public-probe.mjs', import.meta.url),'utf8');
 const green={status:200,page:{origin:'https://www.douyin.com',ready:'complete',challenged:false,titleLength:8,bodyLength:220,bodyChildren:8,paintBytes:10000},sandbox:{rendererSandboxVerified:true,networkServiceWindowsTokenVerified:true,networkServiceLowIntegrityVerified:true,networkServiceProcessOwned:true},identity:{loopbackOnly:true,listenerMatchesEdge:true},cleaned:true};
@@ -258,4 +258,23 @@ test('more than ten owned-looking guards are capped and never accepted as a uniq
  const details=summarizeIdentityTopology(rows,{exePid:100,backendPid:102});
  assert.equal(details.workerGuardCount,10);
  assert.equal(details.exactGuardPairVerified,false);
+});
+
+
+test('unavailable or malformed WMI snapshot is a fixed redacted error, never an identity match',()=>{
+ const secret='C:\\Users\\private\\token';
+ const missing=safeProcessSnapshot(()=>{throw new Error(secret)});
+ assert.deepEqual(missing,{rows:null,error:'PROCESS_SNAPSHOT_UNAVAILABLE'});
+ assert.deepEqual(safeProcessSnapshot(()=>null),{rows:null,error:'PROCESS_SNAPSHOT_UNAVAILABLE'});
+ assert.deepEqual(safeProcessSnapshot(()=>({ProcessId:5})),{rows:null,error:'PROCESS_SNAPSHOT_UNAVAILABLE'});
+ assert.equal(identityReasonCode(new Error(missing.error)),'PROCESS_SNAPSHOT_UNAVAILABLE');
+ assert.doesNotMatch(JSON.stringify(missing),/private|token|Users/);
+});
+test('valid sparse process snapshot keeps only object rows, snapshot gate is wired at both boundaries',()=>{
+ const snapshot=safeProcessSnapshot(()=>[null,undefined,'garbled',{ProcessId:5,Name:'node.exe'},123]);
+ assert.equal(snapshot.error,null);
+ assert.deepEqual(snapshot.rows,[{ProcessId:5,Name:'node.exe'}]);
+ assert.equal((s.match(/safeProcessSnapshot\(processes\)/g)||[]).length,2);
+ assert.match(s,/lastIdentityReason=snapshot\.error;return null/);
+ assert.match(s,/if\(snapshot\.error\)throw new Error\(snapshot\.error\)/);
 });

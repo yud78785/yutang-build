@@ -16,8 +16,14 @@
 - Add `summarizeIdentityTopology` to report only seven bounded fields: wrapper present, worker present, immediate parent present, exact expected parent name, wrapper ancestry verified, guard count (capped at 10), and guard PID-pair verified. It never logs original PIDs, names, command lines, filesystem paths or credentials.
 - Emit the summary only when the early or final ownership check fails; otherwise no extra telemetry.
 - Explicitly encode Windows PowerShell subprocess stdout in UTF-8 to avoid dependent-locale Unicode process-name corruption. **No Windows validation of this change has been performed**.
-- Source Git blob SHA-1: `ec5ac27decb1b6b995d1a390f4e84f8d96c0f418`. Test Git blob SHA-1: `4346b352262fc9b8869e0c46589ead26ee8a98a2`.
-- Actual Node 22.16.0 Linux run of the exact changed source and test bytes, with a test-only stub for the unchanged production lifecycle import: **46/46 pass**, 0 fail, 0 skipped; `node --check` both files passed. TAP SHA-256 `3458ca0a484ff6a1c56cdccc033065033cecacdeafd5acf778741fb1d1f2ec01`. This does **not** validate Windows processes or the production lifecycle module.
+- Source Git blob SHA-1: `f998b7a793effe086f6d220e459d1e7e808ea17e`. Test Git blob SHA-1: `db3caf11f51ffbe4a9ec9aa3bc2085e4cdc20634`.
+- Actual Node 22.16.0 Linux run of the exact changed source and test bytes, with a test-only stub for the unchanged production lifecycle import: **48/48 pass**, 0 fail, 0 skipped; `node --check` both files passed. TAP SHA-256 `601b6e1febc0c87249e7004ca79ca5b3a4d7b4557adaa89320ac7ee2b67868d9`. This does **not** validate Windows processes or the production lifecycle module.
 - Next real proof would be a new, separately authorized, **single Windows 2025** immutable-EXE diagnostic. Do **not** trigger Windows 2022 if Windows 2025 fails; do not substitute this source-only pass for actual public-web acceptance.
 
 - Additional synthetic negative cases ensure incomplete/null WMI snapshot rows cannot crash the diagnostic, and 14 purported guard processes are capped in the report and explicitly rejected as a unique owner-pair.
+
+## Safe WMI snapshot failure handling (latest offline-only update)
+
+- A PowerShell/WMI process enumeration failure or non-array result is converted into a fixed `PROCESS_SNAPSHOT_UNAVAILABLE` reason, without logging its raw exception or sensitive OS paths. An invalid result cannot authorize process termination.
+- Missing/non-object rows are filtered from valid snapshots before identity verification; the process owner, exact image and guard-pair checks remain fail-closed.
+- Added two exact-source offline regression cases and re-executed all 48 on Node 22.16.0 Linux, with **the same test-only lifecycle stub limitation**. No new GitHub Actions were started and the exact original EXE SHA-256 was not changed.

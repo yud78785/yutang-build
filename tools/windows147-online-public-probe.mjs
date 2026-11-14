@@ -194,10 +194,23 @@ export function summarizeIdentityTopology(rows,{exePid,backendPid}) {
   };
 }
 
+export function safeProcessSnapshot(reader) {
+  // A broken WMI query must not masquerade as missing Electron or disclose
+  // the raw OS error (which may contain local paths or user information).
+  try {
+    const value=reader();
+    if(!Array.isArray(value))throw new Error('not-a-process-array');
+    return {rows:value.filter(r=>r!==null&&typeof r==='object'),error:null};
+  } catch {
+    return {rows:null,error:'PROCESS_SNAPSHOT_UNAVAILABLE'};
+  }
+}
+
 export function identityReasonCode(error) {
   // Only fixed error codes are printed; never log untrusted process command lines or paths.
   const known=[
     'CANDIDATE_WRAPPER_IDENTITY_NOT_VERIFIED','API_WORKER_IDENTITY_NOT_VERIFIED',
+    'PROCESS_SNAPSHOT_UNAVAILABLE',
     'INNER_ELECTRON_PARENT_NOT_FOUND','INNER_ELECTRON_NAME_MISMATCH',
     'INNER_ELECTRON_ANCESTRY_NOT_VERIFIED','INNER_ELECTRON_IMAGE_PATH_NOT_VERIFIED',
     'DESKTOP_JOB_GUARD_NOT_VERIFIED','DESKTOP_JOB_GUARD_PAIR_MISMATCH'
@@ -327,7 +340,9 @@ export async function run(exe) {
     // Capture the identity-verified inner desktop BEFORE browser API navigation, so
     // a network error can still trigger the same owned Job Object shutdown.
     desktopTarget=await until(()=>{
-      const earlyRows=processes();
+      const snapshot=safeProcessSnapshot(processes);
+      if(snapshot.error){lastIdentityReason=snapshot.error;return null;}
+      const earlyRows=snapshot.rows;
       lastIdentityTopology=summarizeIdentityTopology(earlyRows,{exePid:child.pid,backendPid});
       try {
         const target=verifyDesktopStopTarget(earlyRows,{exePid:child.pid,exeFile:exe,backendPid});
@@ -398,7 +413,9 @@ export async function run(exe) {
     let cleanupError=null;
     if(!desktopTarget && Number.isSafeInteger(backendPid) && backendPid>0) {
       try {
-        const remainingRows=processes();
+        const snapshot=safeProcessSnapshot(processes);
+        if(snapshot.error)throw new Error(snapshot.error);
+        const remainingRows=snapshot.rows;
         lastIdentityTopology=summarizeIdentityTopology(remainingRows,{exePid:child.pid,backendPid});
         desktopTarget=verifyDesktopStopTarget(remainingRows,{exePid:child.pid,exeFile:exe,backendPid});
         for(const p of remainingRows)if(Number(p.ProcessId)===child.pid || Number(p.ProcessId)===desktopTarget.pid ||
