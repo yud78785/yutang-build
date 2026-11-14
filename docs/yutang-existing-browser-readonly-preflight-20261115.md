@@ -7,21 +7,25 @@ New host-only integration:
 - `tools/douyin-existing-browser-readonly.mjs`
 - `tests/douyin-existing-browser-readonly.test.mjs`
 
-These compose the previously committed `observePublicCommentsReadOnly` and `inspectDouyinAiSummaryEntryReadOnly` adapters, using the pinned upstream `BrowserController.connectExistingBrowser({signal})` and existing `readPageState` / `readCommentDom` exports. They do NOT call `connect()`, `openBrowser()`, `execute()`, navigate, open tabs, click, scroll, send messages, close the user's Edge, write files, retrieve login credentials, or call a model.
+These compose the previously committed `observePublicCommentsReadOnly` and `inspectDouyinAiSummaryEntryReadOnly` adapters, using the pinned upstream `BrowserController.connectExistingBrowser({signal})` and existing `readPageState` / `readCommentDom` exports. They do NOT call `connect()`, `openBrowser()`, `execute()`, navigate, open tabs, click, scroll, send messages, close the user's Edge, retrieve login credentials, or call a model. The one-shot source runner DOES create/remove a temporary upstream `tab-api.lock` via the upstream lock API to coordinate reads with other upstream operations. It does not modify persistent user data.
 
 The browser must ALREADY exist, with exactly one context and exactly one owned public video page. The only accepted tab owner labels are `deepseek-douyin-api` / `deepseek-douyin-dsh`, verified by reading `window.name`. Video URLs must belong to `https://www.douyin.com/video/{expectedId}` with no conflicting `modal_id` or `aweme_id`. Duplicate owned pages, inaccessible browser, page switches, missing comments, invalid source receipts, or failed AI iframe evidence are handled explicitly. The wrapper never pretends the AI summary body was generated: `aiSummaryGenerated=false`, `aiSummaryText=null`.
 
 **Integration sketch for a separately reviewed upstream source runtime** (not yet installed in any EXE):
 
 ```js
-import { BrowserController, readPageState } from './core.mjs';
+import { BrowserController, readPageState, acquireBrowserOperationLock } from './core.mjs';
 import { readCommentDom } from './comment-browser.mjs';
 import { inspectExistingDedicatedDouyinVideoReadOnly } from './tools/douyin-existing-browser-readonly.mjs';
 import { observePublicCommentsReadOnly } from './tools/douyin-public-comment-readonly.mjs';
 import { inspectDouyinAiSummaryEntryReadOnly } from './tools/douyin-ai-summary-entry-readonly.mjs';
 
+const controller = new BrowserController({ source:'api' });
 const receipt = await inspectExistingDedicatedDouyinVideoReadOnly({
-  controller: new BrowserController({ source:'api' }),
+  controller,
+  acquireReadLock: ({signal}) => acquireBrowserOperationLock('tab-api', {
+    signal, directory: controller.controlDirectory, timeoutMs: 4000
+  }),
   readPageState,
   readCommentDom,
   observeComments: observePublicCommentsReadOnly,
@@ -37,7 +41,7 @@ Do not paste this source sketch into the user's CMD: the user has a packaged EXE
 - **New existing-browser adapter:** 23/23 locally run Node 22.16.0/Linux deterministic mocked-browser tests passed.
 - **Prior source-only comment and AI-entry readers:** 39/39 local offline tests passed.
 - **Combined 77/77 offline tests (including 15 CLI tests)**; this is NOT live Douyin, CDP, Windows, actual comment reading or official AI-summary generation acceptance.
-- Byte-exact Git blob SHA-1 of new source: `b39372e846fcd1931ecc23d41c04e5b6240329f5`.
+- Byte-exact Git blob SHA-1 of new source: `f8c8bb5261cc2df742b4a771f92101eff14e2020`.
 - Byte-exact Git blob SHA-1 of new tests: `35bbdcc356c8982fef8cc90b0a6f1551f386d46c`.
 - Existing verified unsigned EXE remains SHA-256 `3201d433df727a5d5fddf8e68a0f69ea1654057e04cfad7833fd3ed7dc241a34`.
 - [Windows 2025 genuine public homepage test](https://github.com/yud78785/yutang-build/actions/runs/43643545361) passed earlier; it was **not** a video/comment test.
@@ -64,7 +68,7 @@ On a **separately authorized Windows source checkout that already exists**, an e
 node tools/run-douyin-existing-browser-readonly.mjs --video-id <verified-public-video-id> --upstream-root <absolute-clean-upstream-source-checkout>
 ```
 
-**Not a command for end users to execute now:** this branch is not inside the accepted Windows EXE, and the user's current desktop cannot be operated from this ChatGPT conversation. The command does not install or launch a browser, create tabs, navigate, login or click; it only attempts to connect an existing verified profile and prints one redacted JSON receipt. Any receipt without actually visible comments or an AI-entry observation exits with code 2, without claiming that a live read happened. When the runner exits it drops its own CDP connection without calling `browser.close()`, so it does not intentionally close the existing Edge.
+**Not a command for end users to execute now:** this branch is not inside the accepted Windows EXE, and the user's current desktop cannot be operated from this ChatGPT conversation. The command does not install or launch a browser, create tabs, navigate, login or click; it attempts to connect an existing verified profile, briefly acquires/releases the upstream `tab-api` lockfile, and prints one redacted JSON receipt. Any receipt without actually visible comments or an AI-entry observation exits with code 2, without claiming that a live read happened. When the runner exits it drops its own CDP connection without calling `browser.close()`, so it does not intentionally close the existing Edge.
 
 **Exact-byte regression:** Node.js 22.16.0 on isolated Linux; 14/14 additional checks pass, including a real spawned CLI invocation that correctly returned `WINDOWS_REQUIRED`, and explicit refusal of a wrong-Git-commit local checkout. Combined with 39 earlier reader checks and 19 existing-browser tests, **77/77 pass, 0 failed**. This does NOT constitute a live Windows browser test or a real Douyin comment/iframe validation. No EXE changed, no paid Windows CI triggered, no `main` changes, no signing or release.
 
