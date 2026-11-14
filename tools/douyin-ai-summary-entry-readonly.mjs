@@ -72,6 +72,17 @@ export async function inspectDouyinAiSummaryEntryReadOnly({page, readPageState, 
   if (second.status === 'blocked') return result('blocked', 'POST_OBSERVATION_' + second.reasonCode, expectedVideoId, matched.length);
   if (before.url !== after.url || before.video.url !== after.video.url)
     return result('blocked', 'VIDEO_CHANGED_WHILE_READING', expectedVideoId, matched.length);
+  // A frame can navigate or be replaced after the original label check, even
+  // when the top-level video URL stays unchanged. Verify ownership again.
+  try {
+    const currentFrames = page.frames();
+    if (!Array.isArray(currentFrames) || currentFrames.length > 30)
+      return result('blocked', 'FINAL_FRAME_LIST_UNVERIFIED', expectedVideoId, matched.length);
+    const currentMatched = currentFrames.filter(frame => aiFrameUrl(frame?.url?.()));
+    if (currentMatched.length !== matched.length ||
+        (matched.length === 1 && (currentMatched[0] !== matched[0] || currentMatched[0]?.url() !== initialFrameUrl)))
+      return result('blocked', 'AI_FRAME_CHANGED_AFTER_READ', expectedVideoId, matched.length);
+  } catch { return result('blocked', 'FINAL_FRAME_IDENTITY_READ_FAILED', expectedVideoId, matched.length); }
   if (matched.length === 0 || !labelVisible)
     return result('not_observed', 'SUMMARY_ENTRY_NOT_VISIBLE', expectedVideoId, matched.length);
   return result('entry_visible', null, expectedVideoId, 1);
