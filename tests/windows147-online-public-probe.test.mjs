@@ -150,5 +150,5 @@ test('positive verified host can own its jobguard and normal and diagnostic filt
  assert.equal(cleanupRole({ProcessId:200,Name:'node.exe'},identity),'browser-host');
  assert.equal(ownedJobGuardForCleanup({Name:'jobguard.exe',ParentProcessId:200},identity),true);
  assert.equal(ownedJobGuardForCleanup({Name:'jobguard.exe',ParentProcessId:555},identity),false);
- assert.equal((s.match(/ownedJobGuardForCleanup\(p,\{exePid,hostPid\}\)/g)||[]).length,2);
+ assert.equal((s.match(/ownedJobGuardForCleanup\(p,\{exePid,hostPid\}\)/g)||[]).length,3);
 });
