@@ -7,7 +7,7 @@ const s=fs.readFileSync(new URL('../tools/windows147-online-public-probe.mjs', i
 const green={status:200,page:{origin:'https://www.douyin.com',ready:'complete',challenged:false,titleLength:8,bodyLength:220,bodyChildren:8,paintBytes:10000},sandbox:{rendererSandboxVerified:true,networkServiceWindowsTokenVerified:true,networkServiceLowIntegrityVerified:true,networkServiceProcessOwned:true},identity:{loopbackOnly:true,listenerMatchesEdge:true},cleaned:true};
 test('positive green receipt only says PUBLIC_WEB_ONLY',()=>assert.equal(validatePublicReceipt(green),'PASS_WINDOWS_EXE_PUBLIC_WEB_ONLY'));
 for(const [name,change] of [
-  ['403',{status:403}],['redirect',{status:302}],['empty body',{page:{...green.page,bodyLength:0}}],
+  ['403',{status:403}],['redirect',{status:302}],['204 not a full document',{status:204}],['201 not a document',{status:201}],['empty body',{page:{...green.page,bodyLength:0}}],
   ['empty screenshot',{page:{...green.page,paintBytes:0}}],['login challenge',{page:{...green.page,challenged:true}}],
   ['wrong origin',{page:{...green.page,origin:'https://evil.example'}}],
   ['loading-only',{page:{...green.page,ready:'loading'}}],
@@ -31,3 +31,12 @@ test('approved public origin is fixed; no site URL argument',()=>{assert.match(s
 test('candidate-only process cleanup bounds remain explicit',()=>{assert.match(s,/CANDIDATE_PROCESSES_OR_CDP_REMAIN/);assert.match(s,/backendPid/);assert.match(s,/DEDICATED_BROWSER_CLOSE_TIMEOUT/);assert.match(s,/CANDIDATE_STATE_ALREADY_EXISTS/)});
 
 test('only the main frame document status can count',()=>{assert.match(s,/Page\.getFrameTree/);assert.match(s,/event\.frameId!==mainFrameId/);assert.match(s,/PUBLIC_MAIN_FRAME_MISSING/)});
+
+test('success marker is logged only after final process and directory cleanup',()=>{
+  const close=s.indexOf('} finally {',s.indexOf('export async function run(exe)'));
+  const marker=s.lastIndexOf('WINDOWS_PUBLIC_WEB_EXE_RECEIPT');
+  assert.ok(marker > close, 'success receipt must be emitted AFTER finally');
+  assert.match(s,/CANDIDATE_PROCESS_CLEANUP_UNVERIFIED/);
+  assert.match(s,/CANDIDATE_DIRECTORY_CLEANUP_UNVERIFIED/);
+  assert.doesNotMatch(s,/fs\.rm\(common,\{recursive:true,force:true\}\)\.catch\(\(\)=>\{\}\)/);
+});

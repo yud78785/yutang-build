@@ -18,7 +18,7 @@ const ORIGIN = 'https://www.douyin.com';
 const MAX_DELAY = 90000;
 
 export function validatePublicReceipt({status, page, sandbox, identity, cleaned}) {
-  assert.ok(Number.isInteger(status) && status >= 200 && status < 300, 'PUBLIC_DOCUMENT_NOT_HTTP_2XX');
+  assert.equal(status, 200, 'PUBLIC_DOCUMENT_NOT_HTTP_200');
   assert.equal(page?.origin, ORIGIN, 'PUBLIC_PAGE_LEFT_APPROVED_ORIGIN');
   assert.equal(page?.ready, 'complete', 'PUBLIC_PAGE_NOT_FULLY_LOADED');
   assert.equal(page?.challenged, false, 'PUBLIC_PAGE_LOGIN_OR_CHALLENGE');
@@ -234,13 +234,27 @@ export async function run(exe) {
       networkServiceAppContainer:true,networkServiceLowIntegrity:true,cdpLoopbackOnly:true,
       noResidualCandidateProcesses:true,accountUsed:false,modelKeyUsed:false,videoPlaybackClaimed:false,
       personalComputerAcceptance:false,releaseAuthorized:false};
-    console.log('WINDOWS_PUBLIC_WEB_EXE_RECEIPT '+JSON.stringify(receipt));
     return receipt;
+  } catch(error) {
+    console.error('WINDOWS_PUBLIC_WEB_STAGE_FAILED '+String(error?.message||'unknown').slice(0,180));
+    throw error;
   } finally {
     if(!exited)try{child.kill();}catch{}
-    try {await waitCleanup({exePid:child.pid,backendPid,hostPid,profile,controlDir});cleaned=true;}catch{}
-    if(cleaned){await fs.rm(common,{recursive:true,force:true}).catch(()=>{});await fs.rm(base,{recursive:true,force:true}).catch(()=>{});}
+    let cleanupError=null;
+    try {
+      await waitCleanup({exePid:child.pid,backendPid,hostPid,profile,controlDir});
+      cleaned=true;
+    } catch { cleanupError=new Error('CANDIDATE_PROCESS_CLEANUP_UNVERIFIED'); }
+    if(cleaned) {
+      try {
+        await fs.rm(common,{recursive:true,force:true});
+        await fs.rm(base,{recursive:true,force:true});
+      } catch { cleanupError=new Error('CANDIDATE_DIRECTORY_CLEANUP_UNVERIFIED'); }
+    }
+    if(cleanupError) throw cleanupError;
   }
 }
 const invoked=process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url);
-if(invoked)run(path.resolve(process.argv[2]||'')).catch(e=>{console.error('WINDOWS_PUBLIC_WEB_EXE_NOT_ACCEPTED '+String(e?.message||'unknown').slice(0,180));process.exitCode=1;});
+if(invoked)run(path.resolve(process.argv[2]||''))
+  .then(receipt=>{console.log('WINDOWS_PUBLIC_WEB_EXE_RECEIPT '+JSON.stringify(receipt));})
+  .catch(e=>{console.error('WINDOWS_PUBLIC_WEB_EXE_NOT_ACCEPTED '+String(e?.message||'unknown').slice(0,180));process.exitCode=1;});
