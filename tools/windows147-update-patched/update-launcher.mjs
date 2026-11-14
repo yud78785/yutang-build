@@ -6,7 +6,7 @@ import { spawn } from 'node:child_process';
 import { execFileSync } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
-import { beginUpdateTransaction, recoverUpdateTransaction, setUpdateTransactionPhase } from './update-transaction.mjs';
+import { beginUpdateTransaction, recoverUpdateTransaction, runNativeShortcutOperation, setUpdateTransactionPhase, verifyNativeShortcutHelper } from './update-transaction.mjs';
 
 export const UPDATE_PUBLISHER_THUMBPRINT = '';
 
@@ -116,7 +116,7 @@ async function hashRegularFile(file) {
   }
 }
 
-export async function commitShortcut(stagedShortcut, shortcut, nonce, transaction) {
+export async function commitShortcut(stagedShortcut, shortcut, nonce, transaction, nativeHelper = {}) {
   const expectedOld = transaction?.oldShortcutSha256;
   const expectedNew = transaction?.newShortcutSha256;
   if (!path.isAbsolute(stagedShortcut || '') || !path.isAbsolute(shortcut || '') ||
@@ -139,34 +139,47 @@ export async function commitShortcut(stagedShortcut, shortcut, nonce, transactio
     if (await hashRegularFile(temporary) !== expectedNew) {
       throw new Error('UPDATE_STAGED_SHORTCUT_COPY_HASH_MISMATCH');
     }
-    // Keep the original entry, but verify the backup still matches the transaction journal.
-    await fs.copyFile(shortcut, backup, fsConstants.COPYFILE_EXCL);
-    if (await hashRegularFile(backup) !== expectedOld) {
-      throw new Error('UPDATE_SHORTCUT_BACKUP_HASH_MISMATCH');
-    }
-    // Recheck both source files immediately before replacing the visible shortcut.
-    if (await hashRegularFile(shortcut) !== expectedOld) {
-      throw new Error('UPDATE_CURRENT_SHORTCUT_CHANGED_DURING_COMMIT');
-    }
-    if (await hashRegularFile(stagedShortcut) !== expectedNew) {
-      throw new Error('UPDATE_STAGED_SHORTCUT_CHANGED_DURING_COMMIT');
-    }
-    await fs.rename(temporary, shortcut);
-    if (await hashRegularFile(shortcut) !== expectedNew) {
-      throw new Error('UPDATE_SHORTCUT_COMMIT_HASH_MISMATCH');
+    if (process.platform === 'win32') {
+      await runNativeShortcutOperation('--shortcut-commit', {
+        shortcut,
+        backup,
+        temporary,
+        'old-sha256': expectedOld,
+        'new-sha256': expectedNew
+      }, nativeHelper);
+    } else {
+      // Non-Windows path is retained only for portable unit tests.
+      await fs.copyFile(shortcut, backup, fsConstants.COPYFILE_EXCL);
+      if (await hashRegularFile(backup) !== expectedOld) {
+        throw new Error('UPDATE_SHORTCUT_BACKUP_HASH_MISMATCH');
+      }
+      if (await hashRegularFile(shortcut) !== expectedOld) {
+        throw new Error('UPDATE_CURRENT_SHORTCUT_CHANGED_DURING_COMMIT');
+      }
+      if (await hashRegularFile(stagedShortcut) !== expectedNew) {
+        throw new Error('UPDATE_STAGED_SHORTCUT_CHANGED_DURING_COMMIT');
+      }
+      await fs.rename(temporary, shortcut);
+      if (await hashRegularFile(shortcut) !== expectedNew) {
+        throw new Error('UPDATE_SHORTCUT_COMMIT_HASH_MISMATCH');
+      }
     }
   } catch (error) {
-    await fs.rm(temporary, { force: true }).catch(() => {});
+    // On Windows, preserve all transaction evidence for handle-based recovery.
+    if (process.platform !== 'win32') await fs.rm(temporary, { force: true }).catch(() => {});
     throw error;
   }
   return {
     backup,
     finalize: async function () {
-      await fs.rm(backup, { force: true });
+      if (process.platform === 'win32') {
+        await runNativeShortcutOperation('--shortcut-delete', { path: backup, sha256: expectedOld }, nativeHelper);
+      } else {
+        await fs.rm(backup, { force: true });
+      }
     }
   };
 }
-
 export async function runUpdateLauncher({
   pid,
   file,
@@ -177,6 +190,8 @@ export async function runUpdateLauncher({
   healthFile,
   stagedShortcut,
   shortcut,
+  nativeHelperPath = process.env.YUTANG_JOBGUARD_PATH,
+  nativeHelperSha256 = process.env.YUTANG_JOBGUARD_SHA256,
   expectedPublisherThumbprint = UPDATE_PUBLISHER_THUMBPRINT,
   verifyAuthenticodeImpl = verifyAuthenticodeSignature,
   waitForOldProcessExitImpl = waitForOldProcessExit,
@@ -196,6 +211,8 @@ export async function runUpdateLauncher({
   const expected = normalizedThumbprint(expectedPublisherThumbprint);
   const supplied = normalizedThumbprint(publisherThumbprint);
   if (!/^[A-F0-9]{40}$/.test(expected) || supplied !== expected) throw new Error('更新发布者身份未配置或不匹配');
+  const nativeHelper = { nativeHelperPath, nativeHelperSha256 };
+  if (process.platform === 'win32') await verifyNativeShortcutHelper(nativeHelperPath, nativeHelperSha256);
   const updatesDirectory = path.resolve(path.dirname(file));
   if (path.resolve(path.dirname(healthFile)) !== updatesDirectory ||
       path.resolve(path.dirname(stagedShortcut)) !== updatesDirectory) throw new Error('更新暂存路径不在受控目录');
@@ -237,7 +254,7 @@ export async function runUpdateLauncher({
     const backupShortcut = path.join(path.dirname(shortcut), '.' + path.basename(shortcut) + '.' + nonce + '.bak.lnk');
     transaction = await beginUpdateTransaction({ updatesDirectory, shortcut, stagedShortcut, backupShortcut, targetExe: file, targetExeSha256: sha256, nonce });
     await setUpdateTransactionPhase(transaction, 'switching');
-    rollbackShortcut = await commitShortcut(stagedShortcut, shortcut, nonce, transaction);
+    rollbackShortcut = await commitShortcut(stagedShortcut, shortcut, nonce, transaction, nativeHelper);
     await setUpdateTransactionPhase(transaction, 'switched');
     // Keep the old shortcut backup until the new process survives the post-switch observation window.
     await waitForStableChild(child, stabilityMs, pollMs, delayImpl);
@@ -247,13 +264,18 @@ export async function runUpdateLauncher({
     await fs.rm(transaction.transactionFile, { force: true });
     child.unref();
     await fs.rm(healthFile, { force: true }).catch(() => {});
-    await fs.rm(stagedShortcut, { force: true }).catch(() => {});
+    if (process.platform === 'win32') {
+      try { await runNativeShortcutOperation('--shortcut-delete', { path: stagedShortcut, sha256: transaction.newShortcutSha256 }, nativeHelper); }
+      catch (error) { console.warn('UPDATE_STAGED_SHORTCUT_PRESERVED', String(error?.message || error).slice(0, 240)); }
+    } else {
+      await fs.rm(stagedShortcut, { force: true }).catch(() => {});
+    }
     return { status: 'healthy-update-started', pid: child.pid, version, sha256, health };
   } catch (error) {
     let recoveryError = null;
     if (transaction) {
       try {
-        const recovered = await recoverUpdateTransaction(updatesDirectory, { shortcut });
+        const recovered = await recoverUpdateTransaction(updatesDirectory, { shortcut, ...nativeHelper });
         if (!['rolled-back', 'old-shortcut-preserved', 'committed-cleanup'].includes(recovered.status)) {
           recoveryError = new Error(recovered.reason || 'UPDATE_TRANSACTION_RECOVERY_INCOMPLETE');
         }
@@ -264,7 +286,7 @@ export async function runUpdateLauncher({
     await stopChild(child, delayImpl);
     if (!recoveryError) {
       await fs.rm(healthFile, { force: true }).catch(() => {});
-      await fs.rm(stagedShortcut, { force: true }).catch(() => {});
+      if (process.platform !== 'win32') await fs.rm(stagedShortcut, { force: true }).catch(() => {});
       if (transaction) await fs.rm(transaction.transactionFile, { force: true }).catch(() => {});
     }
     if (recoveryError) {
@@ -277,9 +299,9 @@ export async function runUpdateLauncher({
 
 const invokedDirectly = process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href;
 if (invokedDirectly) {
-  const [pidText, file, sha256, publisherThumbprint, version, nonce, healthFile, stagedShortcut, shortcut] = process.argv.slice(2);
+  const [pidText, file, sha256, publisherThumbprint, version, nonce, healthFile, stagedShortcut, shortcut, nativeHelperPath, nativeHelperSha256] = process.argv.slice(2);
   runUpdateLauncher({
-    pid: Number(pidText), file, sha256, publisherThumbprint, version, nonce, healthFile, stagedShortcut, shortcut
+    pid: Number(pidText), file, sha256, publisherThumbprint, version, nonce, healthFile, stagedShortcut, shortcut, nativeHelperPath, nativeHelperSha256
   }).then(() => {
     process.stdout.write('YU TANG UPDATE HEALTH CHECK PASSED\n');
   }).catch(error => {
