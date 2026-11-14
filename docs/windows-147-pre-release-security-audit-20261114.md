@@ -635,3 +635,63 @@ Edge 外网在本轮被主动阻断；真实 Douyin 导航返回 ERR_NETWORK_ACC
 签名资格取决于正式发行主体的法律类型与注册司法辖区，不能用当前操作者的地理位置推断。Microsoft Artifact Signing Public Trust 对组织与个人的地区要求不同；若发行主体在不支持地区，应评估受信任 CA 的 OV 代码签名证书。自签证书只可用于测试，不可冒充公开发布者信任。
 
 在真实信任配置完成前，当前候选保持 CANDIDATE-NOT-RELEASE，自动更新保持关闭；不合并、不发布、不安装到用户电脑。
+
+
+---
+
+## 16. 2026-11-14 第二轮候选：快捷方式并发修改保护已进入真实 Windows EXE 验收
+
+本节记录比第 15 节更新的候选。第 15 节的 c169 候选及其通过结果仍然有效，但不能替代本轮新提交 268da 的验收。
+
+### 16.1 新提交与当前工作流
+
+- Workflow Run：[43532232402](https://github.com/yud78785/yutang-build/actions/runs/43532232402)
+- 本轮候选提交：268da91f85f4f57285eceb441c712223ee7ae89
+- 实验分支：experiment/windows-147-update-recovery-20261114
+- main 仍为 4745ed23cbb748cb4b070ed70390703d1261aea0，未修改。
+- Windows 2022 独立构建 job：132252510423，success，25/25 steps。
+- Windows 2025 独立构建 job：132252509850，success，25/25 steps。
+- 同一 Windows 2025 EXE 在 Windows 2022 的交叉 job：132257080868；目前 in_progress，7/14 steps，Edge 沙盒和生命周期步骤仍在运行，尚未计为通过。
+
+### 16.2 新候选文件身份
+
+| 构建平台 | Artifact ID | 文件大小 | EXE SHA-256 | Authenticode |
+|---|---:|---:|---|---|
+| Windows 2022 | 14087804790 | 125,303,751 bytes | a37d552ce33c117ef60c4d7d394c8f5ed2c7808a0a75087f07785c92cf74aec6 | NotSigned |
+| Windows 2025 | 14088736556 | 125,304,537 bytes | 2b3200db6c9be0aa07ea10df8c56077a31c6afec7e16d6806f7700696707367a | NotSigned |
+
+两个独立构建 SHA 不同。已从 Artifact ZIP 分别提取 EXE，重新计算 SHA-256，并与各自 sidecar 和候选回执一致。
+
+### 16.3 新增的快捷方式并发修改保护
+
+提交 268da 在更新事务真正替换桌面快捷方式之前增加了：
+- 重新核对当前旧快捷方式 SHA-256 是否仍等于事务日志记录。
+- 重新核对暂存快捷方式 SHA-256 是否仍等于事务日志记录。
+- 核对备份文件哈希与旧入口一致。
+- 复制后、替换前再次核对旧入口与暂存入口。
+- 若检测到旧入口被用户修改，拒绝覆盖并保留事务证据。
+- 若检测到暂存入口被替换，拒绝使用被改变的文件。
+- 恢复判断优先识别“当前快捷方式已被用户更改”，避免误报成“旧备份缺失”。
+
+新增 3 项事务测试。Windows 2022 与 Windows 2025 均实际执行：
+- 更新信任模板测试：17 tests / 17 pass / 0 fail。
+- 更新事务测试：15 tests / 15 pass / 0 fail。
+- 生产及 Windows 桌面源码回归：145 tests / 144 pass / 0 fail（另有 1 项 skipped）。
+
+两台机器的新候选均已完成真实 EXE 启动、Edge sandbox、Network Service AppContainer + Low Integrity、CDP loopback、两次重启和三种强制退出清理，两个独立构建 job 全部成功。
+
+### 16.4 尚未关闭
+
+Windows 2022 对同一个 Windows 2025 候选的交叉 job 已下载并校验 Windows 2025 Artifact 14088736556，SHA 预期为：
+
+2b3200db6c9be0aa07ea10df8c56077a31c6afec7e16d6806f7700696707367a
+
+但同一 EXE 的 Edge 沙盒与生命周期复测仍在运行。因此：
+- 两台独立构建：通过。
+- 两台独立 EXE 安全验收：通过。
+- 新候选同一 EXE 跨平台交叉验收：待完成。
+- 不可沿用第 15 节旧候选的 cross-test 结果替代本轮。
+- 签名仍为 NotSigned；Ed25519 公钥和 Publisher thumbprint 仍未配置；自动更新保持关闭。
+
+本轮临时 Edge 外网阻断规则的删除命令会在各 job 完成时执行；仍保留第 15.6 节的审计限制：现有 cleanup step 没有删除后查询规则不存在的显式断言。
+
