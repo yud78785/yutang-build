@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import {validatePublicReceipt, validatePublicPageEvidence, verifyDesktopStopTarget, identityReasonCode, ownedEdgePids, trackedEdgeSurvivors, cleanupRole, ownedJobGuardForCleanup, summarizeIdentityTopology, safeProcessSnapshot, summarizePublicPageState} from '../tools/windows147-online-public-probe.mjs';
+import {validatePublicReceipt, validatePublicPageEvidence, verifyDesktopStopTarget, identityReasonCode, ownedEdgePids, trackedEdgeSurvivors, cleanupRole, ownedJobGuardForCleanup, summarizeIdentityTopology, safeProcessSnapshot, summarizePublicPageState, observePublicCdpEvent, summarizePublicCdpSignals, createPublicDocumentResponseWatch} from '../tools/windows147-online-public-probe.mjs';
 const SHA='3201d433df727a5d5fddf8e68a0f69ea1654057e04cfad7833fd3ed7dc241a34';
 const s=fs.readFileSync(new URL('../tools/windows147-online-public-probe.mjs', import.meta.url),'utf8');
 const green={status:200,page:{origin:'https://www.douyin.com',ready:'complete',challenged:false,titleLength:8,bodyLength:220,bodyChildren:8,paintBytes:10000},sandbox:{rendererSandboxVerified:true,networkServiceWindowsTokenVerified:true,networkServiceLowIntegrityVerified:true,networkServiceProcessOwned:true},identity:{loopbackOnly:true,listenerMatchesEdge:true},cleaned:true};
@@ -299,4 +299,76 @@ test('real page readiness has a bounded longer wait but still requires complete 
   assert.match(s,/if\(page\?\.ready==='complete' && page\.bodyLength>=30 && page\.titleLength>0\)break/);
   assert.match(s,/WINDOWS_PUBLIC_WEB_PAGE_DIAGNOSTIC/);
   assert.match(s,/if\(page\?\.challenged===true\)break/);
+});
+
+
+test('CDP frame lifecycle signals are bounded and scoped to approved session',()=>{
+ const state={resourceFailures:0};
+ const sid='authorized-session',frame='main';
+ const feed=(sessionId,method,params={})=>observePublicCdpEvent(state,{sessionId,method,params},sid,frame);
+ feed('unrelated-session','Page.loadEventFired');
+ feed(sid,'Page.domContentEventFired');
+ feed(sid,'Network.responseReceived',{type:'Document',frameId:'other',requestId:'wrong',response:{url:'https://www.douyin.com/'}});
+ feed(sid,'Network.responseReceived',{type:'Document',frameId:frame,requestId:'blocked',response:{url:'https://evil.example/'}});
+ assert.equal(state.mainDocumentResponseSeen,undefined);
+ feed(sid,'Network.responseReceived',{type:'Document',frameId:frame,requestId:'good',response:{url:'https://www.douyin.com/'}});
+ feed(sid,'Page.domContentEventFired');
+ feed(sid,'Network.loadingFinished',{requestId:'good'});
+ feed(sid,'Network.loadingFailed',{requestId:'another',errorText:'private token and URL'});
+ assert.deepEqual(summarizePublicCdpSignals(state),{
+  domContentLoaded:true,loadEventFired:false,mainDocumentResponseSeen:true,
+  mainDocumentFinished:true,mainDocumentFailed:false,resourceFailures:1});
+ assert.doesNotMatch(JSON.stringify(summarizePublicCdpSignals(state)),/private|token|good|blocked|URL|requestId/i);
+});
+test('CDP main-document failure is distinguished from ordinary resource failures',()=>{
+ const state={resourceFailures:0};
+ observePublicCdpEvent(state,{sessionId:'s',method:'Network.responseReceived',params:{type:'Document',frameId:'f',requestId:'x',response:{url:'https://www.douyin.com/'}}},'s','f');
+ observePublicCdpEvent(state,{sessionId:'s',method:'Network.loadingFailed',params:{requestId:'x',errorText:'secret'}},'s','f');
+ for(let i=0;i<150;i++)observePublicCdpEvent(state,{sessionId:'s',method:'Network.loadingFailed',params:{requestId:'other'+i}},'s','f');
+ const summary=summarizePublicCdpSignals(state);
+ assert.equal(summary.mainDocumentFailed,true);
+ assert.equal(summary.resourceFailures,99);
+ assert.doesNotMatch(JSON.stringify(summary),/secret|other/);
+});
+test('public document response watch resolves the exact main frame only and removes listeners',async()=>{
+ const ws=new EventTarget();
+ const watcher=createPublicDocumentResponseWatch(ws,{sessionId:'s',mainFrameId:'f',timeoutMs:500});
+ const send=(sessionId,frameId,url,status)=>ws.dispatchEvent(new MessageEvent('message',{data:JSON.stringify({sessionId,method:'Network.responseReceived',params:{type:'Document',frameId,response:{url,status}}})}));
+ send('else','f','https://www.douyin.com/',404);
+ send('s','another','https://www.douyin.com/',403);
+ send('s','f','https://evil.example/',201);
+ send('s','f','https://www.douyin.com/',200);
+ assert.equal(await watcher.promise,200);
+ watcher.cancel();
+});
+test('public document watcher cancels after reload failure; no leaked response timeout',async()=>{
+ const ws=new EventTarget();
+ const watcher=createPublicDocumentResponseWatch(ws,{sessionId:'s',mainFrameId:'f',timeoutMs:100});
+ watcher.cancel();
+ await assert.rejects(watcher.promise,/PUBLIC_DOCUMENT_WATCH_CANCELLED/);
+});
+test('public document watcher timeout remains fail closed',async()=>{
+ const ws=new EventTarget();
+ const watcher=createPublicDocumentResponseWatch(ws,{sessionId:'s',mainFrameId:'f',timeoutMs:5});
+ await assert.rejects(watcher.promise,/PUBLIC_DOCUMENT_STATUS_TIMEOUT/);
+ watcher.cancel();
+});
+test('interactive page stays unaccepted even when all lifecycle flags have occurred',()=>{
+ const page={...green.page,ready:'interactive'};
+ const flags={domContentLoaded:true,loadEventFired:true,mainDocumentResponseSeen:true,mainDocumentFinished:true};
+ assert.throws(()=>validatePublicPageEvidence({...green,page}),/PUBLIC_PAGE_NOT_FULLY_LOADED/);
+ assert.equal(summarizePublicCdpSignals(flags).loadEventFired,true);
+ assert.match(s,/WINDOWS_PUBLIC_WEB_PAGE_DIAGNOSTIC/);
+ assert.match(s,/\.\.\.online\.cdpSignals/);
+});
+
+test('old-page load event never masquerades as new-page load completion',()=>{
+ const state={mainDocumentResponseSeen:true,loadEventFired:false,domContentLoaded:false,resourceFailures:0};
+ observePublicCdpEvent(state,{sessionId:'s',method:'Page.loadEventFired'},'s','f');
+ assert.equal(summarizePublicCdpSignals(state).loadEventFired,true);
+ observePublicCdpEvent(state,{sessionId:'s',method:'Network.responseReceived',params:{type:'Document',frameId:'f',requestId:'new',response:{url:'https://www.douyin.com/'}}},'s','f');
+ assert.equal(summarizePublicCdpSignals(state).loadEventFired,false);
+ assert.equal(summarizePublicCdpSignals(state).domContentLoaded,false);
+ observePublicCdpEvent(state,{sessionId:'s',method:'Page.loadEventFired'},'s','f');
+ assert.equal(summarizePublicCdpSignals(state).loadEventFired,true);
 });

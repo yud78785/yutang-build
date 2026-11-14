@@ -121,10 +121,83 @@ async function version() {
   assert.match(String(info.Browser),/(?:Edg|Chrome)/,'NOT_EDGE_BROWSER');
   return info;
 }
+export function observePublicCdpEvent(state,message,sessionId,mainFrameId) {
+  if (!state || !message || message.sessionId!==sessionId) return;
+  const method=message.method,params=message.params||{};
+  if (method==='Network.responseReceived' && params.type==='Document' &&
+    params.frameId===mainFrameId && String(params.response?.url||'').startsWith(ORIGIN+'/')) {
+    state.mainDocumentResponseSeen=true;
+    state.mainDocumentRequestId=params.requestId;
+    // Never attribute initial-page lifecycle events to the reloaded document.
+    state.domContentLoaded=false;
+    state.loadEventFired=false;
+    state.mainDocumentFinished=false;
+    state.mainDocumentFailed=false;
+    state.resourceFailures=0;
+    return;
+  }
+  if(!state.mainDocumentResponseSeen)return;
+  if (method==='Page.domContentEventFired') state.domContentLoaded=true;
+  else if (method==='Page.loadEventFired') state.loadEventFired=true;
+  else if (method==='Network.loadingFinished' && state.mainDocumentRequestId &&
+    params.requestId===state.mainDocumentRequestId) state.mainDocumentFinished=true;
+  else if (method==='Network.loadingFailed') {
+    if(state.mainDocumentRequestId && params.requestId===state.mainDocumentRequestId)
+      state.mainDocumentFailed=true;
+    else state.resourceFailures=Math.min(99,(state.resourceFailures||0)+1);
+  }
+}
+export function summarizePublicCdpSignals(state) {
+  return {
+    domContentLoaded:state?.domContentLoaded===true,
+    loadEventFired:state?.loadEventFired===true,
+    mainDocumentResponseSeen:state?.mainDocumentResponseSeen===true,
+    mainDocumentFinished:state?.mainDocumentFinished===true,
+    mainDocumentFailed:state?.mainDocumentFailed===true,
+    resourceFailures:Math.max(0,Math.min(99,Number.isSafeInteger(state?.resourceFailures)?state.resourceFailures:0))
+  };
+}
+export function createPublicDocumentResponseWatch(ws,{sessionId,mainFrameId,timeoutMs=30000}) {
+  let timer=null,listener=null,rejectPending=null,settled=false;
+  const promise=new Promise((resolve,reject)=>{
+    rejectPending=reject;
+    const finish=(callback,value)=>{
+      if(settled)return;
+      settled=true;
+      clearTimeout(timer);
+      ws.removeEventListener('message',listener);
+      callback(value);
+    };
+    listener=e=>{
+      let item;
+      try {item=JSON.parse(String(e.data));} catch{return;}
+      if(item.sessionId!==sessionId || item.method!=='Network.responseReceived')return;
+      const event=item.params;
+      if(event?.type!=='Document' || event.frameId!==mainFrameId ||
+        !String(event.response?.url||'').startsWith(ORIGIN+'/'))return;
+      finish(resolve,Number(event.response.status));
+    };
+    ws.addEventListener('message',listener);
+    timer=setTimeout(()=>finish(reject,new Error('PUBLIC_DOCUMENT_STATUS_TIMEOUT')),timeoutMs);
+  });
+  // Page.reload may reject before its response is awaited: prevent an unhandled timeout.
+  promise.catch(()=>{});
+  return {promise,cancel:()=>{
+    if(settled)return;
+    settled=true;
+    clearTimeout(timer);
+    ws.removeEventListener('message',listener);
+    rejectPending(new Error('PUBLIC_DOCUMENT_WATCH_CANCELLED'));
+  }};
+}
+
 async function inspectOnlinePage() {
   const info=await version();
   const ws=await wsOpen(info.webSocketDebuggerUrl);
   let id=1;
+  let responseWatch=null,signalListener=null;
+  const lifecycle={domContentLoaded:false,loadEventFired:false,mainDocumentResponseSeen:false,
+    mainDocumentFinished:false,mainDocumentFailed:false,resourceFailures:0,mainDocumentRequestId:null};
   try {
     const targets=await command(ws,id++,'Target.getTargets');
     const pages=(targets.targetInfos||[]).filter(t=>t.type==='page'&&t.url?.startsWith(ORIGIN+'/'));
@@ -138,21 +211,14 @@ async function inspectOnlinePage() {
     const frameTree=await command(ws,id++,'Page.getFrameTree',{},sessionId);
     const mainFrameId=frameTree.frameTree?.frame?.id;
     assert.ok(typeof mainFrameId==='string'&&mainFrameId.length>0,'PUBLIC_MAIN_FRAME_MISSING');
-    let responseTimer;
-    const responsePromise=new Promise((resolve,reject)=>{
-      const receive=e=>{
-        let item; try {item=JSON.parse(String(e.data));} catch{return;}
-        if(item.sessionId!==sessionId || item.method!=='Network.responseReceived')return;
-        const event=item.params;
-        if(event?.type!=='Document'||event.frameId!==mainFrameId||!String(event.response?.url||'').startsWith(ORIGIN+'/'))return;
-        clearTimeout(responseTimer);ws.removeEventListener('message',receive);
-        resolve(Number(event.response.status));
-      };
-      ws.addEventListener('message',receive);
-      responseTimer=setTimeout(()=>{ws.removeEventListener('message',receive);reject(new Error('PUBLIC_DOCUMENT_STATUS_TIMEOUT'));},30000);
-    });
+    signalListener=e=>{
+      let item;try{item=JSON.parse(String(e.data));}catch{return;}
+      observePublicCdpEvent(lifecycle,item,sessionId,mainFrameId);
+    };
+    ws.addEventListener('message',signalListener);
+    responseWatch=createPublicDocumentResponseWatch(ws,{sessionId,mainFrameId});
     await command(ws,id++,'Page.reload',{ignoreCache:true},sessionId);
-    const status=await responsePromise;
+    const status=await responseWatch.promise;
     let page;
     const readyDeadline=Date.now()+PUBLIC_READY_WAIT_MS;
     while(Date.now()<readyDeadline){
@@ -168,8 +234,12 @@ async function inspectOnlinePage() {
     const captured=await command(ws,id++,'Page.captureScreenshot',{format:'png',captureBeyondViewport:false},sessionId);
     if (!page) throw new Error('PUBLIC_DOM_UNAVAILABLE');
     page.paintBytes=typeof captured.data==='string'?Math.floor(captured.data.length*3/4):0;
-    return {status,page};
-  } finally {try{ws.close();}catch{}}
+    return {status,page,cdpSignals:summarizePublicCdpSignals(lifecycle)};
+  } finally {
+    responseWatch?.cancel();
+    if(signalListener)ws.removeEventListener('message',signalListener);
+    try{ws.close();}catch{}
+  }
 }
 async function closeDedicatedBrowser() {
   const info=await version();
@@ -401,7 +471,8 @@ export async function run(exe) {
     const online=await inspectOnlinePage();
     try { validatePublicPageEvidence({status:online.status,page:online.page,sandbox,identity}); }
     catch(error) {
-      console.error('WINDOWS_PUBLIC_WEB_PAGE_DIAGNOSTIC '+JSON.stringify(summarizePublicPageState(online.status,online.page)));
+      console.error('WINDOWS_PUBLIC_WEB_PAGE_DIAGNOSTIC '+JSON.stringify({
+        ...summarizePublicPageState(online.status,online.page),...online.cdpSignals}));
       throw error;
     }
     console.log('WINDOWS_PUBLIC_PAGE_GATE_OK '+JSON.stringify({exeSha256:SHA,httpStatus:online.status,rendered:true,cleanupPending:true}));
