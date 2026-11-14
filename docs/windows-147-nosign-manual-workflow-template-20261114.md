@@ -49,3 +49,20 @@ The additional inert template `docs/templates/windows-147-nosign-preflight.branc
 **Not activated:** no such runnable workflow is being installed under `.github/workflows`, and the one-shot run branch is not created or pushed by this change. Do not start the Windows jobs until authorized. The planned jobs only download the accepted unsigned artifact and execute no-sign PowerShell checks; real signing and signed-EXE validation remain separate.
 
 Offline YAML parse/structure checks and `tests/windows147-nosign-one-shot-template.test.mjs` passed **3/3** on Linux Node.js 22.16.0; this is NOT Windows runtime evidence. Tested one-shot template blob: `e007340ecfb17caa7c5afce1abc2e8c6ff395b74`; test blob: `6c528ffb9d2d9969616db097b4456ff28655bd2a`.
+
+## 2026-11-14 immutable-action and single-addition hardening
+
+This change is **template only**: neither file is under `.github/workflows`, and no Windows Actions run has been scheduled or triggered.
+
+To avoid changing executable dependencies unexpectedly between preparation and later review, both inert templates now pin the exact public GitHub commit IDs checked through the official repositories' `refs/tags/v4`:
+
+- `actions/checkout@11d5960a326750d5838078e36cf38b85af677262`
+- `actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093`
+
+Each template also compares `git rev-parse HEAD` against the audited code commit `c8cf9be7c175d00774e7e5cc5a763d587b77ec6e` before downloading the unsigned artifact. The branch-push template additionally fails immediately unless GitHub's push event reports the **first addition** of `.github/workflows/windows-147-nosign-one-shot.yml`; ordinary later modifications will fail rather than appear successful.
+
+**Limitation:** the first-addition condition is NOT a permanent exactly-once guarantee. Re-adding the workflow after deletion, or recreating its branch, could cause a new eligible event. Executing and removing any active workflow still requires an independently approved, explicitly bounded Windows Actions action. Never interpret a skipped, queued, or successful template-only run as PowerShell or signed EXE acceptance.
+
+Local Node.js 22.16.0 isolated regression: `13/13` template assertions passed (old 7 plus new 6), `0` failures; both YAML documents loaded with PyYAML BaseLoader and had read-only GitHub permission, Windows 2022/2025 matrix and expected steps. Local TAP log SHA-256: `6109d89ab2ca2716aff837307d815e3d5e5c2c39b31069eea79f8209f6c7579e`.
+
+The pinned dependency changes do not alter the already accepted unsigned EXE SHA `3201d433df727a5d5fddf8e68a0f69ea1654057e04cfad7833fd3ed7dc241a34`. PowerShell runtime, real signing and signed EXE acceptance are still **NOT RUN**.

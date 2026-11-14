@@ -25,13 +25,21 @@ jobs:
         os: [windows-2022, windows-2025]
     steps:
       - name: Checkout immutable no-sign preflight code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           ref: c8cf9be7c175d00774e7e5cc5a763d587b77ec6e
           persist-credentials: false
 
+      - name: Confirm immutable audited checkout
+        shell: powershell
+        run: |
+          $actualCommit = (& git rev-parse HEAD).Trim()
+          if ($actualCommit -cne 'c8cf9be7c175d00774e7e5cc5a763d587b77ec6e') {
+            throw 'AUDITED_CODE_CHECKOUT_SHA_MISMATCH'
+          }
+
       - name: Download exact accepted unsigned Windows 2025 candidate
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           repository: yud78785/yutang-build
           run-id: 43541915930
