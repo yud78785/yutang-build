@@ -241,3 +241,21 @@ test('topology logs only fixed booleans/counts; PowerShell enforces UTF-8 stdout
  assert.doesNotMatch(s,/JSON\.stringify\(earlyRows\)|JSON\.stringify\(remainingRows\)/);
  assert.doesNotMatch(s,/taskkill\.exe.*'\/T'/);
 });
+
+test('incomplete WMI snapshots never make diagnostics throw or disclose raw fields',()=>{
+ const details=summarizeIdentityTopology([null,undefined,2,'garbled',{},
+   {ProcessId:100,Name:'candidate.exe',ExecutablePath:'C:\private\path'}],{exePid:100,backendPid:102});
+ assert.deepEqual(details,{wrapperPresent:true,workerPresent:false,immediateParentPresent:false,
+  immediateParentNameExpected:false,wrapperAncestryVerified:false,workerGuardCount:0,exactGuardPairVerified:false});
+ assert.doesNotMatch(JSON.stringify(details),/private|candidate\.exe|garbled|path/);
+});
+test('more than ten owned-looking guards are capped and never accepted as a unique pair',()=>{
+ const rows=[{ProcessId:100,ParentProcessId:1,Name:'wrapper.exe'},
+ {ProcessId:101,ParentProcessId:100,Name:'\u5927\u80a5\u9c7c\u6296\u97f3\u52a9\u624b.exe'},
+ {ProcessId:102,ParentProcessId:101,Name:'node.exe'},
+ ...Array.from({length:14},(_,i)=>({ProcessId:300+i,ParentProcessId:101,
+  Name:'jobguard.exe',CommandLine:'jobguard --owner-pid 101 --target-pid 102'}))];
+ const details=summarizeIdentityTopology(rows,{exePid:100,backendPid:102});
+ assert.equal(details.workerGuardCount,10);
+ assert.equal(details.exactGuardPairVerified,false);
+});

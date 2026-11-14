@@ -174,7 +174,7 @@ export function trackedEdgeSurvivors(rows, trackedEdgePids) {
 export function summarizeIdentityTopology(rows,{exePid,backendPid}) {
   // Bounded, non-sensitive telemetry only. Never emit raw PIDs, process names,
   // parent chains, paths, command lines, or environment contents.
-  const snapshot=Array.isArray(rows)?rows:[];
+  const snapshot=Array.isArray(rows)?rows.filter(r=>r!==null&&typeof r==='object'):[];
   const wrapper=snapshot.find(r=>Number(r.ProcessId)===exePid);
   const worker=snapshot.find(r=>Number(r.ProcessId)===backendPid);
   const parentPid=Number(worker?.ParentProcessId);
