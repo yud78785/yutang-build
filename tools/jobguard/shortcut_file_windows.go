@@ -348,6 +348,31 @@ func restoreShortcutHandleNoReplace(shortcut, backup, quarantine, expectedOld, e
 
 // deleteShortcutIfHash removes a file only when the opened file object matches
 // the expected digest. It never deletes by a path-only check-then-use sequence.
+// runShortcutOperation is a one-shot, parent-bound command used by the updater.
+// It never falls back to path-based replacement or deletion.
+func runShortcutOperation(args []string, immediateParentPID int) error {
+	request, err := parseShortcutOperationRequest(args, immediateParentPID)
+	if err != nil {
+		return fmt.Errorf("invalid shortcut operation request: %w", err)
+	}
+	switch request.operation {
+	case "--shortcut-commit":
+		return commitShortcutHandleNoReplace(
+			request.shortcut, request.backup, request.temporary,
+			request.oldSHA256, request.newSHA256,
+		)
+	case "--shortcut-restore":
+		return restoreShortcutHandleNoReplace(
+			request.shortcut, request.backup, request.quarantine,
+			request.oldSHA256, request.newSHA256,
+		)
+	case "--shortcut-delete":
+		return deleteShortcutIfHash(request.path, request.sha256)
+	default:
+		return fmt.Errorf("unsupported shortcut operation")
+	}
+}
+
 func deleteShortcutIfHash(name, expectedHash string) error {
 	if !filepath.IsAbs(name) || filepath.Clean(name) != name || !strings.EqualFold(filepath.Ext(name), ".lnk") {
 		return fmt.Errorf("invalid shortcut cleanup path")
