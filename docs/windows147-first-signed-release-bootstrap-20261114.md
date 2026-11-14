@@ -59,3 +59,13 @@ This is an **append-only test result** beyond the earlier 7/7 local shim-based t
 **Provenance limitation exposed by this test:** `validateManifest()` verifies signature, field types, repository, tag, publisher thumbprint and claimed numeric Run/Artifact IDs. It does **not independently query GitHub or attest that those IDs correspond to the same signed EXE and two passed Windows jobs**. A cryptographically valid manifest can still contain inaccurate build provenance if the authorized signer inputs incorrect metadata. Therefore public signing/publishing must require a separately verified signed-EXE acceptance receipt and an exact file SHA cross-check before manifest signing. Synthetic CLI passes cannot be used as such receipts.
 
 The original accepted unsigned 1.4.7 SHA, Windows 2022/2025 evidence, private Drive backup, publisher qualification blocker, disabled updates, unchanged `main` and no-Release restriction remain in effect. No Windows Actions were started for this test.
+
+## Additional true archived-receipt invocation with exact full updater
+
+After the 14-test pass, the read-only CLI was run twice on the **actual extracted** 65,429-byte `windows-candidate-receipt.json` from the Windows 2025 original Artifact `14092434238`, this time importing the **complete unmodified updater source** (blob `b00c130f081cbe80bec3200bcfc024a738631784`), not the earlier local shim.
+
+- Receipt SHA-256 before and after: `db5335813a3c69e2ce578deabd8c7f99993dba4cedee0ae73378db328086f563` (unchanged).
+- Proposed `1.4.7`: `BLOCKED_FOR_AUTOMATIC_UPDATE_BOOTSTRAP`, non-higher version and disabled trust pins.
+- Proposed `1.4.8`: `BLOCKED_FOR_AUTOMATIC_UPDATE_BOOTSTRAP`, version is higher but disabled trust pins prevent the original client from auto-updating.
+- No executable was launched, no release was created, and both checks are **offline planning evidence only**.
+
