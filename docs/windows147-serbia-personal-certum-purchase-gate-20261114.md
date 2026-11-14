@@ -48,7 +48,16 @@ For the **first public release**, prefer *Certum Individual Cloud, 1 year* as th
 6. Confirm reissue/renewal fees, whether personal identity must be revalidated, and how the leaf certificate thumbprint may change across future reissues.
 7. Confirm public certificate identity fields and that a personal street address is **not** public.
 
-Existing support inquiry draft addressed to `info@sslmentor.rs` is **still not sent** in the project handoff. Do not send without a deliberate user mail authorization, do not include ID scans or personal data in support inquiry, and do not treat a sent message as a supplier answer.
+**2026-11-14 updated email status:** Original pre-purchase inquiry to `info@sslmentor.rs` was sent (Gmail SENT record, 14:53 UTC) and the supplier replied (14:56 UTC). A short follow-up asking about Serbia-resident foreign-national B2C eligibility and precise one-year final charge is saved as an **UNSENT** draft in the same private email thread. Do not disclose customer email, name, identifying documents or private Gmail IDs in this public repository.
+
+
+## Supplier written reply received — scoped evidence, not an eligibility approval
+
+The seller's email on **2026-11-14** states (paraphrased) that if the applicant is "Serbian," its current price is without VAT. It also says **each application is assessed individually**, and the validation team can request clarification or extra supporting documents. It refers to the product FAQ and conditional 30-day refund terms rather than confirming an unconditional refund.
+
+This is now a **written preliminary VAT statement**, not a guaranteed invoice or written approval for a natural person of foreign nationality residing in Serbia. The citizenship/residency distinction was not resolved. The seller did not state whether the one-year natural-person total is precisely EUR 117 with all mandatory charges included, or confirm specific accepted foreign-passport / Serbian residence-proof combinations.
+
+The original email and vendor reply are retained in the account's **private Gmail thread**, not committed here. A brief follow-up addressing only those two unresolved points is drafted, **not sent**. No certificate purchased; no PII, identity papers, billing data or cloud signing credentials provided. For purchase, require a provider-written answer to the exact individual's eligibility/category and a final payment amount; then separately authorize payment and identity validation.
 
 ## Strict release gates after qualification
 
