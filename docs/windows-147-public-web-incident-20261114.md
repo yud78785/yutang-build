@@ -38,3 +38,23 @@ The failed online harness instead used Node `child.kill()` on the outer portable
 Only after separately approving another bounded Windows 2022/2025 public-web run should a fresh isolated one-shot workflow be prepared, pinning the corrected test source SHA and the ORIGINAL EXE SHA. Both new raw job logs must show a page gate success marker and a final cleanup-backed PASS receipt; otherwise report explicit BLOCKED/FAILED with role/PID diagnostics. Do not rerun already accepted sandbox/Job Object suites merely to repeat results.
 
 Do not merge `main`, purchase certificates, sign, publish, use personal accounts, bypass CAPTCHA or operate user devices.
+
+
+## SECOND expressly approved real Windows online run — 2026-11-14 18:35Z
+
+**Run [43627404909](https://github.com/yud78785/yutang-build/actions/runs/43627404909) concluded FAILURE** on both standard runners. This is a separate runtime candidate **test harness**, not new EXE bytes.
+
+- Workflow activation commit: `2eabb798c6d0f027c29030df61be7dc65fb32b93`; exact checked-out test source: `23a8959d38c9f0b72ea7ff894f01c0b0e4bcd77a`.
+- Windows 2022 job [132546281276](https://github.com/yud78785/yutang-build/actions/runs/43627404909/job/132546281276); Windows 2025 job [132546281508](https://github.com/yud78785/yutang-build/actions/runs/43627404909/job/132546281508). Both completed with `failure`.
+- Both verified **the same original EXE SHA-256** `3201d433df727a5d5fddf8e68a0f69ea1654057e04cfad7833fd3ed7dc241a34` and 125446071-byte identity.
+- Both passed 32/32 Windows Node offline/contract unit cases, but neither passed the real Windows EXE startup+public-page+cleanup probe.
+- Both logged `WINDOWS_PUBLIC_WEB_STAGE_FAILED INNER_DESKTOP_IDENTITY_NOT_READY` **before the browser-open API was invoked**. There is no `WINDOWS_PUBLIC_PAGE_GATE_OK` and no accepted page-render receipt. Do not infer internet access or page rendering.
+- Both logged `WINDOWS_PUBLIC_WEB_EXE_NOT_ACCEPTED CANDIDATE_PROCESS_CLEANUP_UNVERIFIED`. Failure diagnostics showed Windows 2022 API worker PID 7356 and Windows 2025 API worker PID 3380 as still present, with `cdpListenerCount:0`.
+- The reported `pid:0, role:inner-electron` is **a bug in the test harness's diagnostic**. If `desktopTarget` is missing, `desktopPid` defaults to 0; the filter erroneously treats Windows PID 0 (the Idle process) as an Electron descendant. **PID 0 is not evidence of a surviving Electron process.** The API workers are independent real cleanup blockers.
+- The reason for identity verification failure cannot be determined from these logs because the old test swallowed the specific `verifyDesktopStopTarget` error on each retry; do not invent a root cause. Potential validation inputs include wrapper image identity, API worker ancestry, Electron basename/path and desktop Job Object owner-target pair. The old offline-network test had previously passed a related inner-Electron forced-exit procedure but not the new stricter public-web guard.
+
+### Targeted follow-up, not a third run
+
+The local-only repair now narrows cleanup checks to nonzero verified desktop PIDs and logs **only fixed identity failure reason codes** (no raw file paths, process command lines, environment variables or user data) when the early and final identity checks cannot be satisfied. This is evidence plumbing to distinguish a genuinely missing process from unreadable Windows executable paths or guard mismatch. It is **not** a successful Windows test, and its new tests have **not yet been executed**.
+
+The user's second-run approval was consumed by Run 43627404909. No third cloud test, release, signing or `main` update has occurred.

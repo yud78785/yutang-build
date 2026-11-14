@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import {validatePublicReceipt, validatePublicPageEvidence, verifyDesktopStopTarget, ownedEdgePids, trackedEdgeSurvivors} from '../tools/windows147-online-public-probe.mjs';
+import {validatePublicReceipt, validatePublicPageEvidence, verifyDesktopStopTarget, identityReasonCode, ownedEdgePids, trackedEdgeSurvivors} from '../tools/windows147-online-public-probe.mjs';
 const SHA='3201d433df727a5d5fddf8e68a0f69ea1654057e04cfad7833fd3ed7dc241a34';
 const s=fs.readFileSync(new URL('../tools/windows147-online-public-probe.mjs', import.meta.url),'utf8');
 const green={status:200,page:{origin:'https://www.douyin.com',ready:'complete',challenged:false,titleLength:8,bodyLength:220,bodyChildren:8,paintBytes:10000},sandbox:{rendererSandboxVerified:true,networkServiceWindowsTokenVerified:true,networkServiceLowIntegrityVerified:true,networkServiceProcessOwned:true},identity:{loopbackOnly:true,listenerMatchesEdge:true},cleaned:true};
@@ -124,4 +124,15 @@ test('missing, relative or mismatched Electron executable path cannot authorize 
  }
  assert.match(s,/path\.isAbsolute\(target\.executablePath\)/);
  assert.match(s,/INNER_ELECTRON_IMAGE_PATH_NOT_VERIFIED/);
+});
+
+test('identity errors expose fixed codes rather than raw WMI paths',()=>{
+ assert.equal(identityReasonCode(new Error('INNER_ELECTRON_IMAGE_PATH_NOT_VERIFIED')), 'INNER_ELECTRON_IMAGE_PATH_NOT_VERIFIED');
+ assert.equal(identityReasonCode(new Error('unrecognized path C:\\sensitive\\user')), 'IDENTITY_VERIFICATION_UNKNOWN');
+ assert.match(s,/WINDOWS_PUBLIC_WEB_IDENTITY_GATE/);
+ assert.match(s,/WINDOWS_PUBLIC_WEB_FINAL_IDENTITY_GATE/);
+});
+test('unknown inner desktop PID never counts the Windows PID-0 idle process as Electron',()=>{
+ assert.match(s,/desktopPid>0 && pid===desktopPid/);
+ assert.match(s,/\(desktopPid>0 && Number\(p\.ProcessId\)===desktopPid\)/);
 });

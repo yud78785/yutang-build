@@ -170,6 +170,15 @@ export function trackedEdgeSurvivors(rows, trackedEdgePids) {
   return rows.filter(p=>/msedge\.exe$/i.test(String(p.Name||'')) &&
     trackedEdgePids.has(Number(p.ProcessId)));
 }
+export function identityReasonCode(error) {
+  // Only fixed error codes are printed; never log untrusted process command lines or paths.
+  const known=[
+    'CANDIDATE_WRAPPER_IDENTITY_NOT_VERIFIED','API_WORKER_IDENTITY_NOT_VERIFIED',
+    'INNER_ELECTRON_IDENTITY_NOT_VERIFIED','INNER_ELECTRON_IMAGE_PATH_NOT_VERIFIED',
+    'DESKTOP_JOB_GUARD_NOT_VERIFIED','DESKTOP_JOB_GUARD_PAIR_MISMATCH'
+  ];
+  return known.find(code=>String(error?.message||'').includes(code)) || 'IDENTITY_VERIFICATION_UNKNOWN';
+}
 export function verifyDesktopStopTarget(rows, {exePid, exeFile, backendPid}) {
   const wrapper=rows.find(r=>Number(r.ProcessId)===exePid);
   assert.ok(wrapper && String(wrapper.ExecutablePath||'').toLowerCase()===path.resolve(exeFile).toLowerCase(),
@@ -211,7 +220,7 @@ function stopVerifiedDesktop(target) {
 function cleanupRole(p,{exePid,desktopPid,backendPid,hostPid,trackedEdgePids}) {
   const pid=Number(p.ProcessId);
   if(pid===exePid)return 'packaged-wrapper';
-  if(pid===desktopPid)return 'inner-electron';
+  if(desktopPid>0 && pid===desktopPid)return 'inner-electron';
   if(pid===backendPid)return 'api-worker';
   if(pid===hostPid)return 'browser-host';
   if(trackedEdgePids.has(pid)&&/msedge\.exe$/i.test(String(p.Name||'')))return 'edge-descendant';
@@ -222,7 +231,7 @@ async function waitCleanup({exePid,desktopPid,backendPid,hostPid,profile,control
   try {
   return await until(()=>{
     const procs=processes();
-    const owned=procs.filter(p=>trackedOwnedPids.has(Number(p.ProcessId)) || Number(p.ProcessId)===desktopPid || Number(p.ProcessId)===exePid ||
+    const owned=procs.filter(p=>trackedOwnedPids.has(Number(p.ProcessId)) || (desktopPid>0 && Number(p.ProcessId)===desktopPid) || Number(p.ProcessId)===exePid ||
       (backendPid > 0 && Number(p.ProcessId)===backendPid) ||
       String(p.CommandLine||'').toLowerCase().includes(profile.toLowerCase()) ||
       String(p.CommandLine||'').toLowerCase().includes(controlDir.toLowerCase()) ||
@@ -233,7 +242,7 @@ async function waitCleanup({exePid,desktopPid,backendPid,hostPid,profile,control
   } catch(error) {
     try {
       const rows=processes();
-      const left=rows.filter(p=>trackedOwnedPids.has(Number(p.ProcessId)) || Number(p.ProcessId)===desktopPid ||
+      const left=rows.filter(p=>trackedOwnedPids.has(Number(p.ProcessId)) || (desktopPid>0 && Number(p.ProcessId)===desktopPid) ||
         Number(p.ProcessId)===exePid || Number(p.ProcessId)===backendPid ||
         String(p.CommandLine||'').toLowerCase().includes(profile.toLowerCase()) ||
         String(p.CommandLine||'').toLowerCase().includes(controlDir.toLowerCase()) ||
@@ -269,6 +278,7 @@ export async function run(exe) {
   const child=spawn(exe,['--remote-debugging-port=0','--remote-debugging-address=127.0.0.1'],{env,windowsHide:true,shell:false,stdio:'ignore'});
   let childError=null,exited=false,hostPid=0,backendPid=0,cleaned=false;
   let desktopTarget=null;
+  let lastIdentityReason='IDENTITY_VERIFICATION_NOT_OBSERVED';
   const trackedEdgePids=new Set();
   const trackedOwnedPids=new Set();
   child.once('error',e=>{childError=e;});child.once('exit',()=>{exited=true;});
@@ -290,8 +300,11 @@ export async function run(exe) {
         for(const p of earlyRows)if(Number(p.ProcessId)===child.pid || Number(p.ProcessId)===target.pid ||
           hasHostAncestor(Number(p.ProcessId),target.pid,earlyRows))trackedOwnedPids.add(Number(p.ProcessId));
         return target;
-      } catch { return null; }
-    },7500,'INNER_DESKTOP_IDENTITY_NOT_READY');
+      } catch(error) { lastIdentityReason=identityReasonCode(error); return null; }
+    },7500,'INNER_DESKTOP_IDENTITY_NOT_READY').catch(error=>{
+      console.error('WINDOWS_PUBLIC_WEB_IDENTITY_GATE '+lastIdentityReason);
+      throw error;
+    });
     assert.match(desktop.origin,/^http:\/\/127\.0\.0\.1:\d{4,5}$/,'LOCAL_API_NOT_LOOPBACK');
     const boot=await fetch(desktop.origin+'/api/bootstrap',{signal:AbortSignal.timeout(5000)});
     assert.equal(boot.status,200,'LOCAL_BOOTSTRAP_FAILED');
@@ -355,7 +368,10 @@ export async function run(exe) {
         for(const p of remainingRows)if(Number(p.ProcessId)===child.pid || Number(p.ProcessId)===desktopTarget.pid ||
           hasHostAncestor(Number(p.ProcessId),desktopTarget.pid,remainingRows))
           trackedOwnedPids.add(Number(p.ProcessId));
-      } catch { cleanupError=new Error('EARLY_DESKTOP_IDENTITY_NOT_VERIFIED'); }
+      } catch(error) {
+        console.error('WINDOWS_PUBLIC_WEB_FINAL_IDENTITY_GATE '+identityReasonCode(error));
+        cleanupError=new Error('EARLY_DESKTOP_IDENTITY_NOT_VERIFIED');
+      }
     }
     if(desktopTarget)try{stopVerifiedDesktop(desktopTarget);}catch{cleanupError=new Error('VERIFIED_DESKTOP_STOP_FAILED');}
     if(!exited)try{child.kill();}catch{}
