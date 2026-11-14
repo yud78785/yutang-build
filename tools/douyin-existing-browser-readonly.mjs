@@ -63,10 +63,12 @@ function validAiReceipt(receipt, expectedVideoId) {
  */
 export async function inspectExistingDedicatedDouyinVideoReadOnly({
   controller, readPageState, readCommentDom, observeComments, inspectSummary,
-  acquireReadLock, expectedVideoId, limit = 12, signal,
+  acquireReadLock, expectedVideoId, limit = 12, observationTimeoutMs = 15000, signal,
 } = {}) {
   if (typeof expectedVideoId !== 'string' || !VIDEO.test(expectedVideoId)) throw new TypeError('INVALID_VIDEO_ID');
   if (!Number.isInteger(limit) || limit < 1 || limit > 20) throw new TypeError('INVALID_LIMIT');
+  if (!Number.isSafeInteger(observationTimeoutMs) || observationTimeoutMs < 25 || observationTimeoutMs > 60000)
+    throw new TypeError('INVALID_OBSERVATION_TIMEOUT');
   if (typeof controller?.connectExistingBrowser !== 'function' ||
       typeof readPageState !== 'function' || typeof readCommentDom !== 'function' ||
       typeof observeComments !== 'function' || typeof inspectSummary !== 'function') {
@@ -84,13 +86,20 @@ export async function inspectExistingDedicatedDouyinVideoReadOnly({
   try { release = await acquireReadLock({ signal, controller }); }
   catch { return blocked('UPSTREAM_OPERATION_LOCK_FAILED', expectedVideoId); }
   if (typeof release !== 'function') return blocked('UPSTREAM_OPERATION_LOCK_UNVERIFIED', expectedVideoId);
-  let receipt;
-  try {
-    receipt = await inspectConnectedBrowserReadOnly({
-      browser, readPageState, readCommentDom, observeComments, inspectSummary,
-      expectedVideoId, limit, signal,
-    });
-  } catch { receipt = blocked('READ_ONLY_INSPECTION_UNEXPECTED_FAILURE', expectedVideoId); }
+  let receipt, timer;
+  const inspection = Promise.resolve().then(() => inspectConnectedBrowserReadOnly({
+    browser, readPageState, readCommentDom, observeComments, inspectSummary,
+    expectedVideoId, limit, signal,
+  }));
+  // Playwright page.evaluate() has no dependable per-call timeout here. A hung
+  // DOM observation must not hold the cooperative upstream tab-api lock forever.
+  // A timed-out inspection is never trusted, even if it resolves late.
+  const deadline = new Promise(resolve => {
+    timer = setTimeout(() => resolve(blocked('READ_ONLY_OBSERVATION_TIMEOUT', expectedVideoId)), observationTimeoutMs);
+  });
+  try { receipt = await Promise.race([inspection, deadline]); }
+  catch { receipt = blocked('READ_ONLY_INSPECTION_UNEXPECTED_FAILURE', expectedVideoId); }
+  finally { clearTimeout(timer); }
   try { await release(); }
   catch { return { ...blocked('UPSTREAM_OPERATION_LOCK_RELEASE_FAILED', expectedVideoId),
     temporaryOperationLockUsed: true, temporaryOperationLockCleanupVerified: false }; }
