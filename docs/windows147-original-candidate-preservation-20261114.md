@@ -2,6 +2,23 @@
 
 Date: 2026-11-14. Original candidate belongs to product patch commit `9cc16d7e64d59dc141e9c6687b8dd461934fcc35` and workflow run `43541915930`. This record is evidence preservation only; it does not sign, publish or build a new EXE.
 
+## 2026-11-14 later update: complete private Drive backup verified by round-trip
+
+**This section supersedes the historical 413/100 MiB upload failure below.** The original ZIP itself was not modified or rebuilt. It was losslessly split into two binary pieces below 100 MiB and uploaded to the user's existing **private** YuTang-Cloud-Build Drive folder. The Drive API returned `shared=false` and exactly the expected sizes for all files; private Drive identifiers are intentionally not reproduced in this public repository.
+
+| Raw split part | Bytes | SHA-256 | Drive upload/readback |
+|---|---:|---|---|
+| `YuTang-1.4.7-Windows2025-Artifact-14092434238-NOT-RELEASE.zip.part001` | 67108864 | `9af1b00da699ecb060ee72bb69365c52eb78b9ae108a8a157b0e31cd1df2f93a` | success |
+| `YuTang-1.4.7-Windows2025-Artifact-14092434238-NOT-RELEASE.zip.part002` | 58466451 | `43b7d3360ee3ddb87babaf81da1c1060eff713a6195219c61f96093f9b5241c6` | success |
+
+Separate Drive items: split manifest JSON, Windows PowerShell restoration script, README and previously preserved Windows 2022 same-file cross-test receipts.
+
+**Independent cloud round-trip evidence:** both parts were downloaded *back* from Google Drive to an independent local path, their individual sizes and SHA-256 were recalculated, concatenation yielded ZIP SHA-256 `718d52af838a4fa0c375ae51f0b1f71aa2dc20d3615b58f79f7355ca1bf3342a`, and a byte-for-byte compare of the reconstituted stream against the original artifact ZIP returned equal. Separately, the original ZIP's internal EXE hash was verified as `3201d433df727a5d5fddf8e68a0f69ea1654057e04cfad7833fd3ed7dc241a34`.
+
+Restore helper `Restore-YuTang147-OriginalArchive.ps1` validates both part hashes and sizes before assembling the exact archive with exclusive CreateNew (no overwrite), then checks total bytes and ZIP SHA. It accepts a `.bin` suffix that Drive clients may append to a part filename, while failing on ambiguous duplicate names. The restoration helper was authored and inspected but **has not been executed under Windows PowerShell**, so it must not be marked as Windows-tested. The concatenation/round-trip hash and byte equality **were executed locally**. No software execution, signing, publishing, Windows Actions, `main` modification or auto-update activation occurred.
+
+This preservation solves the short GitHub Artifact retention risk. It does not change the unsigned EXE's acceptance status or supply a signed release candidate. Signed EXE SHA-256, qualified publisher identity, signed-file Windows 2022/2025 acceptance, real download and rollback remain pending.
+
 ## Windows 2025 exact source artifact
 
 - Artifact ID: `14092434238`, ZIP size **125575315 bytes**.
