@@ -3,7 +3,7 @@
 # Single Windows 2025 diagnostic. If failed, do NOT schedule Windows 2022.
 # Fifth Windows Actions authorization has NOT been given; this template is inert.
 # No production EXE, credentials, release or repository main are modified.
-# On distinct fifth-run authorization only: create a dedicated branch exactly from f3c24b873e3b16afaab94aacf93a98944b1495f6; then activate by one nonforced workflow-file push.
+# On distinct fifth-run authorization only: create a dedicated branch exactly from 88c7bd34f7304058c5160609b14d4bb9fffd41ae; then activate by one nonforced workflow-file push.
 name: YuTang 1.4.7 original unsigned EXE public-web fifth diagnostic - one Windows 2025 runner NOT RELEASE
 on:
   push:
@@ -24,7 +24,7 @@ jobs:
   public-homepage:
     # Job-level gating occurs before matrix runner allocation.
     # Subsequent edits, branch creation, forced pushes and deletion are SKIPPED not PASS.
-    if: github.event_name == 'push' && github.ref == 'refs/heads/experiment/windows-147-public-web-fifth-20261115' && github.event.before == 'f3c24b873e3b16afaab94aacf93a98944b1495f6' && github.event.created == false && github.event.forced == false && github.event.deleted == false
+    if: github.event_name == 'push' && github.ref == 'refs/heads/experiment/windows-147-public-web-fifth-20261115' && github.event.before == '88c7bd34f7304058c5160609b14d4bb9fffd41ae' && github.event.created == false && github.event.forced == false && github.event.deleted == false
     name: windows-2025 - original EXE identity then public homepage probe
     runs-on: windows-2025
     timeout-minutes: 35
@@ -33,13 +33,13 @@ jobs:
       - name: Checkout immutable inspected test source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          ref: f3c24b873e3b16afaab94aacf93a98944b1495f6
+          ref: 88c7bd34f7304058c5160609b14d4bb9fffd41ae
           persist-credentials: false
 
       - name: Verify exact checked-out code SHA
         shell: pwsh
         run: |
-          if ((& git rev-parse HEAD).Trim() -cne 'f3c24b873e3b16afaab94aacf93a98944b1495f6') {
+          if ((& git rev-parse HEAD).Trim() -cne '88c7bd34f7304058c5160609b14d4bb9fffd41ae') {
             throw 'PUBLIC_WEB_PROBE_SOURCE_SHA_MISMATCH'
           }
 
