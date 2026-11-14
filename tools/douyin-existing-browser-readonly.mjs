@@ -162,8 +162,11 @@ export async function inspectExistingDedicatedDouyinVideoReadOnly({
       return blocked('OWNED_VIDEO_PAGE_CHANGED_DURING_INSPECTION', expectedVideoId);
   } catch { return blocked('FINAL_BROWSER_STATE_UNAVAILABLE', expectedVideoId); }
   // This receipt refers ONLY to this probe's calls, not concurrent user/agent actions.
+  const anyObserved = commentResult.status === 'ok' || aiResult.status === 'entry_visible';
   return {
-    status: 'read_only_evidence', videoId: expectedVideoId, reasonCode: null,
+    status: anyObserved ? 'read_only_evidence' : 'no_visible_evidence',
+    videoId: expectedVideoId,
+    reasonCode: anyObserved ? null : 'NO_PUBLIC_COMMENTS_OR_AI_ENTRY_VISIBLE',
     connectionMethod: 'upstream_connectExistingBrowser',
     publicCommentsStatus: commentResult.status,
     comments: commentResult.comments.slice(0, limit).map(row => ({text: row.text, commentId: row.commentId ?? null})),
