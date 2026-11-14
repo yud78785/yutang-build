@@ -189,6 +189,7 @@ export async function runUpdateLauncher({
   nonce,
   healthFile,
   stagedShortcut,
+  expectedStagedShortcutSha256,
   shortcut,
   nativeHelperPath = process.env.YUTANG_JOBGUARD_PATH,
   nativeHelperSha256 = process.env.YUTANG_JOBGUARD_SHA256,
@@ -214,6 +215,9 @@ export async function runUpdateLauncher({
   const nativeHelper = { nativeHelperPath, nativeHelperSha256 };
   const stagedShortcutSha256 = await hashRegularFile(stagedShortcut);
   if (!stagedShortcutSha256) throw new Error('UPDATE_STAGED_SHORTCUT_MISSING_OR_INVALID');
+  if (stagedShortcutSha256 !== expectedStagedShortcutSha256) {
+    throw new Error('UPDATE_STAGED_SHORTCUT_IDENTITY_MISMATCH');
+  }
   if (process.platform === 'win32') await verifyNativeShortcutHelper(nativeHelperPath, nativeHelperSha256);
   const updatesDirectory = path.resolve(path.dirname(file));
   if (path.resolve(path.dirname(healthFile)) !== updatesDirectory ||
@@ -254,7 +258,10 @@ export async function runUpdateLauncher({
       healthFile, nonce, version, sha256, timeoutMs: healthTimeoutMs, pollMs, delayImpl
     });
     const backupShortcut = path.join(path.dirname(shortcut), '.' + path.basename(shortcut) + '.' + nonce + '.bak.lnk');
-    transaction = await beginUpdateTransaction({ updatesDirectory, shortcut, stagedShortcut, backupShortcut, targetExe: file, targetExeSha256: sha256, nonce });
+    transaction = await beginUpdateTransaction({
+      updatesDirectory, shortcut, stagedShortcut, backupShortcut, targetExe: file,
+      targetExeSha256: sha256, expectedStagedShortcutSha256, nonce
+    });
     await setUpdateTransactionPhase(transaction, 'switching');
     rollbackShortcut = await commitShortcut(stagedShortcut, shortcut, nonce, transaction, nativeHelper);
     await setUpdateTransactionPhase(transaction, 'switched');
@@ -309,9 +316,10 @@ export async function runUpdateLauncher({
 
 const invokedDirectly = process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href;
 if (invokedDirectly) {
-  const [pidText, file, sha256, publisherThumbprint, version, nonce, healthFile, stagedShortcut, shortcut, nativeHelperPath, nativeHelperSha256] = process.argv.slice(2);
+  const [pidText, file, sha256, publisherThumbprint, version, nonce, healthFile, stagedShortcut, expectedStagedShortcutSha256, shortcut, nativeHelperPath, nativeHelperSha256] = process.argv.slice(2);
   runUpdateLauncher({
-    pid: Number(pidText), file, sha256, publisherThumbprint, version, nonce, healthFile, stagedShortcut, shortcut, nativeHelperPath, nativeHelperSha256
+    pid: Number(pidText), file, sha256, publisherThumbprint, version, nonce, healthFile,
+    stagedShortcut, expectedStagedShortcutSha256, shortcut, nativeHelperPath, nativeHelperSha256
   }).then(() => {
     process.stdout.write('YU TANG UPDATE HEALTH CHECK PASSED\n');
   }).catch(error => {
