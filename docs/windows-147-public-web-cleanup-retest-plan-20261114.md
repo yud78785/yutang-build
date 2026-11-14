@@ -43,3 +43,10 @@ On **each** runner, require exact EXE SHA, true main-frame HTTP 200/DOM/render/s
 - Actual locally executed Node 22.16.0 tests: **32/32 passed, 0 failed, 0 skipped** using a TEST-ONLY lifecycle module stub; new regression covers missing/relative/mismatched image paths. TAP SHA-256 `ef7a925e74084cfa7d448015a4d16d27566dfed33b726816c699190509811fcc`.
 - Exact locally tested source Git blob SHA-1: `9aa8194f59eda800728a8b3e364a3afa73200cab`; test source Git blob SHA-1: `f6f1f90914192f5c47ab6c075340a6a3f77fa32b`.
 - The **inert** workflow is updated to check out `23a8959d38c9f0b72ea7ff894f01c0b0e4bcd77a`. No new Actions workflow is installed and no Windows/online execution has occurred. The failed Run `43616296326` remains a failure.
+
+## Second-run failure — actual Windows 2022/2025 evidence (2026-11-14)
+
+- [Run 43627404909](https://github.com/yud78785/yutang-build/actions/runs/43627404909), workflow commit `2eabb798c6d0f027c29030df61be7dc65fb32b93`, checked-out test code `23a8959d38c9f0b72ea7ff894f01c0b0e4bcd77a`: **both jobs failed** before browser navigation with `INNER_DESKTOP_IDENTITY_NOT_READY`. Both confirmed unchanged EXE hash and 32/32 Windows Node unit cases; neither produced a page-pass or final cleanup-pass receipt.
+- Diagnostics reported a surviving API worker in each runner and zero CDP listeners. The `pid:0, role:inner-electron` entry was a **diagnostic false positive**, not a real desktop process.
+- New source commit `356c17c6966b825339830f4eb27f384ab5c02247` adds fixed-code identity gate diagnostics and excludes unverified desktop PID 0 from the process survivor check; its new unit assertions remain **not executed**, and there is no new Windows EXE acceptance.
+- Dormant template now pins `356c17c6966b825339830f4eb27f384ab5c02247`. This change did not activate a third run; the user's second-run authorization was exhausted by Run 43627404909.
