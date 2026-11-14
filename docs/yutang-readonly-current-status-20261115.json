@@ -32,15 +32,15 @@
       "path": "tools/douyin-ai-summary-entry-readonly.mjs"
     },
     "existing_edge_reader": {
-      "passed": 23,
-      "blob": "f8c8bb5261cc2df742b4a771f92101eff14e2020",
+      "passed": 26,
+      "blob": "90d7d005c83ce8387f91f28dc215659ecd41ba1e",
       "path": "tools/douyin-existing-browser-readonly.mjs",
       "tests_path": "tests/douyin-existing-browser-readonly.test.mjs",
-      "tests_blob": "35bbdcc356c8982fef8cc90b0a6f1551f386d46c"
+      "tests_blob": "7f22cd431d290693a4bb86091fcd1a9cc081e8ae"
     },
-    "passed_total": 77,
+    "passed_total": 80,
     "failed_total": 0,
-    "scope_limitation": "77 passing deterministic unit/integration tests on Node.js 22.16.0 isolated Linux, including a real CLI environment gate that returns WINDOWS_REQUIRED. Upstream lock API was verified by source inspection but NOT exercised against a real Windows lockfile, Edge, or Douyin.",
+    "scope_limitation": "80 passing real Node.js 22.16.0 isolated Linux unit/integration checks and real environment-gate CLI exit; no Windows dedicated Edge, live Douyin video or comment DOM accepted.",
     "source_preflight_cli": {
       "passed": 15,
       "path": "tools/run-douyin-existing-browser-readonly.mjs",
@@ -70,7 +70,10 @@
     "concurrent_upstream_operation_lock_held": false,
     "concurrent_operations_race_eliminated": false,
     "concurrent_upstream_operation_lock_required_in_candidate": true,
-    "lock_behavior": "Source-only adapter requires the upstream acquireBrowserOperationLock('tab-api') provider; it is acquired after verifying an already connected dedicated browser, and released after the full read. The future Windows runner creates/removes temporary tab-api.lock in upstream browser-control directory. In this chat no Windows host was accessed and no real lockfile was created on the user's machine. This only serializes cooperative upstream code; manual or third-party browser activity can still race."
+    "lock_behavior": "Source-only adapter requires the upstream acquireBrowserOperationLock('tab-api') provider; it is acquired after verifying an already connected dedicated browser, and released after the full read. The future Windows runner creates/removes temporary tab-api.lock in upstream browser-control directory. In this chat no Windows host was accessed and no real lockfile was created on the user's machine. This only serializes cooperative upstream code; manual or third-party browser activity can still race.",
+    "observation_deadline_ms_default": 15000,
+    "observation_timeout": "READ_ONLY_OBSERVATION_TIMEOUT; result discarded and upstream tab-api release attempted; on release error return UPSTREAM_OPERATION_LOCK_RELEASE_FAILED",
+    "pending_timeout_reads": "Promise.race bounds result, but an already pending Playwright page.evaluate may still settle later if the adapter is reused in a long-running host. Current intended use remains a one-shot CLI process, which exits after writing the redacted receipt; real Windows process lifecycle not yet validated."
   },
   "safety_policy_for_next_step": {
     "do_not_modify_main": true,
@@ -82,5 +85,5 @@
     "use_existing_dedicated_edge_only": true,
     "no_claim_of_real_success_without_raw_browser_receipt": true
   },
-  "next_acceptance": "On an authorized Windows executor with a clean pinned upstream checkout and an already running verified YuTang dedicated Edge, invoke the source-only probe on a public /video/{id} page, capture original lock acquisition/read/release receipts, and verify no leaked lockfile. Production EXE, main and user's computer remain unchanged in this isolated source-only iteration; if lock unavailable or no visible evidence, report BLOCKED (exit code 2)."
+  "next_acceptance": "Obtain a real authorized Windows source host and already running verified YuTang Edge; run one bounded read-only public video probe under upstream tab-api lock, confirm original receipt/cleanup. Source only; do not claim live acceptance, modify the accepted EXE or trigger paid Windows CI before authorization."
 }
