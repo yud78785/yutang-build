@@ -172,7 +172,8 @@ async function readTransaction(file, expectedShortcut) {
 }
 
 export async function beginUpdateTransaction({
-  updatesDirectory, shortcut, stagedShortcut, backupShortcut, targetExe, targetExeSha256, nonce
+  updatesDirectory, shortcut, stagedShortcut, backupShortcut, targetExe, targetExeSha256,
+  expectedStagedShortcutSha256, nonce
 }) {
   if (![updatesDirectory, shortcut, stagedShortcut, backupShortcut, targetExe]
     .every(item => typeof item === 'string' && path.isAbsolute(item)) ||
@@ -190,7 +191,8 @@ export async function beginUpdateTransaction({
       path.resolve(backupShortcut) !== expectedBackup ||
       path.dirname(expectedTarget) !== directory ||
       !VERSIONED_EXE.test(path.basename(expectedTarget)) ||
-      !HASH.test(targetExeSha256 || '')) {
+      !HASH.test(targetExeSha256 || '') ||
+      !HASH.test(expectedStagedShortcutSha256 || '')) {
     throw new Error('UPDATE_TRANSACTION_ARGUMENTS_INVALID');
   }
   const [oldShortcutSha256, newShortcutSha256, actualTargetSha256, backupExists, temporaryExists, quarantineExists] = await Promise.all([
@@ -204,6 +206,9 @@ export async function beginUpdateTransaction({
   if (!oldShortcutSha256 || !newShortcutSha256 || actualTargetSha256 !== targetExeSha256 ||
       backupExists || temporaryExists || quarantineExists) {
     throw new Error('UPDATE_TRANSACTION_PRECONDITION_FAILED');
+  }
+  if (newShortcutSha256 !== expectedStagedShortcutSha256) {
+    throw new Error('UPDATE_STAGED_SHORTCUT_IDENTITY_MISMATCH');
   }
   const transactionFile = path.join(directory, 'update-transaction.json');
   const transaction = {
