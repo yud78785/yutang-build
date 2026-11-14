@@ -17,8 +17,20 @@ import { runUpdateLauncher } from '../tools/windows147-update-patched/update-lau
 const THUMBPRINT = 'A'.repeat(40);
 const bytes = Buffer.concat([Buffer.from('MZ'), Buffer.alloc(2046, 27)]);
 const sha256 = createHash('sha256').update(bytes).digest('hex');
+const stagedShortcutSha256 = createHash('sha256').update('new shortcut').digest('hex');
 const { publicKey, privateKey } = generateKeyPairSync('ed25519');
 const publicKeyPem = publicKey.export({ type: 'spki', format: 'pem' });
+
+test('Electron 主进程在创建暂存快捷方式后固定 SHA-256 并传给更新启动器', async () => {
+  const patcher = await fs.readFile(new URL('../tools/apply_windows147_update_trust_patch.mjs', import.meta.url), 'utf8');
+  const launcher = await fs.readFile(new URL('../tools/windows147-update-patched/update-launcher.mjs', import.meta.url), 'utf8');
+  const transaction = await fs.readFile(new URL('../tools/windows147-update-patched/update-transaction.mjs', import.meta.url), 'utf8');
+  assert.match(patcher, /const stagedShortcutSha256=createHash\('sha256'\)\.update\(await fs\.readFile\(stagedShortcut\)\)\.digest\('hex'\);/);
+  assert.match(patcher, /stagedShortcut,stagedShortcutSha256,shortcut,nativeShortcutHelperPath/);
+  assert.match(launcher, /expectedStagedShortcutSha256/);
+  assert.match(transaction, /newShortcutSha256 !== expectedStagedShortcutSha256/);
+});
+
 
 test('稳定更新版本使用规范 SemVer，测试版不会被误判为正式版', () => {
   assert.deepEqual(parseVersion('v1.4.5'), [1, 4, 5]);
@@ -262,6 +274,44 @@ function fakeChild(pid) {
   return child;
 }
 
+
+test('Electron 固定的暂存快捷方式 SHA 不匹配时，启动器在等待旧进程前拒绝', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'yutang-launcher-staged-shortcut-tamper-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const updates = path.join(root, 'updates'), desktop = path.join(root, 'desktop');
+  await fs.mkdir(updates, { recursive: true });
+  await fs.mkdir(desktop, { recursive: true });
+  const file = path.join(updates, 'Dafeiyu-Douyin-API-1.4.8-win-x64.exe');
+  const healthFile = path.join(updates, '.health-staged-shortcut-tamper.json');
+  const nonce = '12345678-1234-4234-8234-123456789ac1';
+  const stagedShortcut = path.join(updates, '.shortcut-' + nonce + '.lnk');
+  const shortcut = path.join(desktop, '大肥鱼抖音助手.lnk');
+  await fs.writeFile(file, bytes);
+  await fs.writeFile(stagedShortcut, 'tampered shortcut');
+  await fs.writeFile(shortcut, 'old shortcut');
+  let waitCount = 0, spawnCount = 0;
+  await assert.rejects(runUpdateLauncher({
+    pid: 4444,
+    file,
+    sha256,
+    publisherThumbprint: THUMBPRINT,
+    version: '1.4.8',
+    nonce,
+    healthFile,
+    stagedShortcut,
+    expectedStagedShortcutSha256: stagedShortcutSha256,
+    shortcut,
+    expectedPublisherThumbprint: THUMBPRINT,
+    verifyAuthenticodeImpl: async () => ({ status: 'Valid', thumbprint: THUMBPRINT }),
+    waitForOldProcessExitImpl: async () => { waitCount++; },
+    spawnImpl: () => { spawnCount++; return fakeChild(5554); }
+  }), /UPDATE_STAGED_SHORTCUT_IDENTITY_MISMATCH/);
+  assert.equal(waitCount, 0);
+  assert.equal(spawnCount, 0);
+  assert.equal(await fs.readFile(shortcut, 'utf8'), 'old shortcut');
+  assert.equal(await fs.readFile(stagedShortcut, 'utf8'), 'tampered shortcut');
+});
+
 test('更新启动器等待新版 UI/API 健康回执后才切换桌面快捷方式', async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'yutang-launcher-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
@@ -286,6 +336,7 @@ test('更新启动器等待新版 UI/API 健康回执后才切换桌面快捷方
     nonce,
     healthFile,
     stagedShortcut,
+    expectedStagedShortcutSha256: stagedShortcutSha256,
     shortcut,
     expectedPublisherThumbprint: THUMBPRINT,
     verifyAuthenticodeImpl: async () => ({ status: 'Valid', thumbprint: THUMBPRINT }),
@@ -337,6 +388,7 @@ test('新版未写健康回执时，旧快捷方式保留且新版进程被终�
     nonce,
     healthFile,
     stagedShortcut,
+    expectedStagedShortcutSha256: stagedShortcutSha256,
     shortcut,
     expectedPublisherThumbprint: THUMBPRINT,
     verifyAuthenticodeImpl: async () => ({ status: 'Valid', thumbprint: THUMBPRINT }),
@@ -380,6 +432,7 @@ test('新版在快捷方式切换后的稳定观察期内崩溃时，恢复旧�
     nonce,
     healthFile,
     stagedShortcut,
+    expectedStagedShortcutSha256: stagedShortcutSha256,
     shortcut,
     expectedPublisherThumbprint: THUMBPRINT,
     verifyAuthenticodeImpl: async () => ({ status: 'Valid', thumbprint: THUMBPRINT }),
@@ -437,6 +490,7 @@ test('新版在稳定观察期内正常退出时保留新版快捷方式', async
     nonce,
     healthFile,
     stagedShortcut,
+    expectedStagedShortcutSha256: stagedShortcutSha256,
     shortcut,
     expectedPublisherThumbprint: THUMBPRINT,
     verifyAuthenticodeImpl: async () => ({ status: 'Valid', thumbprint: THUMBPRINT }),
@@ -493,6 +547,7 @@ test('发布者签名不通过时，更新启动器不会创建新版进程或�
     nonce: '12345678-1234-4234-8234-123456789abe',
     healthFile,
     stagedShortcut,
+    expectedStagedShortcutSha256: stagedShortcutSha256,
     shortcut,
     expectedPublisherThumbprint: THUMBPRINT,
     verifyAuthenticodeImpl: async () => { throw new Error('wrong publisher'); },
