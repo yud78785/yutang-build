@@ -67,13 +67,13 @@ test('missing critical upstream exports never reaches connector',async()=>{
  assert.equal(r.reasonCode,'PINNED_UPSTREAM_EXPORTS_MISSING');
 });
 test('controller failure redacted',async()=>{
- const r=await runReadOnlySourcePreflight({...base,load:async()=>[{BrowserController:class{},readPageState:()=>{}},{readCommentDom:()=>{}}],controllerFactory:()=>{throw Error('Windows user path should not leak')}});
+ const r=await runReadOnlySourcePreflight({...base,load:async()=>[{BrowserController:class{},readPageState:()=>{},acquireBrowserOperationLock:async()=>()=>{}},{readCommentDom:()=>{}}],controllerFactory:()=>{throw Error('Windows user path should not leak')}});
  assert.equal(r.reasonCode,'UPSTREAM_CONTROLLER_UNAVAILABLE');assert.doesNotMatch(JSON.stringify(r),/Windows user path/);
 });
 test('valid pinned source plus absent existing Edge must be BLOCKED, not opened',async()=>{
  let count=0;
  const r=await runReadOnlySourcePreflight({...base,
-  load:async()=>[{BrowserController:class{},readPageState:()=>{}},{readCommentDom:()=>{}}],
+  load:async()=>[{BrowserController:class{},readPageState:()=>{},acquireBrowserOperationLock:async()=>()=>{}},{readCommentDom:()=>{}}],
   controllerFactory:()=>({async connectExistingBrowser(){count++;return null;},openBrowser(){throw Error('unsafe')}}),
  });
  assert.equal(r.reasonCode,'DEDICATED_BROWSER_NOT_RUNNING');assert.equal(count,1);
@@ -92,7 +92,7 @@ test('connector may only report evidence from an owned, matching public video ta
   goto(){throw Error('not allowed')},click(){throw Error('not allowed')},fill(){throw Error('not allowed')},};
  const browser={isConnected(){return true},contexts(){return[{pages(){return[page]}}]}};
  const r=await runReadOnlySourcePreflight({...base,
-   load:async()=>[{BrowserController:class{},readPageState:readState},{readCommentDom:readComments}],
+   load:async()=>[{BrowserController:class{},readPageState:readState,acquireBrowserOperationLock:async()=>()=>{}},{readCommentDom:readComments}],
    controllerFactory:()=>({async connectExistingBrowser(){connectCount++;return browser;}}),
  });
  assert.equal(connectCount,1);assert.equal(r.status,'no_visible_evidence');
@@ -106,4 +106,11 @@ test('CLI on actual local environment exits BLOCKED, clean JSON and no new brows
  assert.ok(cp);assert.equal(cp.status,2);const receipt=JSON.parse(cp.stdout.toString());
  if(process.platform!=='win32')assert.equal(receipt.reasonCode,'WINDOWS_REQUIRED');
  assert.equal(receipt.browserLaunchedByThisProbe,false);
+});
+
+test('CLI refuses pinned upstream missing tab-api lock export',async()=>{
+ const r=await runReadOnlySourcePreflight({...base,
+  load:async()=>[{BrowserController:class{},readPageState:()=>{}},{readCommentDom:()=>{}}],
+  controllerFactory:()=>{throw Error('must not instantiate')}});
+ assert.equal(r.reasonCode,'PINNED_UPSTREAM_EXPORTS_MISSING');
 });
