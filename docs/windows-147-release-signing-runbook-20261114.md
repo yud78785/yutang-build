@@ -6,7 +6,7 @@
 
 当前工作分支：`experiment/windows-147-update-recovery-20261114`
 
-最新验收提交：`c169cadb05c1ad8a6cc6139971e65dcf697e8bdd`
+最新候选提交：`268da91f85f4f57285eceb441c712223ee7ae89`
 
 `main` 保持：`4745ed23cbb748cb4b070ed70390703d1261aea0`
 
@@ -305,3 +305,44 @@ Windows 2022 和 Windows 2025 均执行了：
 7. 正式 Release 仍需单独授权。
 
 本次跨平台启动与 Edge 安全验收已完成；下一项阻塞不是再跑旧候选，而是正式发布者信任身份。没有真实身份和签名配置时，保持 fail closed 是正确行为。
+
+
+## 11. 2026-11-14 第二轮候选：并发修改保护回归通过，跨平台复测进行中
+
+本节记录比第 10 节更新的候选。第 10 节 c169 候选的通过记录仍然有效，但不替代 268da 的新 EXE 验收。
+
+### 11.1 本轮身份与状态
+
+- Workflow Run：[43532232402](https://github.com/yud78785/yutang-build/actions/runs/43532232402)
+- 新候选提交：268da91f85f4f57285eceb441c712223ee7ae89
+- Windows 2022 独立 job：132252510423，success，25/25 steps。
+- Windows 2025 独立 job：132252509850，success，25/25 steps。
+- Windows 2022 同一 Windows 2025 EXE 交叉 job：132257080868，in_progress，7/14 steps；正在执行 Edge 安全与生命周期测试。
+- main 未修改，没有合并、正式 Release 或用户电脑安装。
+
+### 11.2 新候选 SHA-256
+
+- Windows 2022 独立构建 Artifact 14087804790：125,303,751 bytes，SHA-256 a37d552ce33c117ef60c4d7d394c8f5ed2c7808a0a75087f07785c92cf74aec6。
+- Windows 2025 独立构建 Artifact 14088736556：125,304,537 bytes，SHA-256 2b3200db6c9be0aa07ea10df8c56077a31c6afec7e16d6806f7700696707367a。
+- 两份 EXE 已分别从 Artifact ZIP 提取并重新计算哈希，与 sidecar、候选回执一致。
+- Windows 2022 独立构建文件与 Windows 2025 独立构建文件不是同一二进制；跨平台交叉测试必须使用 Windows 2025 Artifact 原文件。
+
+### 11.3 并发修改保护
+
+新版 commitShortcut 在替换快捷方式前复核旧入口、暂存入口和备份文件的 SHA-256；发现用户更改时拒绝覆盖。事务恢复逻辑优先报告 CURRENT_SHORTCUT_CHANGED_BY_USER。新增 3 项测试。
+
+两台 Windows runner 均执行：
+- 更新信任模板：17/17 pass，0 fail。
+- 更新事务恢复：15/15 pass，0 fail。
+- 源码回归：145 tests，144 pass，0 fail，1 skipped。
+- 新候选 EXE 便携启动、Renderer、Network Service Token、CDP、两次重启和三种强制退出清理：各自构建 job 成功。
+
+### 11.4 当前唯一验收阻塞
+
+交叉 job 132257080868 已下载并校验 Windows 2025 候选 Artifact 14088736556，目标 SHA-256 为：
+
+2b3200db6c9be0aa07ea10df8c56077a31c6afec7e16d6806f7700696707367a
+
+但 Edge 生命周期步骤尚未完成。必须等待交叉 job 结束并核对交叉回执 SHA 与这个值完全一致，才可以宣布本轮新候选跨平台通过。
+
+签名、Ed25519 公钥、Publisher thumbprint 和真实在线更新仍未配置；自动更新保持 fail closed。
