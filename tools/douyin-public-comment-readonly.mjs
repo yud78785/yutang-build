@@ -1,5 +1,6 @@
-// SOURCE-ONLY helper. Never launches a browser, navigates, clicks, sends messages, or persists content.
-// Inject ONLY the existing pinned upstream readPageState and readCommentDom functions.
+// Source-only, read-only Douyin public comment evidence gate.
+// This module does not start browsers, navigate, click, scroll, post, message or persist data.
+// Only pre-existing pinned readPageState/readCommentDom functions may be passed in.
 const ORIGIN = 'https://www.douyin.com';
 const VIDEO_ID = /^\d{10,30}$/;
 const PRIVATE_BLOCKERS = [
@@ -9,33 +10,38 @@ const PRIVATE_BLOCKERS = [
   ['unsupportedPage', 'UNSUPPORTED_PAGE'],
   ['blocked', 'PAGE_BLOCKED'],
 ];
+const AI_SUMMARY_UNVERIFIED = Object.freeze({ verified: false, reasonCode: 'DEDICATED_AI_SUMMARY_NOT_INSPECTED' });
 
-function validPublicUrl(value, expectedVideoId, videoUrl = false) {
+function validPublicVideoRoute(value, expectedVideoId) {
   if (typeof value !== 'string') return false;
   try {
-    const url = new URL(value);
-    if (url.origin !== ORIGIN || url.username || url.password) return false;
-    if (videoUrl) return url.href === `${ORIGIN}/video/${expectedVideoId}`;
-    return true;
+    const u = new URL(value);
+    // An active video on the recommendation page is insufficient to attribute
+    // an independently rendered comment drawer to the same work.
+    return u.origin === ORIGIN && !u.username && !u.password &&
+      u.pathname === `/video/${expectedVideoId}` && !u.hash;
   } catch { return false; }
 }
-
+function canonicalVideoUrl(value, expectedVideoId) {
+  return value === `${ORIGIN}/video/${expectedVideoId}`;
+}
 function checkState(state, expectedVideoId) {
   if (!state || typeof state !== 'object' || Array.isArray(state)) return 'STATE_UNAVAILABLE';
   for (const [property, code] of PRIVATE_BLOCKERS) if (state[property] === true) return code;
   if (state.videoSelection?.identityConflict === true) return 'VIDEO_IDENTITY_CONFLICT';
+  if (state.videoSelection?.ambiguous === true || state.videoSelection?.candidateCount !== 1) return 'VIDEO_SELECTION_NOT_UNIQUE';
+  if (state.pageKind !== 'video') return 'NOT_SINGLE_VIDEO_PAGE';
   if (state.video?.id !== expectedVideoId) return 'VIDEO_ID_MISMATCH';
   if (!Number.isInteger(state.video?.readyState) || state.video.readyState < 2) return 'VIDEO_NOT_READY';
-  if (!validPublicUrl(state.video?.url, expectedVideoId, true)) return 'VIDEO_URL_UNVERIFIED';
-  if (!validPublicUrl(state.url || state.video.url, expectedVideoId)) return 'PAGE_ORIGIN_UNVERIFIED';
+  if (!canonicalVideoUrl(state.video?.url, expectedVideoId)) return 'VIDEO_URL_UNVERIFIED';
+  if (!validPublicVideoRoute(state.url, expectedVideoId)) return 'PAGE_VIDEO_ROUTE_UNVERIFIED';
   return null;
 }
-
 function fail(reasonCode, expectedVideoId) {
   return {
     status: 'blocked', reasonCode, videoId: expectedVideoId,
     comments: [], visibleCommentCount: 0,
-    aiSummary: { verified: false, reasonCode: 'DEDICATED_AI_SUMMARY_NOT_INSPECTED' },
+    aiSummary: { ...AI_SUMMARY_UNVERIFIED },
   };
 }
 
@@ -43,13 +49,15 @@ function cleanText(value) {
   return value.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '').trim();
 }
 
+// Only claims currently visible, DOM-derived comments; this is not an official
+// Douyin AI-summary, a complete comment inventory, or a proven comment-panel click.
 export function classifyPublicCommentEvidence({ stateBefore, stateAfter, commentRows, expectedVideoId, limit = 12 } = {}) {
   if (typeof expectedVideoId !== 'string' || !VIDEO_ID.test(expectedVideoId)) throw new TypeError('INVALID_VIDEO_ID');
   if (!Number.isInteger(limit) || limit < 1 || limit > 20) throw new TypeError('INVALID_COMMENT_LIMIT');
-  const first = checkState(stateBefore, expectedVideoId);
-  if (first) return fail(first, expectedVideoId);
-  const last = checkState(stateAfter, expectedVideoId);
-  if (last) return fail('POST_OBSERVATION_' + last, expectedVideoId);
+  const beforeReason = checkState(stateBefore, expectedVideoId);
+  if (beforeReason) return fail(beforeReason, expectedVideoId);
+  const afterReason = checkState(stateAfter, expectedVideoId);
+  if (afterReason) return fail('POST_OBSERVATION_' + afterReason, expectedVideoId);
   if (stateBefore.video.url !== stateAfter.video.url || stateBefore.url !== stateAfter.url) {
     return fail('PAGE_CHANGED_WHILE_READING', expectedVideoId);
   }
@@ -76,21 +84,30 @@ export function classifyPublicCommentEvidence({ stateBefore, stateAfter, comment
     status: comments.length ? 'ok' : 'no_visible_comments',
     reasonCode: comments.length ? null : 'COMMENTS_NOT_VISIBLE_OR_NOT_LOADED',
     videoId: expectedVideoId,
+    source: 'visible_public_comment_dom',
+    observationScope: 'currently_visible_loaded_rows_only',
     comments,
     visibleCommentCount: comments.length,
-    aiSummary: { verified: false, reasonCode: 'DEDICATED_AI_SUMMARY_NOT_INSPECTED' },
+    aiSummary: { ...AI_SUMMARY_UNVERIFIED },
   };
 }
 
 export async function observePublicCommentsReadOnly({ page, readPageState, readCommentDom, expectedVideoId, limit = 12 } = {}) {
   if (typeof expectedVideoId !== 'string' || !VIDEO_ID.test(expectedVideoId)) throw new TypeError('INVALID_VIDEO_ID');
+  if (!Number.isInteger(limit) || limit < 1 || limit > 20) throw new TypeError('INVALID_COMMENT_LIMIT');
   if (typeof page?.evaluate !== 'function' || typeof readPageState !== 'function' || typeof readCommentDom !== 'function') {
     throw new TypeError('READ_ONLY_ADAPTER_REQUIRED');
   }
-  const before = await page.evaluate(readPageState);
+  let before;
+  try { before = await page.evaluate(readPageState); }
+  catch { return fail('INITIAL_PAGE_READ_FAILED', expectedVideoId); }
   const reason = checkState(before, expectedVideoId);
   if (reason) return fail(reason, expectedVideoId);
-  const rows = await page.evaluate(readCommentDom, expectedVideoId);
-  const after = await page.evaluate(readPageState);
+  let rows;
+  try { rows = await page.evaluate(readCommentDom, expectedVideoId); }
+  catch { return fail('COMMENT_DOM_READ_FAILED', expectedVideoId); }
+  let after;
+  try { after = await page.evaluate(readPageState); }
+  catch { return fail('FINAL_PAGE_READ_FAILED', expectedVideoId); }
   return classifyPublicCommentEvidence({ stateBefore: before, stateAfter: after, commentRows: rows, expectedVideoId, limit });
 }
