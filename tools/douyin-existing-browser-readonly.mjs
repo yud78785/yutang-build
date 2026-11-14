@@ -86,16 +86,23 @@ export async function inspectExistingDedicatedDouyinVideoReadOnly({
     pages = contexts[0].pages();
     if (!Array.isArray(pages) || pages.length > LIMIT_PAGES) return blocked('DEDICATED_PAGE_LIST_UNVERIFIED', expectedVideoId);
   } catch { return blocked('BROWSER_PAGE_ENUMERATION_FAILED', expectedVideoId); }
+  // Count *all* upstream-owned public Douyin tabs, not only tabs already at
+  // the target video. Otherwise a second owned tab on another work/homepage
+  // could concurrently mutate the same upstream browser session unnoticed.
   const owned = [];
   try {
     for (const page of pages) {
       if (isAbort(signal)) return blocked('CANCELLED_DURING_PAGE_SELECTION', expectedVideoId);
-      if (page?.isClosed?.() !== false || !videoRoute(page.url(), expectedVideoId)) continue;
+      if (page?.isClosed?.() !== false) continue;
+      const address = new URL(page.url());
+      if (address.origin !== ORIGIN || address.username || address.password) continue;
       const label = await page.evaluate(() => window.name);
       if (LABELS.has(label)) owned.push(page);
     }
   } catch { return blocked('OWNED_VIDEO_PAGE_READ_FAILED', expectedVideoId); }
-  if (owned.length !== 1) return blocked(owned.length ? 'OWNED_VIDEO_PAGE_AMBIGUOUS' : 'OWNED_VIDEO_PAGE_NOT_FOUND', expectedVideoId);
+  if (owned.length > 1) return blocked('OWNED_VIDEO_PAGE_AMBIGUOUS', expectedVideoId);
+  if (owned.length === 0 || !videoRoute(owned[0].url(), expectedVideoId))
+    return blocked('OWNED_VIDEO_PAGE_NOT_FOUND', expectedVideoId);
   const page = owned[0];
   let initialUrl, initialDocument;
   try {
@@ -134,6 +141,25 @@ export async function inspectExistingDedicatedDouyinVideoReadOnly({
         finalDocument.locationHref !== initialDocument.locationHref)
       return blocked('DOCUMENT_CHANGED_DURING_INSPECTION', expectedVideoId);
     if (browser.isConnected() !== true) return blocked('BROWSER_DISCONNECTED_DURING_INSPECTION', expectedVideoId);
+    // Re-enumerate the pre-existing context after both reads. A newly opened
+    // upstream-owned tab invalidates evidence even when the original page and
+    // document remained stable. Never scan private/non-Douyin page contents.
+    const finalContexts = browser.contexts();
+    if (!Array.isArray(finalContexts) || finalContexts.length !== 1)
+      return blocked('FINAL_CONTEXT_NOT_UNIQUE', expectedVideoId);
+    const finalPages = finalContexts[0].pages();
+    if (!Array.isArray(finalPages) || finalPages.length > LIMIT_PAGES)
+      return blocked('FINAL_PAGE_LIST_UNVERIFIED', expectedVideoId);
+    const finalOwned = [];
+    for (const candidate of finalPages) {
+      if (isAbort(signal)) return blocked('CANCELLED_DURING_FINAL_PAGE_SELECTION', expectedVideoId);
+      if (candidate?.isClosed?.() !== false) continue;
+      const address = new URL(candidate.url());
+      if (address.origin !== ORIGIN || address.username || address.password) continue;
+      if (LABELS.has(await candidate.evaluate(() => window.name))) finalOwned.push(candidate);
+    }
+    if (finalOwned.length !== 1 || finalOwned[0] !== page)
+      return blocked('OWNED_VIDEO_PAGE_CHANGED_DURING_INSPECTION', expectedVideoId);
   } catch { return blocked('FINAL_BROWSER_STATE_UNAVAILABLE', expectedVideoId); }
   // This receipt refers ONLY to this probe's calls, not concurrent user/agent actions.
   return {
