@@ -20,6 +20,7 @@ const MAX_DELAY = 90000;
 export function validatePublicReceipt({status, page, sandbox, identity, cleaned}) {
   assert.ok(Number.isInteger(status) && status >= 200 && status < 300, 'PUBLIC_DOCUMENT_NOT_HTTP_2XX');
   assert.equal(page?.origin, ORIGIN, 'PUBLIC_PAGE_LEFT_APPROVED_ORIGIN');
+  assert.equal(page?.ready, 'complete', 'PUBLIC_PAGE_NOT_FULLY_LOADED');
   assert.equal(page?.challenged, false, 'PUBLIC_PAGE_LOGIN_OR_CHALLENGE');
   assert.ok(page?.titleLength > 0 && page?.bodyLength >= 30 && page?.bodyChildren > 0 && page?.paintBytes > 2048, 'PUBLIC_PAGE_NOT_RENDERED');
   assert.equal(sandbox?.rendererSandboxVerified, true, 'RENDERER_SANDBOX_MISSING');
@@ -46,6 +47,7 @@ function windowsJson(psCode) {
     { encoding: 'utf8', windowsHide: true, timeout: 12000, maxBuffer: 1_000_000 }).trim();
   if (!raw) return [];
   const value = JSON.parse(raw);
+  if (value == null) return [];
   return Array.isArray(value) ? value : [value];
 }
 function processes() {
@@ -113,13 +115,16 @@ async function inspectOnlinePage() {
     await command(ws,id++,'Page.enable',{},sessionId);
     await command(ws,id++,'Runtime.enable',{},sessionId);
     await command(ws,id++,'Network.enable',{},sessionId);
+    const frameTree=await command(ws,id++,'Page.getFrameTree',{},sessionId);
+    const mainFrameId=frameTree.frameTree?.frame?.id;
+    assert.ok(typeof mainFrameId==='string'&&mainFrameId.length>0,'PUBLIC_MAIN_FRAME_MISSING');
     let responseTimer;
     const responsePromise=new Promise((resolve,reject)=>{
       const receive=e=>{
         let item; try {item=JSON.parse(String(e.data));} catch{return;}
         if(item.sessionId!==sessionId || item.method!=='Network.responseReceived')return;
         const event=item.params;
-        if(event?.type!=='Document'||!String(event.response?.url||'').startsWith(ORIGIN+'/'))return;
+        if(event?.type!=='Document'||event.frameId!==mainFrameId||!String(event.response?.url||'').startsWith(ORIGIN+'/'))return;
         clearTimeout(responseTimer);ws.removeEventListener('message',receive);
         resolve(Number(event.response.status));
       };
@@ -139,6 +144,7 @@ async function inspectOnlinePage() {
       await delay(300);
     }
     const captured=await command(ws,id++,'Page.captureScreenshot',{format:'png',captureBeyondViewport:false},sessionId);
+    if (!page) throw new Error('PUBLIC_DOM_UNAVAILABLE');
     page.paintBytes=typeof captured.data==='string'?Math.floor(captured.data.length*3/4):0;
     return {status,page};
   } finally {try{ws.close();}catch{}}
