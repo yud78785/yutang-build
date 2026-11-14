@@ -366,3 +366,81 @@ Windows 2022 和 Windows 2025 均执行了：
 签名仍为 NotSigned；Ed25519 公钥与 Publisher thumbprint 未配置；自动更新保持 fail closed。正式发行主体确认签名资格后，才进入签名、真实在线升级、错误签名拒绝、启动失败回滚和用户数据保留 E2E。正式 Release 仍需单独授权。
 
 
+## 12. 2026-11-14 最新候选与 Certum Individual Cloud 签名路线复核
+
+本节覆盖本文件此前的候选身份与“签名服务待选”历史记录。历史 SHA、Run 和 Artifact 保留，不互相替代。
+
+### 12.1 最新 Windows 候选身份
+
+- 当前已验收实验分支：`experiment/windows-147-shortcut-pin-20261114`
+- 当前候选提交：`9cc16d7e64d59dc141e9c6687b8dd461934fcc35`
+- 最终工作流：[Run 43541915930](https://github.com/yud78785/yutang-build/actions/runs/43541915930)，completed / success。
+- `main` 仍为 `4745ed23cbb748cb4b070ed70390703d1261aea0`，没有修改。
+- Windows 2025 独立候选 Artifact：`14092434238`，EXE SHA-256：`3201d433df727a5d5fddf8e68a0f69ea1654057e04cfad7833fd3ed7dc241a34`。
+- Windows 2022 独立候选 Artifact：`14092741259`，EXE SHA-256：`19cbafd88291f98b40757b8af99883e32881e59a3a3aa04f980b5d875f1a584c`。
+- Windows 2025 原始 EXE 在 Windows 2022 下载后直接运行，交叉 Artifact：`14093021418`，同一文件 SHA-256：`3201d433df727a5d5fddf8e68a0f69ea1654057e04cfad7833fd3ed7dc241a34`。
+- 两台 Windows 的独立 EXE 测试与同一 EXE 交叉测试均成功；三个 job 全部成功。
+- 三个 Artifact 均为 NOT-RELEASE；未签名、未合并、未发布、未安装到用户电脑。
+
+### 12.2 用户已接受的签名方向与购买边界
+
+用户此前接受的候选方向为 **Certum Individual Cloud Code Signing / SimplySign**：
+
+- 个人自然人证书；不注册公司、不购买 EV。
+- 不使用自签证书冒充正式发布者。
+- 先核对申请资格、身份材料要求、最终价格和签名集成方式。
+- 购买、提交身份证件和付款均暂缓；不得在聊天、GitHub 仓库或 Artifact 中收集身份证件、私钥、TOTP 种子或证书密码。
+
+### 12.3 本轮供应商资料核对
+
+**SSLmentor.rs 的 Certum Individual 产品页**当前列出：
+
+- 1 年：117 EUR（不含 VAT）。
+- 2 年：218 EUR（不含 VAT）。
+- 3 年：291 EUR（不含 VAT）。
+- 产品说明称面向个人开发者，不接受公司作为该 Individual 产品申请人。
+- 产品页列出的验证方式包括证件照片/人脸验证，以及水、电、固定电话或固定网络等地址证明；声称通常 3 个以上工作日。
+- 产品页称证书主体会包含个人姓名（CN 和 Organization）、城市、地区和国家；完整街道地址不写入证书。
+- 页面称 SimplySign App、SimplySign Desktop 和 Microsoft SignTool 免费。
+- 页面还称 SimplySign 云会话最长约 2 小时、每月最多 5,000 次签名、不能导出 PFX，且目前不支持 CI/CD 自动化，未来支持时间未公布。
+
+来源：[SSLmentor.rs Certum Individual Cloud Code Signing](https://www.sslmentor.rs/certum/certumcodecloudindividual)。
+
+**Certum 官方资料交叉核对：**
+
+- 官方 Standard Code Signing in the Cloud 页面当前显示起价 209 EUR，并支持自然人资料、SimplySign 云端密钥和 Microsoft SignTool；云端产品说明列出每月 5,000 次签名限制。
+- Certum 官方页面规定，自 2026-02-27 起单张 Code Signing 证书最长有效期为 **459 天**；多年度产品需要在服务期内重新签发。SSLmentor 页面仍写 460 天，两者存在 1 天差异，必须以 Certum 实际签发规则和订单条款为准。
+- Certum 官方个人申请材料说明要求验证订户身份，个人申请还需订户名下的水、电、电话等公共事业账单；验证方式可能包括自动验证、登记点/身份确认点、公证或持证件照片验证。
+- Certum 官方 SimplySign 激活说明：云端密钥由 SimplySign 服务生成并保存在云端账户。
+- Certum 官方 SignTool 指南要求 Windows 上运行 SimplySign Desktop、通过移动端生成的一次性令牌连接云卡，再使用 SignTool 按证书 thumbprint 签名；示例使用 SHA-256 与 RFC 3161 时间戳服务 `http://time.certum.pl`，并以 `signtool verify /pa /all` 验证。
+
+官方来源：
+- [Standard Code Signing in the Cloud](https://shop.certum.eu/standard-code-signing-in-the-cloud.html)
+- [Code Signing required documents](https://support.certum.eu/en/code-signing-required-documents/)
+- [Activate Code Signing in the Cloud](https://support.certum.eu/en/how-to-activate-code-signing-simplysign/)
+- [Certum SignTool / SimplySign instructions](https://support.certum.eu/en/signing-the-code-using-tools-like-signtool-and-jarsigner-instruction/)
+- [Certum Partner Network](https://shop.certum.eu/certum-reseller-points-map)
+
+注意：SSLmentor 页面展示了 Certum 授权合作伙伴标识，但本轮没有通过 Certum 动态合作伙伴目录独立确认该商户的具体授权记录；也没有获得对用户个人申请的正式报价或资格确认。Certum 合作网络官方页面列出 Serbia 为服务国家之一，但这不等于某一具体身份证件已通过验证。
+
+### 12.4 对 YuTang 的技术影响
+
+1. Certum Individual 证书会把个人姓名及城市/地区/国家放入公开的签名者身份信息；若不希望软件用户看到这些信息，该个人证书路线不适合。
+2. Standard Code Signing 可建立 Microsoft SmartScreen 声誉，但不保证首次下载立即没有 SmartScreen 警告；不能把“有签名”宣传成“保证绕过 SmartScreen”。
+3. SSLmentor 当前 FAQ 声称 SimplySign Individual 目前不支持 CI/CD，且 PFX 不可导出。不能把该证书私钥复制到 GitHub Secrets，也不能假设 GitHub Hosted Runner 可以无人值守地使用 SimplySign Desktop。
+4. 因此若继续选择该路线，合理流程是：GitHub Actions 继续构建和验收未签名候选；在受控的 Windows 签名工作站上，由证书持有人通过 SimplySign Desktop 交互授权，使用官方 SignTool 对**已通过同一 SHA 双平台验收的确切 EXE**签名；签名后重新计算 SHA-256，再把签名版作为新的候选交给 Windows 2022 / 2025 重新验收。不得把签名前的通过结果套用到签名后的二进制。
+5. Ed25519 更新清单签名仍是独立信任层。其私钥必须与 Authenticode 云证书分开保管；客户端只嵌入 Ed25519 公钥和真实 Publisher thumbprint。当前两个常量仍为空，自动更新继续 fail closed。
+6. Open Source Code Signing 低价产品不适合 YuTang 的商业分发用途：Certum 官方要求公开可识别的开源项目，并明确商业分发可能导致撤销。
+
+### 12.5 下一步（不购买、不做身份验证）
+
+在购买前只需要供应商书面确认以下事实，不提交真实身份材料：
+
+- SSLmentor 的 Individual 产品能否为居住/申请资料位于 Serbia 的自然人签发；具体可接受哪些塞尔维亚身份证件与地址证明。
+- 117 EUR 的一年期报价是否仍有效、最终 VAT/税务处理、付款币种及退款条款。
+- 最终签发的证书是否确为 Certum Standard Code Signing CA 下的商业 Code Signing 证书，而非 Open Source Code Signing。
+- 459 天上限与多年度 reissue 的实际规则，以 Certum CA 当前政策为准。
+- 通过 SimplySign Desktop + SignTool 在一台受控 Windows 工作站手动签名的支持方式；明确不依赖 PFX 导出或未审查的第三方云 API。
+- 签名者姓名/城市/地区/国家会公开显示，用户需在付款前知情决定是否接受。
+
+在上述确认和用户另行决定购买之前，不购买、不提交身份材料、不配置真实签名密钥、不打开自动更新、不创建正式 Release。不要因为候选 EXE 已通过 Windows 安全测试就降低这些边界。
