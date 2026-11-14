@@ -34,11 +34,11 @@ Do not paste this source sketch into the user's CMD: the user has a packaged EXE
 
 ## Evidence and limits
 
-- **New existing-browser adapter:** 15/15 locally run Node 22.16.0/Linux deterministic mocked-browser tests passed.
+- **New existing-browser adapter:** 19/19 locally run Node 22.16.0/Linux deterministic mocked-browser tests passed.
 - **Prior source-only comment and AI-entry readers:** 39/39 local offline tests passed.
-- **Combined 54/54 offline tests**; this is NOT live Douyin, CDP, Windows, actual comment reading or official AI-summary generation acceptance.
-- Byte-exact Git blob SHA-1 of new source: `c6cb78af8e91f24b4af5af0d18d8496a196e33a7`.
-- Byte-exact Git blob SHA-1 of new tests: `21a8c85709eb3fcf009386a7832c3c0dd93f3865`.
+- **Combined 72/72 offline tests (including 14 CLI tests)**; this is NOT live Douyin, CDP, Windows, actual comment reading or official AI-summary generation acceptance.
+- Byte-exact Git blob SHA-1 of new source: `85e8a1fcdac48a97e22621e6f35598bb6aac1072`.
+- Byte-exact Git blob SHA-1 of new tests: `d064bc1a832ca6254909c70f3b2c66f1d81c1fb8`.
 - Existing verified unsigned EXE remains SHA-256 `3201d433df727a5d5fddf8e68a0f69ea1654057e04cfad7833fd3ed7dc241a34`.
 - [Windows 2025 genuine public homepage test](https://github.com/yud78785/yutang-build/actions/runs/43643545361) passed earlier; it was **not** a video/comment test.
 
@@ -53,8 +53,8 @@ The original host wrapper checked only that the video URL remained unchanged. A 
 ## 2026-11-15 — optional one-shot source CLI (isolated preflight only)
 
 A previously missing executable entry now exists in this experimental source branch:
-- `tools/run-douyin-existing-browser-readonly.mjs` (Git blob SHA-1 `75ef1d4a463b88582d0519a2b9c400d29580920c`)
-- `tests/douyin-existing-browser-cli.test.mjs` (Git blob SHA-1 `8d9fe7075a8126e062c047aed5aaa40697c3238c`)
+- `tools/run-douyin-existing-browser-readonly.mjs` (Git blob SHA-1 `81210460f95e5e7b680a8b2fc61849fe7f701d12`)
+- `tests/douyin-existing-browser-cli.test.mjs` (Git blob SHA-1 `2aaebb17e1e702832492a805a30497bd31c4c2dc`)
 
 The entry supports exactly `--video-id` (10–30 decimal digits) and `--upstream-root` (absolute path). It refuses non-Windows hosts, Node below v22.13, missing upstream source, non-matching Git HEAD, dirty tracked files, missing upstream exported functions, disconnected dedicated Edge, or an unowned/unverified public video tab. Pin: upstream `LockyBee/dsh-douyin-agent@9c49833078f4b4d18b9211ef86d024e7f2e15739`.
 
@@ -64,8 +64,23 @@ On a **separately authorized Windows source checkout that already exists**, an e
 node tools/run-douyin-existing-browser-readonly.mjs --video-id <verified-public-video-id> --upstream-root <absolute-clean-upstream-source-checkout>
 ```
 
-**Not a command for end users to execute now:** this branch is not inside the accepted Windows EXE, and the user's current desktop cannot be operated from this ChatGPT conversation. The command does not install or launch a browser, create tabs, navigate, login or click; it only attempts to connect an existing verified profile and prints one redacted JSON receipt. A `blocked` receipt exits with code 2, without claiming that a live read happened. When the runner exits it drops its own CDP connection without calling `browser.close()`, so it does not intentionally close the existing Edge.
+**Not a command for end users to execute now:** this branch is not inside the accepted Windows EXE, and the user's current desktop cannot be operated from this ChatGPT conversation. The command does not install or launch a browser, create tabs, navigate, login or click; it only attempts to connect an existing verified profile and prints one redacted JSON receipt. Any receipt without actually visible comments or an AI-entry observation exits with code 2, without claiming that a live read happened. When the runner exits it drops its own CDP connection without calling `browser.close()`, so it does not intentionally close the existing Edge.
 
-**Exact-byte regression:** Node.js 22.16.0 on isolated Linux; 14/14 additional checks pass, including a real spawned CLI invocation that correctly returned `WINDOWS_REQUIRED`, and explicit refusal of a wrong-Git-commit local checkout. Combined with 54 previous tests, **68/68 pass, 0 failed**. This does NOT constitute a live Windows browser test or a real Douyin comment/iframe validation. No EXE changed, no paid Windows CI triggered, no `main` changes, no signing or release.
+**Exact-byte regression:** Node.js 22.16.0 on isolated Linux; 14/14 additional checks pass, including a real spawned CLI invocation that correctly returned `WINDOWS_REQUIRED`, and explicit refusal of a wrong-Git-commit local checkout. Combined with 39 earlier reader checks and 19 existing-browser tests, **72/72 pass, 0 failed**. This does NOT constitute a live Windows browser test or a real Douyin comment/iframe validation. No EXE changed, no paid Windows CI triggered, no `main` changes, no signing or release.
 
 **Known limitation:** upstream source runtime dependencies must already be present; this branch does not install them. The CLI's Git HEAD/working-tree check is a source-version guard, not an audit of every installed dependency. Real site screenshots, comments and AI summary contents remain unverified.
+
+## 2026-11-15 — second independent audit: false-success and cross-tab race fixes
+
+**Current source-only regression:** Node 22.16.0/Linux, **72/72 pass, 0 fail**, plus direct invocation of the CLI returning a truthful `WINDOWS_REQUIRED` receipt and exit code 2 in this isolated environment. These are mocked browser tests, not actual Windows or Douyin execution.
+
+Two externally significant defects were reproduced and repaired:
+
+1. **Duplicate owner cross-video false acceptance.** The earlier helper counted only tabs already at the expected video. Tests created a second owned public Douyin tab on a different video or homepage: two tests **failed on the pre-fix code**, showing false acceptance. The fixed helper scans only public Douyin tabs for the pinned upstream owner labels before reading, and again after reading. A new owned tab created while reading invalidates the entire receipt. Unrelated private/off-origin pages are not inspected.
+2. **Empty evidence reported as success.** The earlier wrapper returned `read_only_evidence` when both visible comments and AI-summary entry were absent. The fixed wrapper returns `no_visible_evidence` with `NO_PUBLIC_COMMENTS_OR_AI_ENTRY_VISIBLE` instead. The standalone CLI now exits 2 for every status other than `read_only_evidence`; it does not elevate an empty page to PASS. Seeing an AI entry only does not imply the AI-generated summary text was read.
+
+**Exact Git blob IDs for the tested updated files:** `tools/douyin-existing-browser-readonly.mjs` = `85e8a1fcdac48a97e22621e6f35598bb6aac1072`; corresponding tests = `d064bc1a832ca6254909c70f3b2c66f1d81c1fb8`; `tools/run-douyin-existing-browser-readonly.mjs` = `81210460f95e5e7b680a8b2fc61849fe7f701d12`; corresponding CLI tests = `2aaebb17e1e702832492a805a30497bd31c4c2dc`.
+
+**Important remaining race:** upstream `core.mjs` uses the disk-backed `tab-api` operation lock. This no-write probe deliberately does **not** acquire that lock, because acquiring it would create and delete lock files on the user's machine. Pre/post tab and document identity checks reduce stale-result risk but **do not provide transactional isolation** from concurrent upstream operations. Do not claim full race freedom or production acceptance; do not run against an active autonomous-watch session without separate review.
+
+The Windows user currently has a packaged EXE; the source-only CLI requires an existing clean pinned upstream source checkout and its dependencies, so it is not a one-click update for that EXE. A real Windows Edge / Douyin public-video observation remains the only decisive acceptance milestone. No paid CI, `main` changes, EXE modification, signing or publishing occurred in this experiment.
