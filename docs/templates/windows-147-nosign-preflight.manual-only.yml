@@ -1,0 +1,67 @@
+# TEMPLATE ONLY. Stored under docs/templates, not .github/workflows.
+# DO NOT promote or dispatch without explicit Windows Actions authorization.
+name: YuTang 1.4.7 unsigned EXE signing preflight - manual only NOT RELEASE
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: yutang-nosign-preflight-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  windows-nosign:
+    if: github.event_name == 'workflow_dispatch'
+    name: ${{ matrix.os }} - accepted unsigned EXE no-sign PowerShell
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-2025]
+    steps:
+      - name: Checkout immutable no-sign preflight code
+        uses: actions/checkout@v4
+        with:
+          ref: c8cf9be7c175d00774e7e5cc5a763d587b77ec6e
+          persist-credentials: false
+
+      - name: Download exact accepted unsigned Windows 2025 candidate
+        uses: actions/download-artifact@v4
+        with:
+          repository: yud78785/yutang-build
+          run-id: 43541915930
+          name: YuTang-OpenRouter-Desktop-1.4.7-SecurityHardening-windows-2025-CANDIDATE-NOT-RELEASE
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/yutang-unsigned-147
+
+      - name: Verify unsigned EXE digest and run PowerShell no-sign checks
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Join-Path '${{ runner.temp }}' 'yutang-unsigned-147\desktop\release-api\Dafeiyu-Douyin-API-1.4.7-win-x64.exe'
+          if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) {
+            throw 'PINNED_UNSIGNED_EXE_NOT_FOUND'
+          }
+          $expectedSha = '3201d433df727a5d5fddf8e68a0f69ea1654057e04cfad7833fd3ed7dc241a34'
+          $before = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($before -cne $expectedSha) { throw 'UNSIGNED_EXE_SHA256_MISMATCH' }
+          if ((Get-Item -LiteralPath $exe).Length -ne 125446071) { throw 'UNSIGNED_EXE_SIZE_MISMATCH' }
+          $harness = Join-Path '${{ github.workspace }}' 'tests\Invoke-Windows147SigningNoSignPreflight.ps1'
+          $receiptText = & powershell.exe -NoLogo -NoProfile -NonInteractive -File $harness -UnsignedExe $exe
+          if ($LASTEXITCODE -ne 0) { throw 'WINDOWS_POWERSHELL_NOSIGN_PREFLIGHT_FAILED' }
+          $receipt = $receiptText | ConvertFrom-Json
+          if ($receipt.status -cne 'PASS_WINDOWS_POWERSHELL_NOSIGN_ONLY' -or
+              $receipt.authenticodeSigned -ne $false -or
+              $receipt.signedExeAcceptance -ne $false -or
+              $receipt.publicationAuthorized -ne $false) {
+            throw 'NONSIGN_RECEIPT_REJECTED'
+          }
+          $after = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($after -cne $expectedSha) { throw 'UNSIGNED_EXE_CHANGED_AFTER_PREFLIGHT' }
+          # This message is NOT a signed EXE acceptance or a release approval.
+          Write-Host ('WINDOWS_NOSIGN_ONLY_RECEIPT ' + ($receipt | ConvertTo-Json -Compress -Depth 4))
