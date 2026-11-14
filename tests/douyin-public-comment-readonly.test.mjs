@@ -119,3 +119,11 @@ test('non-boolean pending status cannot be silently treated as a published comme
  const r=inspect({commentRows:{rows:[{...row('尚未发布'),pending:'true'}]}});
  assert.equal(r.status,'blocked');assert.deepEqual(r.comments,[]);
 });
+
+test('comment limit never skips late cross-video evidence validation',()=>{
+ const rows=Array.from({length:20},(_,i)=>({...row('评论'+i),commentId:String(i+1)}));
+ rows[19]={...rows[19],videoId:'7523456789012345678'};
+ const r=inspect({commentRows:{rows},limit:5});
+ assert.equal(r.status,'blocked');assert.equal(r.reasonCode,'COMMENT_ROW_NOT_BOUND_TO_VIDEO');
+ assert.deepEqual(r.comments,[]);
+});
