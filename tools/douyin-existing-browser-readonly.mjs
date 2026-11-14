@@ -97,10 +97,17 @@ export async function inspectExistingDedicatedDouyinVideoReadOnly({
   } catch { return blocked('OWNED_VIDEO_PAGE_READ_FAILED', expectedVideoId); }
   if (owned.length !== 1) return blocked(owned.length ? 'OWNED_VIDEO_PAGE_AMBIGUOUS' : 'OWNED_VIDEO_PAGE_NOT_FOUND', expectedVideoId);
   const page = owned[0];
-  let initialUrl;
-  try { initialUrl = page.url(); }
-  catch { return blocked('INITIAL_PAGE_URL_UNAVAILABLE', expectedVideoId); }
-  if (!videoRoute(initialUrl, expectedVideoId)) return blocked('INITIAL_VIDEO_ROUTE_MISMATCH', expectedVideoId);
+  let initialUrl, initialDocument;
+  try {
+    initialUrl = page.url();
+    initialDocument = await page.evaluate(() => ({
+      label: window.name, documentOrigin: performance.timeOrigin, locationHref: location.href,
+    }));
+  } catch { return blocked('INITIAL_DOCUMENT_IDENTITY_UNAVAILABLE', expectedVideoId); }
+  if (!videoRoute(initialUrl, expectedVideoId) ||
+      !initialDocument || !LABELS.has(initialDocument.label) ||
+      !Number.isFinite(initialDocument.documentOrigin) || initialDocument.documentOrigin <= 0 ||
+      initialDocument.locationHref !== initialUrl) return blocked('INITIAL_DOCUMENT_IDENTITY_MISMATCH', expectedVideoId);
 
   let commentResult, aiResult;
   try {
@@ -117,6 +124,15 @@ export async function inspectExistingDedicatedDouyinVideoReadOnly({
   if (isAbort(signal)) return blocked('CANCELLED_AFTER_AI_ENTRY', expectedVideoId);
   try {
     if (page.isClosed() || page.url() !== initialUrl) return blocked('PAGE_CHANGED_DURING_INSPECTION', expectedVideoId);
+    const finalDocument = await page.evaluate(() => ({
+      label: window.name, documentOrigin: performance.timeOrigin, locationHref: location.href,
+    }));
+    // A navigation back to the same URL can otherwise falsely preserve a stale
+    // comment/AI-entry receipt. Never copy raw URL or document timing into output.
+    if (!finalDocument || finalDocument.label !== initialDocument.label ||
+        finalDocument.documentOrigin !== initialDocument.documentOrigin ||
+        finalDocument.locationHref !== initialDocument.locationHref)
+      return blocked('DOCUMENT_CHANGED_DURING_INSPECTION', expectedVideoId);
     if (browser.isConnected() !== true) return blocked('BROWSER_DISCONNECTED_DURING_INSPECTION', expectedVideoId);
   } catch { return blocked('FINAL_BROWSER_STATE_UNAVAILABLE', expectedVideoId); }
   // This receipt refers ONLY to this probe's calls, not concurrent user/agent actions.
