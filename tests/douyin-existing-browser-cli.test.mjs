@@ -95,7 +95,8 @@ test('connector may only report evidence from an owned, matching public video ta
    load:async()=>[{BrowserController:class{},readPageState:readState},{readCommentDom:readComments}],
    controllerFactory:()=>({async connectExistingBrowser(){connectCount++;return browser;}}),
  });
- assert.equal(connectCount,1);assert.equal(r.status,'read_only_evidence');
+ assert.equal(connectCount,1);assert.equal(r.status,'no_visible_evidence');
+ assert.equal(r.reasonCode,'NO_PUBLIC_COMMENTS_OR_AI_ENTRY_VISIBLE');
  assert.equal(r.publicCommentsStatus,'no_visible_comments');assert.equal(r.aiSummaryEntryVisible,false);
  assert.equal(r.aiSummaryGenerated,false);assert.equal(r.clickedByThisProbe,false);
 });
