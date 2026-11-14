@@ -86,6 +86,13 @@ async function build(options) {
     /^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/.test(String(meta.version)) &&
     meta.tag === 'v' + meta.version && normalizedThumbprint(meta.authenticodeThumbprint) === thumb,
     'METADATA_IDENTITY_MISMATCH');
+  // A signed release must have a separate signed-file acceptance run and artifact.
+  // These historical IDs belong to the unsigned EXE only, even if its code is identical.
+  if (meta.version === '1.4.7' &&
+      (meta.candidate?.workflowRunId === 43541915930 ||
+       [14092434238, 14092741259, 14093021418].includes(meta.candidate?.artifactId))) {
+    throw new Error('UNSIGNED_CANDIDATE_IDS_NOT_SIGNED_PROVENANCE');
+  }
   // One canonical implementation for schema, hashing, serialization and Ed25519.
   const manifest = makeManifest({
     version: meta.version,
