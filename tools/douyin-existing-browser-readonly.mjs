@@ -1,7 +1,8 @@
 // Optional host-side integration for YuTang's EXISTING dedicated Edge session.
 // Calls only upstream connectExistingBrowser (never connect, openBrowser, navigate or create).
 // Read-only page functions are injected by the pinned runtime; this file contains
-// no file writes, credentials, CDP commands or model requests.
+// no persistent data writes, credentials, direct CDP commands or model requests.
+// Its injected upstream tab-api lock provider creates/removes a temporary lock file.
 const ORIGIN = 'https://www.douyin.com';
 const VIDEO = /^\d{10,30}$/;
 const LABELS = new Set(['deepseek-douyin-api', 'deepseek-douyin-dsh']);
