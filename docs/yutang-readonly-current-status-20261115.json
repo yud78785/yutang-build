@@ -32,21 +32,21 @@
       "path": "tools/douyin-ai-summary-entry-readonly.mjs"
     },
     "existing_edge_reader": {
-      "passed": 19,
-      "blob": "85e8a1fcdac48a97e22621e6f35598bb6aac1072",
+      "passed": 23,
+      "blob": "b39372e846fcd1931ecc23d41c04e5b6240329f5",
       "path": "tools/douyin-existing-browser-readonly.mjs",
       "tests_path": "tests/douyin-existing-browser-readonly.test.mjs",
-      "tests_blob": "d064bc1a832ca6254909c70f3b2c66f1d81c1fb8"
+      "tests_blob": "35bbdcc356c8982fef8cc90b0a6f1551f386d46c"
     },
-    "passed_total": 72,
+    "passed_total": 77,
     "failed_total": 0,
-    "scope_limitation": "72 passing deterministic checks with Node.js 22.16.0 on isolated Linux plus a real CLI environment-gate invocation returning WINDOWS_REQUIRED, exit=2. No actual Windows/Douyin browser run.",
+    "scope_limitation": "77 passing deterministic unit/integration tests on Node.js 22.16.0 isolated Linux, including a real CLI environment gate that returns WINDOWS_REQUIRED. Upstream lock API was verified by source inspection but NOT exercised against a real Windows lockfile, Edge, or Douyin.",
     "source_preflight_cli": {
-      "passed": 14,
+      "passed": 15,
       "path": "tools/run-douyin-existing-browser-readonly.mjs",
-      "blob": "81210460f95e5e7b680a8b2fc61849fe7f701d12",
+      "blob": "928fca3f91430caba790f26d92578789623a7aa9",
       "tests_path": "tests/douyin-existing-browser-cli.test.mjs",
-      "tests_blob": "2aaebb17e1e702832492a805a30497bd31c4c2dc"
+      "tests_blob": "9498763644db6b88809063b59d11bf4acf19c219"
     },
     "regression_reproduced_pre_fix": {
       "details": "Old source incorrectly accepted an expected video tab when an additional upstream-owned public Douyin tab was on another video or homepage.",
@@ -68,7 +68,9 @@
     "no_content_receipt": "no_visible_evidence",
     "no_content_cli_exit_code": 2,
     "concurrent_upstream_operation_lock_held": false,
-    "concurrent_operations_race_eliminated": false
+    "concurrent_operations_race_eliminated": false,
+    "concurrent_upstream_operation_lock_required_in_candidate": true,
+    "lock_behavior": "Source candidate now requires upstream acquireBrowserOperationLock('tab-api') before public-comment/AI reading, and awaits release for all outcomes. It creates/removes temporary browser operation lock files ONLY when invoked on a future Windows host, so it no longer claims zero filesystem writes. Cooperative upstream operations are serialized; manual/user activity or other noncooperating browser actors remain outside the lock."
   },
   "safety_policy_for_next_step": {
     "do_not_modify_main": true,
@@ -80,5 +82,5 @@
     "use_existing_dedicated_edge_only": true,
     "no_claim_of_real_success_without_raw_browser_receipt": true
   },
-  "next_acceptance": "Actual Windows acceptance still requires a separately available Windows source host, a clean pinned upstream checkout and an already-running, verified dedicated YuTang Edge on one public /video/{id} tab. The source-only reader now blocks duplicate upstream-owned Douyin tabs before and after reading, and returns no_visible_evidence (exit 2) if neither comments nor AI entry is present. Upstream tab-api operation lock is NOT acquired because this no-write probe must not create lockfiles; no concurrent-operation safety guarantee is claimed. Do not run new CI, login, modify main/EXE or publish without separate instruction."
+  "next_acceptance": "On an authorized Windows executor with a clean pinned upstream checkout and an already running verified YuTang dedicated Edge, invoke the source-only probe on a public /video/{id} page, capture original lock acquisition/read/release receipts, and verify no leaked lockfile. Production EXE, main and user's computer remain unchanged in this isolated source-only iteration; if lock unavailable or no visible evidence, report BLOCKED (exit code 2)."
 }
