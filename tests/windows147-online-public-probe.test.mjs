@@ -94,3 +94,16 @@ test('cleanup diagnostic logs only bounded role and PID, not command line',()=>{
  assert.match(s,/remaining: left\.slice\(0,40\)/);
  assert.doesNotMatch(s,/JSON\.stringify\(.*CommandLine/);
 });
+
+test('verified internal desktop target is captured before browser API can fail',()=>{
+ const early=s.indexOf("desktopTarget=await until(()=>");
+ const navigate=s.indexOf("const opened=await fetch(desktop.origin+'/api/browser/open'");
+ assert.ok(early>0 && navigate>early,'identity must be recorded before navigation');
+ assert.match(s,/INNER_DESKTOP_IDENTITY_NOT_READY/);
+});
+test('early error path attempts exact verified cleanup, never blind inner-process kill',()=>{
+ assert.match(s,/if\(!desktopTarget && Number\.isSafeInteger\(backendPid\) && backendPid>0\)/);
+ assert.match(s,/desktopTarget=verifyDesktopStopTarget\(remainingRows/);
+ assert.match(s,/EARLY_DESKTOP_IDENTITY_NOT_VERIFIED/);
+ assert.match(s,/stopVerifiedDesktop\(desktopTarget\)/);
+});

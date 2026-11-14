@@ -272,6 +272,17 @@ export async function run(exe) {
     assert.equal(desktop.configured,false,'MODEL_CONFIG_MUST_BE_ABSENT');
     backendPid=Number(desktop.backendPid);
     assert.ok(Number.isSafeInteger(backendPid)&&backendPid>0,'API_WORKER_PID_INVALID');
+    // Capture the identity-verified inner desktop BEFORE browser API navigation, so
+    // a network error can still trigger the same owned Job Object shutdown.
+    desktopTarget=await until(()=>{
+      const earlyRows=processes();
+      try {
+        const target=verifyDesktopStopTarget(earlyRows,{exePid:child.pid,exeFile:exe,backendPid});
+        for(const p of earlyRows)if(Number(p.ProcessId)===child.pid || Number(p.ProcessId)===target.pid ||
+          hasHostAncestor(Number(p.ProcessId),target.pid,earlyRows))trackedOwnedPids.add(Number(p.ProcessId));
+        return target;
+      } catch { return null; }
+    },7500,'INNER_DESKTOP_IDENTITY_NOT_READY');
     assert.match(desktop.origin,/^http:\/\/127\.0\.0\.1:\d{4,5}$/,'LOCAL_API_NOT_LOOPBACK');
     const boot=await fetch(desktop.origin+'/api/bootstrap',{signal:AbortSignal.timeout(5000)});
     assert.equal(boot.status,200,'LOCAL_BOOTSTRAP_FAILED');
@@ -328,6 +339,15 @@ export async function run(exe) {
     throw error;
   } finally {
     let cleanupError=null;
+    if(!desktopTarget && Number.isSafeInteger(backendPid) && backendPid>0) {
+      try {
+        const remainingRows=processes();
+        desktopTarget=verifyDesktopStopTarget(remainingRows,{exePid:child.pid,exeFile:exe,backendPid});
+        for(const p of remainingRows)if(Number(p.ProcessId)===child.pid || Number(p.ProcessId)===desktopTarget.pid ||
+          hasHostAncestor(Number(p.ProcessId),desktopTarget.pid,remainingRows))
+          trackedOwnedPids.add(Number(p.ProcessId));
+      } catch { cleanupError=new Error('EARLY_DESKTOP_IDENTITY_NOT_VERIFIED'); }
+    }
     if(desktopTarget)try{stopVerifiedDesktop(desktopTarget);}catch{cleanupError=new Error('VERIFIED_DESKTOP_STOP_FAILED');}
     if(!exited)try{child.kill();}catch{}
     try {
