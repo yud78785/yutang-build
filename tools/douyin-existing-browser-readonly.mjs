@@ -1,0 +1,135 @@
+// Optional host-side integration for YuTang's EXISTING dedicated Edge session.
+// Calls only upstream connectExistingBrowser (never connect, openBrowser, navigate or create).
+// Read-only page functions are injected by the pinned runtime; this file contains
+// no file writes, credentials, CDP commands or model requests.
+const ORIGIN = 'https://www.douyin.com';
+const VIDEO = /^\d{10,30}$/;
+const LABELS = new Set(['deepseek-douyin-api', 'deepseek-douyin-dsh']);
+const LIMIT_PAGES = 30;
+
+function blocked(reasonCode, videoId) {
+  return {
+    status: 'blocked', reasonCode, videoId,
+    connectionMethod: 'upstream_connectExistingBrowser',
+    comments: [], aiSummaryEntryVisible: false, aiSummaryGenerated: false,
+    browserLaunchedByThisProbe: false, navigationByThisProbe: false,
+    clickedByThisProbe: false, wroteByThisProbe: false,
+  };
+}
+function videoRoute(value, expectedId) {
+  if (typeof value !== 'string') return false;
+  try {
+    const u = new URL(value);
+    return u.origin === ORIGIN && !u.username && !u.password &&
+      u.pathname === `/video/${expectedId}` && !u.hash &&
+      ['aweme_id', 'modal_id'].every(key => u.searchParams.getAll(key).every(v => v === expectedId));
+  } catch { return false; }
+}
+function isAbort(signal) { return signal?.aborted === true; }
+function safeCode(value) { return typeof value === 'string' && /^[A-Z0-9_]{1,80}$/.test(value) ? value : 'UNKNOWN'; }
+function validCommentReceipt(receipt, expectedVideoId, limit) {
+  if (!receipt || receipt.videoId !== expectedVideoId ||
+      !['ok', 'no_visible_comments'].includes(receipt.status) ||
+      receipt.source !== 'visible_public_comment_dom' ||
+      receipt.observationScope !== 'currently_visible_loaded_rows_only' ||
+      !Array.isArray(receipt.comments) || receipt.comments.length > limit ||
+      receipt.visibleCommentCount !== receipt.comments.length) return false;
+  if (receipt.status === 'ok' && receipt.comments.length === 0) return false;
+  if (receipt.status === 'no_visible_comments' && receipt.comments.length !== 0) return false;
+  return receipt.comments.every(row => row && typeof row === 'object' &&
+    typeof row.text === 'string' && row.text.length > 0 && row.text.length <= 512 &&
+    (row.commentId === null || typeof row.commentId === 'string' && /^\d{1,64}$/.test(row.commentId)));
+}
+function validAiReceipt(receipt, expectedVideoId) {
+  return receipt && receipt.videoId === expectedVideoId &&
+    receipt.evidenceSource === 'visible_official_ai_iframe_entry_only' &&
+    ['entry_visible', 'not_observed'].includes(receipt.status) &&
+    receipt.aiSummaryEntryVisible === (receipt.status === 'entry_visible') &&
+    receipt.aiSummaryGenerated === false && receipt.aiSummaryText === null &&
+    Number.isSafeInteger(receipt.matchingFrameCount) && receipt.matchingFrameCount >= 0 && receipt.matchingFrameCount <= 1;
+}
+
+/**
+ * Executed only from a host already carrying pinned upstream BrowserController.
+ * A validated connection is required; the function never boots Edge or opens a tab.
+ *
+ * @param {Object} args
+ * @param {Object} args.controller - existing upstream BrowserController instance
+ * @param {Function} args.readPageState - pinned upstream core.mjs export
+ * @param {Function} args.readCommentDom - pinned upstream comment-browser.mjs export
+ * @param {Function} args.observeComments - read-only module's observePublicCommentsReadOnly
+ * @param {Function} args.inspectSummary - read-only module's inspectDouyinAiSummaryEntryReadOnly
+ */
+export async function inspectExistingDedicatedDouyinVideoReadOnly({
+  controller, readPageState, readCommentDom, observeComments, inspectSummary,
+  expectedVideoId, limit = 12, signal,
+} = {}) {
+  if (typeof expectedVideoId !== 'string' || !VIDEO.test(expectedVideoId)) throw new TypeError('INVALID_VIDEO_ID');
+  if (!Number.isInteger(limit) || limit < 1 || limit > 20) throw new TypeError('INVALID_LIMIT');
+  if (typeof controller?.connectExistingBrowser !== 'function' ||
+      typeof readPageState !== 'function' || typeof readCommentDom !== 'function' ||
+      typeof observeComments !== 'function' || typeof inspectSummary !== 'function') {
+    throw new TypeError('PINNED_RUNTIME_READERS_REQUIRED');
+  }
+  if (isAbort(signal)) return blocked('CANCELLED_BEFORE_READ', expectedVideoId);
+  let browser;
+  try { browser = await controller.connectExistingBrowser({ signal }); }
+  catch { return blocked('EXISTING_BROWSER_CONNECTION_FAILED', expectedVideoId); }
+  if (isAbort(signal)) return blocked('CANCELLED_AFTER_CONNECTION', expectedVideoId);
+  if (!browser) return blocked('DEDICATED_BROWSER_NOT_RUNNING', expectedVideoId);
+
+  let contexts, pages;
+  try {
+    if (browser.isConnected?.() !== true) return blocked('BROWSER_NOT_CONNECTED', expectedVideoId);
+    contexts = browser.contexts();
+    if (!Array.isArray(contexts) || contexts.length !== 1) return blocked('DEDICATED_CONTEXT_NOT_UNIQUE', expectedVideoId);
+    pages = contexts[0].pages();
+    if (!Array.isArray(pages) || pages.length > LIMIT_PAGES) return blocked('DEDICATED_PAGE_LIST_UNVERIFIED', expectedVideoId);
+  } catch { return blocked('BROWSER_PAGE_ENUMERATION_FAILED', expectedVideoId); }
+  const owned = [];
+  try {
+    for (const page of pages) {
+      if (isAbort(signal)) return blocked('CANCELLED_DURING_PAGE_SELECTION', expectedVideoId);
+      if (page?.isClosed?.() !== false || !videoRoute(page.url(), expectedVideoId)) continue;
+      const label = await page.evaluate(() => window.name);
+      if (LABELS.has(label)) owned.push(page);
+    }
+  } catch { return blocked('OWNED_VIDEO_PAGE_READ_FAILED', expectedVideoId); }
+  if (owned.length !== 1) return blocked(owned.length ? 'OWNED_VIDEO_PAGE_AMBIGUOUS' : 'OWNED_VIDEO_PAGE_NOT_FOUND', expectedVideoId);
+  const page = owned[0];
+  let initialUrl;
+  try { initialUrl = page.url(); }
+  catch { return blocked('INITIAL_PAGE_URL_UNAVAILABLE', expectedVideoId); }
+  if (!videoRoute(initialUrl, expectedVideoId)) return blocked('INITIAL_VIDEO_ROUTE_MISMATCH', expectedVideoId);
+
+  let commentResult, aiResult;
+  try {
+    commentResult = await observeComments({ page, readPageState, readCommentDom, expectedVideoId, limit });
+  } catch { return blocked('PUBLIC_COMMENT_INSPECTION_FAILED', expectedVideoId); }
+  if (commentResult?.status === 'blocked') return blocked('COMMENT_' + safeCode(commentResult.reasonCode), expectedVideoId);
+  if (!validCommentReceipt(commentResult, expectedVideoId, limit)) return blocked('PUBLIC_COMMENT_RECEIPT_INVALID', expectedVideoId);
+  if (isAbort(signal)) return blocked('CANCELLED_AFTER_COMMENTS', expectedVideoId);
+  try {
+    aiResult = await inspectSummary({ page, readPageState, expectedVideoId });
+  } catch { return blocked('AI_ENTRY_INSPECTION_FAILED', expectedVideoId); }
+  if (aiResult?.status === 'blocked') return blocked('AI_ENTRY_' + safeCode(aiResult.reasonCode), expectedVideoId);
+  if (!validAiReceipt(aiResult, expectedVideoId)) return blocked('AI_ENTRY_RECEIPT_INVALID', expectedVideoId);
+  if (isAbort(signal)) return blocked('CANCELLED_AFTER_AI_ENTRY', expectedVideoId);
+  try {
+    if (page.isClosed() || page.url() !== initialUrl) return blocked('PAGE_CHANGED_DURING_INSPECTION', expectedVideoId);
+    if (browser.isConnected() !== true) return blocked('BROWSER_DISCONNECTED_DURING_INSPECTION', expectedVideoId);
+  } catch { return blocked('FINAL_BROWSER_STATE_UNAVAILABLE', expectedVideoId); }
+  // This receipt refers ONLY to this probe's calls, not concurrent user/agent actions.
+  return {
+    status: 'read_only_evidence', videoId: expectedVideoId, reasonCode: null,
+    connectionMethod: 'upstream_connectExistingBrowser',
+    publicCommentsStatus: commentResult.status,
+    comments: commentResult.comments.slice(0, limit).map(row => ({text: row.text, commentId: row.commentId ?? null})),
+    aiSummaryEntryVisible: aiResult.status === 'entry_visible',
+    aiSummaryEntryStatus: aiResult.status,
+    aiSummaryGenerated: false,
+    aiSummaryText: null,
+    browserLaunchedByThisProbe: false, navigationByThisProbe: false,
+    clickedByThisProbe: false, wroteByThisProbe: false,
+  };
+}
