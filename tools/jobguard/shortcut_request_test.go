@@ -77,8 +77,7 @@ func TestParseShortcutOperationRejectsDuplicateUnknownAndRelativeArguments(t *te
 	unknown := append(append([]string{}, base...), "--unexpected", "value")
 	if _, err := parseShortcutOperationRequest(unknown, 101); err == nil { t.Fatal("unknown argument accepted") }
 	relative := append([]string{}, base...)
-	relative[4] = "--shortcut"
-	relative[5] = "relative.lnk"
+	relative[4] = "relative.lnk"
 	if _, err := parseShortcutOperationRequest(relative, 101); err == nil { t.Fatal("relative path accepted") }
 }
 
