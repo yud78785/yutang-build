@@ -52,10 +52,10 @@ jobs:
         run: |
           if ($env:GITHUB_REPOSITORY -cne 'yud78785/yutang-build') { throw 'WRONG_REPOSITORY' }
           $allowedRefs = @(
-  'refs/heads/experiment/windows-147-update-recovery-20261114',
-  'refs/heads/experiment/windows-147-shortcut-handle-integration-20261114'
-)
-if ($allowedRefs -cnotcontains $env:GITHUB_REF) { throw 'WRONG_FIX_BRANCH' }
+            'refs/heads/experiment/windows-147-update-recovery-20261114',
+            'refs/heads/experiment/windows-147-shortcut-handle-integration-20261114'
+          )
+          if ($allowedRefs -cnotcontains $env:GITHUB_REF) { throw 'WRONG_FIX_BRANCH' }
           if ($env:RUNNER_OS -cne 'Windows') { throw 'WINDOWS_RUNNER_REQUIRED' }
 
       - name: Set up pinned Node.js build runtime
@@ -481,7 +481,11 @@ if ($allowedRefs -cnotcontains $env:GITHUB_REF) { throw 'WRONG_FIX_BRANCH' }
         run: |
           $ErrorActionPreference = 'Stop'
           if ($env:GITHUB_REPOSITORY -cne 'yud78785/yutang-build') { throw 'WRONG_REPOSITORY' }
-          if ($env:GITHUB_REF -cne 'refs/heads/experiment/windows-147-update-recovery-20261114') { throw 'WRONG_FIX_BRANCH' }
+          $allowedRefs = @(
+            'refs/heads/experiment/windows-147-update-recovery-20261114',
+            'refs/heads/experiment/windows-147-shortcut-handle-integration-20261114'
+          )
+          if ($allowedRefs -cnotcontains $env:GITHUB_REF) { throw 'WRONG_FIX_BRANCH' }
           if ($env:RUNNER_OS -cne 'Windows') { throw 'WINDOWS_RUNNER_REQUIRED' }
           if ($env:ImageOS -notmatch 'win22') { throw ('WINDOWS_2022_CROSS_RUNNER_REQUIRED: ' + $env:ImageOS) }
 
