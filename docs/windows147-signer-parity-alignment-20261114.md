@@ -40,7 +40,7 @@ These are local Linux functional/synthetic and static-contract tests. Run `43605
 
 ## Outstanding blockers
 
-1. SSLmentor's *written* Serbia personal application acceptance, VAT-inclusive total, refund and renewal terms remains unavailable. Gmail pre-sale inquiry remains an unsent draft; no personal ID, OTP, phone token or payment submitted.
+1. SSLmentor supplied a **preliminary written VAT statement** on 2026-11-14: applicants it describes as 'Serbian' are currently charged without VAT, subject to individual verification. An inquiry was sent and a reply was received; a narrowly targeted **follow-up draft remains unsent**. Eligibility for a Serbia-resident foreign-national natural person and the precise B2C one-year final charge, refund and renewal terms remain unconfirmed. No ID, OTP, phone token or payment submitted.
 2. Real Certum SimplySign + Microsoft SignTool signing, RFC3161 timestamp trust and Authenticode verification are **not performed**.
 3. Signer currently deliberately allows only the previously accepted unsigned 1.4.7 EXE. A new trust-pinned, updatable bootstrap (e.g. version 1.4.8) will need a **separate candidate-specific signer authorization** and new unsigned source hash, rather than loosening the current pinned script.
 4. Signed EXE must have its own new SHA-256, independently verified on both Windows Server 2022 and 2025 with signed-file provenance. The accepted original 1.4.7 client's updater still has empty trust pins.
