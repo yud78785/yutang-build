@@ -1,0 +1,87 @@
+# INERT TEMPLATE ONLY. File intentionally lives in docs/templates, NOT .github/workflows.
+# DO NOT ACTIVATE WITHOUT NEW EXPLICIT USER AUTHORIZATION. No Actions spend from this file.
+# Single Windows 2025 diagnostic. If failed, do NOT schedule Windows 2022.
+# Fifth Windows Actions authorization has NOT been given; this template is inert.
+# No production EXE, credentials, release or repository main are modified.
+# On distinct fifth-run authorization only: create a dedicated branch exactly from f3c24b873e3b16afaab94aacf93a98944b1495f6; then activate by one nonforced workflow-file push.
+name: YuTang 1.4.7 original unsigned EXE public-web fifth diagnostic - one Windows 2025 runner NOT RELEASE
+on:
+  push:
+    branches:
+      - experiment/windows-147-public-web-fifth-20261115
+    paths:
+      - .github/workflows/windows-147-public-web-fifth-diagnostic.yml
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: yutang-147-public-web-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  public-homepage:
+    # Job-level gating occurs before matrix runner allocation.
+    # Subsequent edits, branch creation, forced pushes and deletion are SKIPPED not PASS.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/experiment/windows-147-public-web-fifth-20261115' && github.event.before == 'f3c24b873e3b16afaab94aacf93a98944b1495f6' && github.event.created == false && github.event.forced == false && github.event.deleted == false
+    name: windows-2025 - original EXE identity then public homepage probe
+    runs-on: windows-2025
+    timeout-minutes: 35
+
+    steps:
+      - name: Checkout immutable inspected test source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: f3c24b873e3b16afaab94aacf93a98944b1495f6
+          persist-credentials: false
+
+      - name: Verify exact checked-out code SHA
+        shell: pwsh
+        run: |
+          if ((& git rev-parse HEAD).Trim() -cne 'f3c24b873e3b16afaab94aacf93a98944b1495f6') {
+            throw 'PUBLIC_WEB_PROBE_SOURCE_SHA_MISMATCH'
+          }
+
+      - name: Download the original accepted unsigned Windows 2025 EXE only
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          repository: yud78785/yutang-build
+          run-id: 43541915930
+          name: YuTang-OpenRouter-Desktop-1.4.7-SecurityHardening-windows-2025-CANDIDATE-NOT-RELEASE
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/yutang-147-accepted-exe
+
+      - name: Verify immutable EXE filename size and SHA-256 before execution
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Join-Path '${{ runner.temp }}' 'yutang-147-accepted-exe\desktop\release-api\Dafeiyu-Douyin-API-1.4.7-win-x64.exe'
+          if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw 'ACCEPTED_EXE_NOT_FOUND' }
+          if ((Get-Item -LiteralPath $exe).Length -ne 125446071) { throw 'ACCEPTED_EXE_SIZE_MISMATCH' }
+          $sha = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($sha -cne '3201d433df727a5d5fddf8e68a0f69ea1654057e04cfad7833fd3ed7dc241a34') {
+            throw 'ACCEPTED_EXE_SHA256_MISMATCH'
+          }
+          'YUTANG_ACCEPTED_EXE=' + $exe | Out-File -LiteralPath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host ('ACCEPTED_EXE_SHA256=' + $sha)
+
+      - name: Execute public-web receipt fail-closed unit tests
+        shell: pwsh
+        run: |
+          node --version
+          node --test tests/windows147-online-public-probe.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'PUBLIC_WEB_PROBE_NEGATIVE_TESTS_FAILED' }
+
+      - name: Run corrected exact unsigned EXE public homepage and cleanup probe
+        shell: pwsh
+        timeout-minutes: 18
+        env:
+          YUTANG_PUBLIC_WEB_TEST_AUTHORIZED: 'yes'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (Get-NetFirewallRule -DisplayName 'YuTang147EphemeralEdgeEgressBlock' -ErrorAction SilentlyContinue) {
+            throw 'OFFLINE_FIREWALL_RULE_NOT_ALLOWED_DURING_ONLINE_PROBE'
+          }
+          node tools/windows147-online-public-probe.mjs "$env:YUTANG_ACCEPTED_EXE"
+          if ($LASTEXITCODE -ne 0) { throw 'PUBLIC_WEB_EXE_ACCEPTANCE_NOT_PROVEN' }
