@@ -15,7 +15,7 @@ const DEPENDENCIES = Object.freeze(['core.mjs', 'comment-browser.mjs', 'package.
 
 function blocked(reasonCode) {
   return {status:'blocked',reasonCode,videoId:null,comments:[],aiSummaryEntryVisible:false,aiSummaryGenerated:false,
-    browserLaunchedByThisProbe:false,navigationByThisProbe:false,clickedByThisProbe:false,wroteByThisProbe:false};
+    browserLaunchedByThisProbe:false,navigationByThisProbe:false,clickedByThisProbe:false,persistentDataModifiedByThisProbe:false};
 }
 export function parseReadOnlyArgs(argv) {
   if (!Array.isArray(argv) || argv.length !== 4) return {ok:false,reasonCode:'ARGUMENTS_REQUIRED'};
@@ -75,6 +75,7 @@ export async function runReadOnlySourcePreflight({argv, platform=process.platfor
   try {[core,comments]=await load(verified.root);}
   catch{return blocked('PINNED_UPSTREAM_IMPORT_FAILED');}
   if(typeof core?.BrowserController!=='function'||typeof core?.readPageState!=='function'||
+     typeof core?.acquireBrowserOperationLock!=='function'||
      typeof comments?.readCommentDom!=='function')return blocked('PINNED_UPSTREAM_EXPORTS_MISSING');
   let controller;
   try{controller=controllerFactory(core);}catch{return blocked('UPSTREAM_CONTROLLER_UNAVAILABLE');}
@@ -82,6 +83,9 @@ export async function runReadOnlySourcePreflight({argv, platform=process.platfor
     return await inspectExistingDedicatedDouyinVideoReadOnly({
       controller,readPageState:core.readPageState,readCommentDom:comments.readCommentDom,
       observeComments:observePublicCommentsReadOnly,inspectSummary:inspectDouyinAiSummaryEntryReadOnly,
+      acquireReadLock: ({signal}) => core.acquireBrowserOperationLock('tab-api', {
+        signal, directory:controller.controlDirectory, timeoutMs:4000,
+      }),
       expectedVideoId:parsed.videoId,limit:12,
     });
   }catch{return blocked('READ_ONLY_EXECUTION_FAILED');}
