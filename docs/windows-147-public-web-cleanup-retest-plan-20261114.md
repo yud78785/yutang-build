@@ -7,7 +7,7 @@
 - Baseline offline Windows security Run `43541915930`: success; this does not prove live network browsing.
 - Real-online Run `43616296326`: **failed** on Windows 2022 and 2025 after original EXE hash checks. Both logged `CANDIDATE_PROCESSES_OR_CDP_REMAIN` followed by `CANDIDATE_PROCESS_CLEANUP_UNVERIFIED`. No accepted page receipt. See `docs/windows-147-public-web-incident-20261114.md`.
 - Isolated test harness repair `f10cacd82bb6f677b1309cf8ccb5b76eeaabdf99` checks identity of the **inner Electron** process and its API Job Object before nonrecursive stop, and logs page-gate and bounded PID/role cleanup diagnostics separately. Production EXE unchanged.
-- Historical `f10cacd` Node 22 offline test-with-stub result was 29/29; it does **not** validate the new cleanup source. **The new source has not completed a fresh Node test run or real Windows test.**
+- Earlier `f10cacd` Node 22 offline result was 29/29. The revised source at `05fab3d` has now completed **31/31 local Node 22.16.0 offline tests, zero failures and zero skipped**, using a TEST-ONLY lifecycle-function stub. This is **not an actual Windows integration test** and does not validate the complete real Edge/EXE lifecycle.
 
 ## Reserved, NOT activated
 - Inert workflow template: `docs/templates/windows-147-public-web-cleanup-retest.inert.yml`.
@@ -24,5 +24,14 @@ On **each** runner, require exact EXE SHA, true main-frame HTTP 200/DOM/render/s
 - New inspected code commit: `05fab3d9f6e87649ab3cdf556c2c5ca5462b3a5f`; keeps original EXE SHA unchanged.
 - Verified inner Electron / Job Object ownership is now captured after the desktop readiness marker **before** calling `/api/browser/open`, so early network/browser failure does not bypass the safely owned desktop shutdown.
 - If no earlier identity is available, the finalizer may retry the same exact-image / worker-parent / owner-target guard check before killing any inner process; no unverified PID is killed.
-- The test file now defines two additional static tests for this pre-open and fallback path. **No new executed test result is claimed for this updated source.** Prior 29/29 success belongs to the earlier test file only.
+- Two additional tests verify the pre-open identity capture and fallback stop contract. The exact **new** source and test files were executed locally: Node 22.16.0 `--check` passed for both files, and `node --test` yielded **31 passed / 0 failed / 0 skipped**. The non-Windows launch gate also refused execution with `REFUSED_OUTSIDE_EXPLICIT_EPHEMERAL_WINDOWS_CI` and exit code 1.
 - This template remains under `docs/templates` and is NOT activated. An explicit, fresh Windows Actions execution authorization is still required.
+
+## 2026-11-14 17:38Z independent source/fixture verification (no Actions)
+
+- Local-tested probe Git blob SHA-1: `ae91309fac449ae6db65ee11331de09e336a15e1`; negative-test Git blob SHA-1: `3bd56b4d668aa02ffa43f055d040bc69a4a9f7d6`. Both match files already committed at `05fab3d9f6e87649ab3cdf556c2c5ca5462b3a5f`.
+- Local executed Node TAP log: **31/31 PASS, no skip**, SHA-256 `2d9d062176dc6c9538db584c2720ef575f74f4495d022ab5895c4f8fe1597040`. This log uses the test-only stub of the original lifecycle module and is not Windows EXE output.
+- Original archived candidate Artifact `14092434238` was read directly without executing the EXE: inner EXE actual size `125446071`, SHA-256 `3201d433df727a5d5fddf8e68a0f69ea1654057e04cfad7833fd3ed7dc241a34`. This verifies the candidate byte identity only.
+- Archived original Windows `windows-edge-lifecycle-force-desktop.json` supports previously accepted nonrecursive inner Electron forced-exit handling with zero leftover tracked processes and zero CDP listeners, **under the older blocked-network conditions**. It is not evidence for the new public-web cleanup fix.
+- Online Run `43616296326` remains **failure on both Windows versions**, and the revised `05fab3d` **has not been run on Windows**.
+- A separate explicit approval is required before the inactive template is installed into `.github/workflows` and another Windows 2022/2025 Actions run is launched.
