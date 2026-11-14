@@ -20,7 +20,7 @@ const PINNED = Object.freeze({
 function requireGate(condition, code) { if (!condition) throw new Error(code); }
 function validTarget(value) {
   return typeof value === 'string' &&
-    /^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)$/.test(value) &&
+    /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(value) &&
     value.split('.').every(part => Number.isSafeInteger(Number(part)));
 }
 
