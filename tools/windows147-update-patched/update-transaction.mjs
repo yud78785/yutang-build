@@ -237,11 +237,12 @@ export async function recoverUpdateTransaction(updatesDirectory, { shortcut } = 
     await fs.rm(transactionFile);
     return { status: 'old-shortcut-preserved' };
   }
+  if (currentHash && currentHash !== transaction.oldShortcutSha256 &&
+      currentHash !== transaction.newShortcutSha256) {
+    return { status: 'blocked', reason: 'CURRENT_SHORTCUT_CHANGED_BY_USER' };
+  }
   if (backupHash !== transaction.oldShortcutSha256) {
     return { status: 'blocked', reason: 'OLD_SHORTCUT_BACKUP_MISSING_OR_CHANGED' };
-  }
-  if (currentHash && currentHash !== transaction.newShortcutSha256) {
-    return { status: 'blocked', reason: 'CURRENT_SHORTCUT_CHANGED_BY_USER' };
   }
   if (currentHash === transaction.newShortcutSha256) await fs.rm(transaction.shortcut);
   await fs.rename(transaction.backupShortcut, transaction.shortcut);

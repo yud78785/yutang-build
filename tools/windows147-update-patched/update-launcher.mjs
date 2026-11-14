@@ -105,15 +105,60 @@ async function stopChild(child, delayImpl = delay) {
   }
 }
 
-async function commitShortcut(stagedShortcut, shortcut, nonce) {
+async function hashRegularFile(file) {
+  try {
+    const stat = await fs.lstat(file);
+    if (!stat.isFile() || stat.isSymbolicLink()) return null;
+    return createHash('sha256').update(await fs.readFile(file)).digest('hex');
+  } catch (error) {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
+export async function commitShortcut(stagedShortcut, shortcut, nonce, transaction) {
+  const expectedOld = transaction?.oldShortcutSha256;
+  const expectedNew = transaction?.newShortcutSha256;
+  if (!path.isAbsolute(stagedShortcut || '') || !path.isAbsolute(shortcut || '') ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(nonce || '') ||
+      !/^[a-f0-9]{64}$/.test(expectedOld || '') || !/^[a-f0-9]{64}$/.test(expectedNew || '')) {
+    throw new Error('UPDATE_SHORTCUT_COMMIT_ARGUMENTS_INVALID');
+  }
+  const [stagedBefore, currentBefore] = await Promise.all([
+    hashRegularFile(stagedShortcut),
+    hashRegularFile(shortcut)
+  ]);
+  if (stagedBefore !== expectedNew) throw new Error('UPDATE_STAGED_SHORTCUT_CHANGED_BEFORE_COMMIT');
+  if (currentBefore !== expectedOld) throw new Error('UPDATE_CURRENT_SHORTCUT_CHANGED_BEFORE_COMMIT');
+
   const directory = path.dirname(shortcut);
   const temporary = path.join(directory, '.' + path.basename(shortcut) + '.' + nonce + '.tmp.lnk');
   const backup = path.join(directory, '.' + path.basename(shortcut) + '.' + nonce + '.bak.lnk');
-  await fs.copyFile(stagedShortcut, temporary, fsConstants.COPYFILE_EXCL);
-  // Preserve the old entry by copying it, then atomically replace the visible shortcut.
-  // There is no interval in which the user's desktop shortcut is missing.
-  await fs.copyFile(shortcut, backup, fsConstants.COPYFILE_EXCL);
-  await fs.rename(temporary, shortcut);
+  try {
+    await fs.copyFile(stagedShortcut, temporary, fsConstants.COPYFILE_EXCL);
+    if (await hashRegularFile(temporary) !== expectedNew) {
+      throw new Error('UPDATE_STAGED_SHORTCUT_COPY_HASH_MISMATCH');
+    }
+    // Keep the original entry, but verify the backup still matches the transaction journal.
+    await fs.copyFile(shortcut, backup, fsConstants.COPYFILE_EXCL);
+    if (await hashRegularFile(backup) !== expectedOld) {
+      throw new Error('UPDATE_SHORTCUT_BACKUP_HASH_MISMATCH');
+    }
+    // Recheck both source files immediately before replacing the visible shortcut.
+    if (await hashRegularFile(shortcut) !== expectedOld) {
+      throw new Error('UPDATE_CURRENT_SHORTCUT_CHANGED_DURING_COMMIT');
+    }
+    if (await hashRegularFile(stagedShortcut) !== expectedNew) {
+      throw new Error('UPDATE_STAGED_SHORTCUT_CHANGED_DURING_COMMIT');
+    }
+    await fs.rename(temporary, shortcut);
+    if (await hashRegularFile(shortcut) !== expectedNew) {
+      throw new Error('UPDATE_SHORTCUT_COMMIT_HASH_MISMATCH');
+    }
+  } catch (error) {
+    await fs.rm(temporary, { force: true }).catch(() => {});
+    throw error;
+  }
   return {
     backup,
     finalize: async function () {
@@ -192,7 +237,7 @@ export async function runUpdateLauncher({
     const backupShortcut = path.join(path.dirname(shortcut), '.' + path.basename(shortcut) + '.' + nonce + '.bak.lnk');
     transaction = await beginUpdateTransaction({ updatesDirectory, shortcut, stagedShortcut, backupShortcut, targetExe: file, targetExeSha256: sha256, nonce });
     await setUpdateTransactionPhase(transaction, 'switching');
-    rollbackShortcut = await commitShortcut(stagedShortcut, shortcut, nonce);
+    rollbackShortcut = await commitShortcut(stagedShortcut, shortcut, nonce, transaction);
     await setUpdateTransactionPhase(transaction, 'switched');
     // Keep the old shortcut backup until the new process survives the post-switch observation window.
     await waitForStableChild(child, stabilityMs, pollMs, delayImpl);
@@ -224,7 +269,7 @@ export async function runUpdateLauncher({
     }
     if (recoveryError) {
       throw new AggregateError([error, recoveryError],
-        '新版更新失败，旧快捷方式恢复未完成；请保留更新事务及备份文件：' + (transaction?.backupShortcut || '更新事务备份文件'));
+        '新版更新失败，桌面快捷方式状态需要人工核对；请保留更新事务文件；如存在备份，请勿删除：' + (transaction?.backupShortcut || '更新事务备份文件'));
     }
     throw error;
   }

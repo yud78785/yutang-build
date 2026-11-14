@@ -10,6 +10,7 @@ import {
   resolveDesktopShortcutPath,
   setUpdateTransactionPhase
 } from '../tools/windows147-update-patched/update-transaction.mjs';
+import { commitShortcut } from '../tools/windows147-update-patched/update-launcher.mjs';
 
 const hash = value => createHash('sha256').update(value).digest('hex');
 
@@ -79,6 +80,48 @@ async function fixture(t) {
   });
   return { updates, desktop, shortcut, staged, backup, temporary, target, nonce, transaction };
 }
+
+test('提交前验证旧入口与暂存入口哈希，再切换并保留旧入口备份', async t => {
+  const f = await fixture(t);
+  await setUpdateTransactionPhase(f.transaction, 'switching');
+  const committed = await commitShortcut(f.staged, f.shortcut, f.nonce, f.transaction);
+  assert.equal(await fs.readFile(f.shortcut, 'utf8'), 'new shortcut');
+  assert.equal(await fs.readFile(committed.backup, 'utf8'), 'old shortcut');
+  assert.equal(await fs.access(f.temporary).then(() => true, () => false), false);
+  await committed.finalize();
+  assert.equal(await fs.access(f.backup).then(() => true, () => false), false);
+});
+
+test('用户在事务准备后修改旧快捷方式时，提交拒绝覆盖并保留事务', async t => {
+  const f = await fixture(t);
+  await setUpdateTransactionPhase(f.transaction, 'switching');
+  await fs.writeFile(f.shortcut, 'user edited shortcut');
+  await assert.rejects(
+    commitShortcut(f.staged, f.shortcut, f.nonce, f.transaction),
+    /UPDATE_CURRENT_SHORTCUT_CHANGED_BEFORE_COMMIT/
+  );
+  const recovered = await recoverUpdateTransaction(f.updates, { shortcut: f.shortcut });
+  assert.equal(recovered.status, 'blocked');
+  assert.equal(recovered.reason, 'CURRENT_SHORTCUT_CHANGED_BY_USER');
+  assert.equal(await fs.readFile(f.shortcut, 'utf8'), 'user edited shortcut');
+  assert.equal(await fs.access(f.backup).then(() => true, () => false), false);
+  assert.equal(await fs.access(path.join(f.updates, 'update-transaction.json')).then(() => true, () => false), true);
+});
+
+test('暂存快捷方式在事务准备后被替换时，提交拒绝使用被改变的文件', async t => {
+  const f = await fixture(t);
+  await setUpdateTransactionPhase(f.transaction, 'switching');
+  await fs.writeFile(f.staged, 'tampered staged shortcut');
+  await assert.rejects(
+    commitShortcut(f.staged, f.shortcut, f.nonce, f.transaction),
+    /UPDATE_STAGED_SHORTCUT_CHANGED_BEFORE_COMMIT/
+  );
+  const recovered = await recoverUpdateTransaction(f.updates, { shortcut: f.shortcut });
+  assert.equal(recovered.status, 'old-shortcut-preserved');
+  assert.equal(await fs.readFile(f.shortcut, 'utf8'), 'old shortcut');
+  assert.equal(await fs.readFile(f.staged, 'utf8'), 'tampered staged shortcut');
+  assert.equal(await fs.access(f.backup).then(() => true, () => false), false);
+});
 
 test('更新助手在快捷方式替换前被强杀：旧入口保持且事务可清理', async t => {
   const f = await fixture(t);

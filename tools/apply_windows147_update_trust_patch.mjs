@@ -226,7 +226,8 @@ export async function applyUpdateTrustPatch(upstream, repositoryRoot = REPOSITOR
   await fs.mkdir(path.join(upstream, 'desktop/tests'), { recursive: true });
   await write(path.join(upstream, 'desktop/tests/update-trust.test.mjs'), upstreamTrustTests);
   const transactionTests = (await read(path.join(repositoryRoot, 'tests/windows147-update-transaction.test.mjs')))
-    .replace("../tools/windows147-update-patched/update-transaction.mjs", "../src/update-transaction.mjs");
+    .replace("../tools/windows147-update-patched/update-transaction.mjs", "../src/update-transaction.mjs")
+    .replace("../tools/windows147-update-patched/update-launcher.mjs", "../src/update-launcher.mjs");
   await write(path.join(upstream, 'desktop/tests/update-transaction.test.mjs'), transactionTests);
   await fs.rm(path.join(upstream, 'desktop/tests/update-service.test.mjs'), { force: true });
 
