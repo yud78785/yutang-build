@@ -16,6 +16,8 @@ $sha = $ExpectedUnsignedSha256.ToLowerInvariant()
 if ($sha -cnotmatch '^[a-f0-9]{64}$') { Fail 'UNSIGNED_SHA256_INVALID' }
 $source = [System.IO.Path]::GetFullPath($SourceExe)
 if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { Fail 'SOURCE_EXE_MISSING' }
+$sourceItem = Get-Item -LiteralPath $source -Force
+if (($sourceItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { Fail 'SOURCE_REPARSE_POINT_FORBIDDEN' }
 $name = [System.IO.Path]::GetFileName($source)
 if ($name -cnotmatch '^Dafeiyu-Douyin-API-\d+\.\d+\.\d+-win-x64\.exe$') { Fail 'SOURCE_EXE_NAME_INVALID' }
 $actual = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -36,6 +38,13 @@ if ([string]::IsNullOrWhiteSpace($SignToolPath) -or -not [System.IO.Path]::IsPat
 }
 $signTool = [System.IO.Path]::GetFullPath($SignToolPath)
 if ([System.IO.Path]::GetFileName($signTool) -ine 'signtool.exe' -or -not (Test-Path -LiteralPath $signTool -PathType Leaf)) { Fail 'SIGNTOOL_NOT_FOUND' }
+$signToolItem = Get-Item -LiteralPath $signTool -Force
+if (($signToolItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { Fail 'SIGNTOOL_REPARSE_POINT_FORBIDDEN' }
+$signToolSignature = Get-AuthenticodeSignature -LiteralPath $signTool
+if ([string]$signToolSignature.Status -cne 'Valid' -or $null -eq $signToolSignature.SignerCertificate -or
+    [string]$signToolSignature.SignerCertificate.Subject -notmatch '(?i)(CN|O)=Microsoft Corporation(,|$)') {
+  Fail 'SIGNTOOL_NOT_MICROSOFT_SIGNED'
+}
 $cert = @(Get-ChildItem -Path 'Cert:\CurrentUser\My' | Where-Object {
   ($_.Thumbprint -replace '\s','').ToUpperInvariant() -ceq $thumb
 })
@@ -45,13 +54,27 @@ $eku = @($cert[0].EnhancedKeyUsageList | ForEach-Object { $_.ObjectId.Value })
 if ($eku -notcontains '1.3.6.1.5.5.7.3.3') { Fail 'CERTIFICATE_NOT_CODE_SIGNING' }
 $outputDir = [System.IO.Path]::GetFullPath($OutputDirectory)
 if (-not (Test-Path -LiteralPath $outputDir -PathType Container)) { Fail 'OUTPUT_DIRECTORY_MUST_ALREADY_EXIST' }
+$outputDirItem = Get-Item -LiteralPath $outputDir -Force
+if (($outputDirItem.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { Fail 'OUTPUT_DIRECTORY_REPARSE_POINT_FORBIDDEN' }
 $dest = [System.IO.Path]::Combine($outputDir, $name)
 if ($dest -ieq $source) { Fail 'NEVER_SIGN_ORIGINAL_CANDIDATE_IN_PLACE' }
 if (Test-Path -LiteralPath $dest) { Fail 'SIGNED_OUTPUT_ALREADY_EXISTS' }
 $receiptFile = [System.IO.Path]::Combine($outputDir,'windows-local-signing-receipt.json')
 if (Test-Path -LiteralPath $receiptFile) { Fail 'SIGNING_RECEIPT_ALREADY_EXISTS' }
-Copy-Item -LiteralPath $source -Destination $dest -ErrorAction Stop
-if ((Get-FileHash -LiteralPath $dest -Algorithm SHA256).Hash.ToLowerInvariant() -cne $sha) { Fail 'COPIED_CANDIDATE_CHANGED_BEFORE_SIGNING' }
+# CreateNew is atomic: unlike Test-Path then Copy-Item, it cannot overwrite a
+# file created by the user or another process during the check/copy gap.
+$inputStream = [System.IO.File]::Open($source,[System.IO.FileMode]::Open,[System.IO.FileAccess]::Read,[System.IO.FileShare]::Read)
+try {
+  $outputStream = [System.IO.File]::Open($dest,[System.IO.FileMode]::CreateNew,[System.IO.FileAccess]::Write,[System.IO.FileShare]::None)
+  try {
+    $inputStream.CopyTo($outputStream)
+    $outputStream.Flush($true)
+  } finally { $outputStream.Dispose() }
+} finally { $inputStream.Dispose() }
+if ((Get-FileHash -LiteralPath $dest -Algorithm SHA256).Hash.ToLowerInvariant() -cne $sha -or
+    (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant() -cne $sha) {
+  Fail 'COPIED_CANDIDATE_CHANGED_BEFORE_SIGNING'
+}
 # SimplySign Desktop must already be authorized by the certificate holder.
 # No PFX, TOTP, PIN or private key is sent to this script, GitHub or ChatGPT.
 & $signTool sign /v /s My /sha1 $thumb /fd SHA256 /tr 'http://time.certum.pl' /td SHA256 $dest
@@ -66,6 +89,9 @@ if ([string]$verified.Status -cne 'Valid' -or $null -eq $verified.SignerCertific
 if ($null -eq $verified.TimeStamperCertificate) { Fail 'TRUSTED_TIMESTAMP_NOT_PRESENT' }
 $digest = (Get-FileHash -LiteralPath $dest -Algorithm SHA256).Hash.ToLowerInvariant()
 if ($digest -ceq $sha) { Fail 'SIGNED_EXE_HASH_DID_NOT_CHANGE' }
+if ((Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant() -cne $sha) {
+  Fail 'ORIGINAL_UNSIGNED_EXE_CHANGED_DURING_SIGNING'
+}
 $receipt = [ordered]@{
   schema = 'yutang.windows-local-signing-receipt.v1'
   file = $dest
