@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {classifyPublicCommentEvidence, observePublicCommentsReadOnly} from '../tools/douyin-public-comment-readonly.mjs';
 
 const id = '7512345678901234567';
-const state = Object.freeze({url:`https://www.douyin.com/video/${id}`,video:{id,url:`https://www.douyin.com/video/${id}`,readyState:4},
+const state = Object.freeze({url:`https://www.douyin.com/video/${id}`,pageKind:'video',videoSelection:{candidateCount:1,ambiguous:false,identityConflict:false},video:{id,url:`https://www.douyin.com/video/${id}`,readyState:4},
   loginRequired:false,verificationRequired:false,privateChatVisible:false,unsupportedPage:false});
 const row = (text = '公开评论') => ({videoId:id,commentId:'12345678',text,mine:false,sent:false,pending:false,failed:false});
 const inspect = (overrides={}) => classifyPublicCommentEvidence({stateBefore:state,stateAfter:state,
@@ -30,12 +30,12 @@ test('refuses wrong video or conflicting video identity',()=>{
 });
 test('refuses unready media and unauthorized origins',()=>{
   assert.equal(inspect({stateBefore:{...state,video:{...state.video,readyState:1}}}).reasonCode,'VIDEO_NOT_READY');
-  assert.equal(inspect({stateBefore:{...state,url:'https://evil.example/'}}).reasonCode,'PAGE_ORIGIN_UNVERIFIED');
+  assert.equal(inspect({stateBefore:{...state,url:'https://evil.example/'}}).reasonCode,'PAGE_VIDEO_ROUTE_UNVERIFIED');
   assert.equal(inspect({stateBefore:{...state,video:{...state.video,url:`https://evil.example/video/${id}`}}}).reasonCode,'VIDEO_URL_UNVERIFIED');
 });
 test('refuses stale video navigation and changed pages without leaking comments',()=>{
   const r=inspect({stateAfter:{...state,url:'https://www.douyin.com/?recommend=1'}});
-  assert.equal(r.status,'blocked');assert.equal(r.reasonCode,'PAGE_CHANGED_WHILE_READING');assert.deepEqual(r.comments,[]);
+  assert.equal(r.status,'blocked');assert.equal(r.reasonCode,'POST_OBSERVATION_PAGE_VIDEO_ROUTE_UNVERIFIED');assert.deepEqual(r.comments,[]);
 });
 test('refuses cross-video, malformed and excessive comment rows',()=>{
   assert.equal(inspect({commentRows:{rows:[{...row(),videoId:'7523456789012345678'}]}}).reasonCode,'COMMENT_ROW_NOT_BOUND_TO_VIDEO');
@@ -70,4 +70,39 @@ test('adapter never leaks stale comments when page changes after read',async()=>
   const page={async evaluate(fn){if(fn===second)return{rows:[row('confidential stale snippet')]};n++;return n===1?state:{...state,video:{...state.video,id:'7523456789012345678'}};}};
   const r=await observePublicCommentsReadOnly({page,readPageState:first,readCommentDom:second,expectedVideoId:id});
   assert.equal(r.status,'blocked');assert.deepEqual(r.comments,[]);assert.doesNotMatch(JSON.stringify(r),/confidential/);
+});
+
+// New guard tests use the *actual* fields produced by upstream readPageState.
+test('refuses homepage video even if its visible video ID matches',()=>{
+ const r=inspect({stateBefore:{...state,url:'https://www.douyin.com/?recommend=1'}});
+ assert.equal(r.reasonCode,'PAGE_VIDEO_ROUTE_UNVERIFIED');
+});
+test('refuses ambiguous or unproven active video selection',()=>{
+ assert.equal(inspect({stateBefore:{...state,videoSelection:{candidateCount:2,ambiguous:true}}}).reasonCode,'VIDEO_SELECTION_NOT_UNIQUE');
+ assert.equal(inspect({stateBefore:{...state,videoSelection:{candidateCount:0,ambiguous:false}}}).reasonCode,'VIDEO_SELECTION_NOT_UNIQUE');
+ assert.equal(inspect({stateBefore:{...state,videoSelection:undefined}}).reasonCode,'VIDEO_SELECTION_NOT_UNIQUE');
+});
+test('requires a single video detail page, not search, live or image post',()=>{
+ for (const pageKind of ['search','live-room','image-post','unknown'])
+   assert.equal(inspect({stateBefore:{...state,pageKind}}).reasonCode,'NOT_SINGLE_VIDEO_PAGE');
+});
+test('accepts bounded query on exact video path; rejects another video and anchors',()=>{
+ const withQuery={...state,url:`https://www.douyin.com/video/${id}?recommend=1`};
+ assert.equal(inspect({stateBefore:withQuery,stateAfter:withQuery}).status,'ok');
+ assert.equal(inspect({stateBefore:{...state,url:`https://www.douyin.com/video/${id}#comment`}}).reasonCode,'PAGE_VIDEO_ROUTE_UNVERIFIED');
+ assert.equal(inspect({stateBefore:{...state,url:'https://www.douyin.com/video/7523456789012345678'}}).reasonCode,'PAGE_VIDEO_ROUTE_UNVERIFIED');
+});
+test('fails closed with redacted reason on each browser evaluation exception',async()=>{
+ const first=()=>{},second=()=>{};
+ const a=await observePublicCommentsReadOnly({page:{async evaluate(){throw Error('private token and credentials')}},readPageState:first,readCommentDom:second,expectedVideoId:id});
+ assert.equal(a.reasonCode,'INITIAL_PAGE_READ_FAILED');assert.doesNotMatch(JSON.stringify(a),/private|token/);
+ let n=0;const b=await observePublicCommentsReadOnly({page:{async evaluate(fn){if(fn===second)throw Error('private data');return state;}},readPageState:first,readCommentDom:second,expectedVideoId:id});
+ assert.equal(b.reasonCode,'COMMENT_DOM_READ_FAILED');assert.doesNotMatch(JSON.stringify(b),/private/);
+ const c=await observePublicCommentsReadOnly({page:{async evaluate(fn){if(fn===second)return{rows:[row('sensitive')]};return ++n===1?state:Promise.reject(Error('secret'));}},readPageState:first,readCommentDom:second,expectedVideoId:id});
+ assert.equal(c.reasonCode,'FINAL_PAGE_READ_FAILED');assert.deepEqual(c.comments,[]);
+});
+test('invalid limit and arguments never touch browser',async()=>{
+ let evaluated=false;const page={async evaluate(){evaluated=true;return state;}};
+ await assert.rejects(observePublicCommentsReadOnly({page,readPageState:()=>{},readCommentDom:()=>{},expectedVideoId:id,limit:21}),/INVALID_COMMENT_LIMIT/);
+ assert.equal(evaluated,false);
 });
