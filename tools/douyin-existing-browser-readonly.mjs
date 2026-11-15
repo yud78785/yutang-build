@@ -122,20 +122,34 @@ export async function inspectExistingDedicatedDouyinVideoReadOnly({
   try { release = await acquireReadLock({ signal, controller }); }
   catch { return blocked('UPSTREAM_OPERATION_LOCK_FAILED', expectedVideoId); }
   if (typeof release !== 'function') return blocked('UPSTREAM_OPERATION_LOCK_UNVERIFIED', expectedVideoId);
-  let receipt, timer;
+  // The upstream Playwright page.evaluate API does not guarantee cancellation.
+  // Cooperatively abort later read stages on timeout, and report separately
+  // whether the underlying page inspection actually settled before return.
+  const inspectionAbort = new AbortController();
+  const forwardExternalAbort = () => inspectionAbort.abort();
+  if (isAbort(signal)) inspectionAbort.abort();
+  else signal?.addEventListener?.('abort', forwardExternalAbort, { once: true });
+  let receipt, timer, timedOut = false, inspectionSettled = false;
   const inspection = Promise.resolve().then(() => inspectConnectedBrowserReadOnly({
     browser, readPageState, readCommentDom, observeComments, inspectSummary,
-    expectedVideoId, limit, signal,
+    expectedVideoId, limit, signal: inspectionAbort.signal,
   }));
-  // Playwright page.evaluate() has no dependable per-call timeout here. A hung
-  // DOM observation must not hold the cooperative upstream tab-api lock forever.
-  // A timed-out inspection is never trusted, even if it resolves late.
+  // Both fulfilled and rejected inspections are accounted for. No unhandled
+  // rejection is created by bookkeeping on the promise that wins/loses race.
+  void inspection.then(() => { inspectionSettled = true; }, () => { inspectionSettled = true; });
   const deadline = new Promise(resolve => {
-    timer = setTimeout(() => resolve(blocked('READ_ONLY_OBSERVATION_TIMEOUT', expectedVideoId)), observationTimeoutMs);
+    timer = setTimeout(() => {
+      timedOut = true;
+      inspectionAbort.abort();
+      resolve(blocked('READ_ONLY_OBSERVATION_TIMEOUT', expectedVideoId));
+    }, observationTimeoutMs);
   });
   try { receipt = await Promise.race([inspection, deadline]); }
   catch { receipt = blocked('READ_ONLY_INSPECTION_UNEXPECTED_FAILURE', expectedVideoId); }
-  finally { clearTimeout(timer); }
+  finally {
+    clearTimeout(timer);
+    signal?.removeEventListener?.('abort', forwardExternalAbort);
+  }
   try { await release(); }
   catch { return { ...blocked('UPSTREAM_OPERATION_LOCK_RELEASE_FAILED', expectedVideoId),
     temporaryOperationLockUsed: true, temporaryOperationLockCleanupVerified: false }; }
@@ -144,6 +158,10 @@ export async function inspectExistingDedicatedDouyinVideoReadOnly({
   // lock provider; the probe itself does not change Douyin or persistent data.
   return { ...receipt, operationLock: 'upstream_tab_api_acquired_released',
     temporaryOperationLockUsed: true, temporaryOperationLockCleanupVerified: true,
+    // A released lockfile does NOT prove an in-flight Playwright evaluation has
+    // stopped. Persistent hosts must avoid starting another read when false.
+    inFlightBrowserReadTerminationVerified: inspectionSettled,
+    timedOutBeforeBrowserInspectionSettled: timedOut && !inspectionSettled,
     persistentDataModifiedByThisProbe: false };
 }
 
@@ -151,6 +169,7 @@ async function inspectConnectedBrowserReadOnly({
   browser, readPageState, readCommentDom, observeComments, inspectSummary,
   expectedVideoId, limit, signal,
 }) {
+  if (isAbort(signal)) return blocked('CANCELLED_BEFORE_BROWSER_INSPECTION', expectedVideoId);
   let contexts, pages;
   try {
     if (browser.isConnected?.() !== true) return blocked('BROWSER_NOT_CONNECTED', expectedVideoId);
@@ -190,16 +209,18 @@ async function inspectConnectedBrowserReadOnly({
 
   let commentResult, aiResult;
   try {
-    commentResult = await observeComments({ page, readPageState, readCommentDom, expectedVideoId, limit });
+    commentResult = await observeComments({ page, readPageState, readCommentDom, expectedVideoId, limit, signal });
   } catch { return blocked('PUBLIC_COMMENT_INSPECTION_FAILED', expectedVideoId); }
+  if (isAbort(signal)) return blocked('CANCELLED_AFTER_COMMENTS', expectedVideoId);
   if (commentResult?.status === 'blocked') return blocked('COMMENT_' + safeCode(commentResult.reasonCode), expectedVideoId);
   if (!validCommentReceipt(commentResult, expectedVideoId, limit)) return blocked('PUBLIC_COMMENT_RECEIPT_INVALID', expectedVideoId);
   const passiveNetwork = validPassiveNetworkReceipt(commentResult.passiveNetwork, expectedVideoId, limit);
   if (!passiveNetwork.valid) return blocked('PASSIVE_NETWORK_RECEIPT_INVALID', expectedVideoId);
   if (isAbort(signal)) return blocked('CANCELLED_AFTER_COMMENTS', expectedVideoId);
   try {
-    aiResult = await inspectSummary({ page, readPageState, expectedVideoId });
+    aiResult = await inspectSummary({ page, readPageState, expectedVideoId, signal });
   } catch { return blocked('AI_ENTRY_INSPECTION_FAILED', expectedVideoId); }
+  if (isAbort(signal)) return blocked('CANCELLED_AFTER_AI_ENTRY', expectedVideoId);
   if (aiResult?.status === 'blocked') return blocked('AI_ENTRY_' + safeCode(aiResult.reasonCode), expectedVideoId);
   if (!validAiReceipt(aiResult, expectedVideoId)) return blocked('AI_ENTRY_RECEIPT_INVALID', expectedVideoId);
   if (isAbort(signal)) return blocked('CANCELLED_AFTER_AI_ENTRY', expectedVideoId);
