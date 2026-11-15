@@ -2,6 +2,7 @@
 import importlib.util
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 MODULE_PATH = Path(__file__).resolve().parents[1] / "tools" / "douyin_public_comments_once.py"
 spec = importlib.util.spec_from_file_location("douyin_public_comments_once", MODULE_PATH)
@@ -82,6 +83,13 @@ class PublicSampleGateTests(unittest.TestCase):
         result = module.run_once(ID, 2, load_sampler=fail_load)
         self.assertEqual(result["reason"], "PINNED_UPSTREAM_UNAVAILABLE")
         self.assertEqual(calls, ["load"])
+
+    def test_ambient_proxy_credentials_block_before_fetch(self):
+        calls = []
+        with patch.dict(module.os.environ, {"HTTPS_PROXY": "http://user:secret@proxy.example"}, clear=True):
+            result = module.run_once(ID, load_sampler=lambda: calls.append(1))
+        self.assertEqual(result["reason"], "AMBIENT_HTTP_CREDENTIALS_UNSAFE")
+        self.assertEqual(calls, [])
 
     def test_no_network_for_invalid_video_id(self):
         calls = []
