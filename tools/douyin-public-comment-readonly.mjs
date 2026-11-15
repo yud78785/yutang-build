@@ -95,22 +95,26 @@ export function classifyPublicCommentEvidence({ stateBefore, stateAfter, comment
   };
 }
 
-export async function observePublicCommentsReadOnly({ page, readPageState, readCommentDom, expectedVideoId, limit = 12 } = {}) {
+export async function observePublicCommentsReadOnly({ page, readPageState, readCommentDom, expectedVideoId, limit = 12, signal } = {}) {
   if (typeof expectedVideoId !== 'string' || !VIDEO_ID.test(expectedVideoId)) throw new TypeError('INVALID_VIDEO_ID');
   if (!Number.isInteger(limit) || limit < 1 || limit > 20) throw new TypeError('INVALID_COMMENT_LIMIT');
   if (typeof page?.evaluate !== 'function' || typeof readPageState !== 'function' || typeof readCommentDom !== 'function') {
     throw new TypeError('READ_ONLY_ADAPTER_REQUIRED');
   }
+  if (signal?.aborted) return fail('READ_ABORTED', expectedVideoId);
   let before;
   try { before = await page.evaluate(readPageState); }
   catch { return fail('INITIAL_PAGE_READ_FAILED', expectedVideoId); }
+  if (signal?.aborted) return fail('READ_ABORTED', expectedVideoId);
   const reason = checkState(before, expectedVideoId);
   if (reason) return fail(reason, expectedVideoId);
   let rows;
   try { rows = await page.evaluate(readCommentDom, expectedVideoId); }
   catch { return fail('COMMENT_DOM_READ_FAILED', expectedVideoId); }
+  if (signal?.aborted) return fail('READ_ABORTED', expectedVideoId);
   let after;
   try { after = await page.evaluate(readPageState); }
   catch { return fail('FINAL_PAGE_READ_FAILED', expectedVideoId); }
+  if (signal?.aborted) return fail('READ_ABORTED', expectedVideoId);
   return classifyPublicCommentEvidence({ stateBefore: before, stateAfter: after, commentRows: rows, expectedVideoId, limit });
 }
