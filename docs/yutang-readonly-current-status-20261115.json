@@ -100,7 +100,7 @@
         "new_upstream_tests_included": false
       }
     },
-    "total_scope_note": "13 newly verified latest upstream v3 BridgeClient tests were run on isolated Linux/Node v22.16.0; they do NOT include prior independently run old-fork 14 or mocked-browser 94 tests. No combined 121 test-run claim.",
+    "total_scope_note": "18 current v3 read-only BridgeClient tests run on isolated Node.js 22.16.0 Linux; 94 prior mocked browser tests and 14 old-fork CLI tests are independent historical runs, not part of this 18.",
     "latest_source_snapshot": {
       "repository": "Yht20927/douyin-cli",
       "pinned_commit": "f9b73666ed1b24fcbbf208ed81b24acc3ff47688",
@@ -123,16 +123,16 @@
       "notice_path": "docs/yutang-upstream-full-snapshot-20261116.md"
     },
     "upstream_v3_get_readonly": {
-      "passed": 13,
+      "passed": 18,
       "failed": 0,
       "skipped": 0,
       "test_host": "isolated Linux Node.js v22.16.0",
       "source_pinned": "Yht20927/douyin-cli@f9b73666ed1b24fcbbf208ed81b24acc3ff47688",
       "bridge_client_git_blob": "5c7fd38f25c27f198a2ea5021343ed3c9376fd3e",
       "runner": "tools/run-upstream-douyin-get-readonly.cjs",
-      "runner_git_blob": "1d369115ce9dafd6afca5160a42254d39c963576",
+      "runner_git_blob": "ed93ac5ec4b2783d56c0aa6cf7cfd695f59d5266",
       "tests": "tests/upstream-douyin-get-readonly.test.cjs",
-      "tests_git_blob": "b2f6396ce54ad6b2dfb7443b289f0ce99f46eae9",
+      "tests_git_blob": "bc45980c20e76ad68b2e6d0ccc4ad74094871e65",
       "docs": "docs/yutang-upstream-v3-get-readonly-acceptance-20261116.md",
       "imported_original_new_get_js": false,
       "sqlite_reads_or_writes_by_runner": false,
@@ -147,7 +147,17 @@
         "no malformed cross-video comment output"
       ],
       "site_tested": false,
-      "windows_tested": false
+      "windows_tested": false,
+      "reproduced_upstream_duplicate_dispatch": {
+        "cause": "Pinned upstream router's WebSocket timeout can fall through to HTTP polling and dispatch the same eval again.",
+        "red_before_fix": "One added test invoked the same browser eval twice; getComments was invoked twice, 2 != 1.",
+        "green_after_fix": "The same task UUID reuses one transient page-local promise; both callers receive one sanitized read; no duplicate getComments within that page.",
+        "tests_after_fix": 18,
+        "page_memory_cleanup": "Maximum 32 transient entries; 120 second TTL and timer when present. No persistent DB writes.",
+        "caveat": "Does not dedupe across browser reload, different page or new task UUID; live website not tested."
+      },
+      "live_site_tested": false,
+      "original_userscript_secret_warning": "Pinned original MIT userscript contains a nonempty hardcoded token in publicly tracked source, whereas the server may generate a new random token. Do not install unchanged, do not reuse published token, never request secrets in chat."
     }
   },
   "site_and_browser_access": {
@@ -195,7 +205,10 @@
     "latest_original_upstream_windows_validated": false,
     "latest_original_upstream_read_only_adapter_added": true,
     "latest_original_upstream_read_only_adapter_live_tested": false,
-    "no_douyin_tabs_in_shared_browser": true
+    "no_douyin_tabs_in_shared_browser": true,
+    "latest_original_upstream_read_dedupe_only_same_page_task": true,
+    "upstream_userscript_published_token_present": true,
+    "original_upstream_requires_logged_in_douyin_account": true
   },
   "safety_policy_for_next_step": {
     "do_not_modify_main": true,
@@ -207,5 +220,5 @@
     "use_existing_dedicated_edge_only": true,
     "no_claim_of_real_success_without_raw_browser_receipt": true
   },
-  "next_acceptance": "The latest original MIT upstream BridgeClient is used in a separately authored get-only runner with protocol-v3 explicit account binding and no SQLite import (13/13 isolated local HTTP/VM tests). Actual Douyin public video, comments and AI summary still BLOCKED because no authorized Windows Douyin browser or Bridge v3 session is exposed to this chat. No main or EXE changes, no paid CI. A live read requires a separately approved isolated browser/server/userscript with a privately coordinated token and exactly identified account; do not assume source tests are live acceptance."
+  "next_acceptance": "Actual read-only public Douyin video comments/AI summary remain BLOCKED: no shared Douyin browser tab and no authorized local Windows Bridge/CDP host reachable from this chat. Latest v3 runner now deduplicates identical page eval tasks against upstream WS->HTTP dispatch fallback (18/18 offline tests) but original upstream userscript contains a public hard-coded token and v3 requires an account. Preserve vendor for review only, do not auto install, login, merge main, publish or trigger paid Windows CI."
 }
