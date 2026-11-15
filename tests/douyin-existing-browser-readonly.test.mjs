@@ -27,6 +27,8 @@ function make({urls=[address],labels=['deepseek-douyin-api'],connected=true,cont
   return commentStatus==='blocked'?{status:'blocked',reasonCode:'LOGIN_REQUIRED'}:{status:commentStatus,videoId:id,source:'visible_public_comment_dom',observationScope:'currently_visible_loaded_rows_only',comments:commentStatus==='ok'?[{text:'看到了公开评论',commentId:'123'}]:[],visibleCommentCount:commentStatus==='ok'?1:0};};
  const inspectSummary=async opts=>{calls.push('ai-entry.read');assert.equal(opts.page,pages[0]);if(mutate==='afterSummary')pages[0]._closed=true;if(mutate==='reloadSameUrl')pages[0]._epoch+=1;
   if(mutate==='addOwnedTabAfterSummary')pages.push({...pages[0],_url:'https://www.douyin.com/video/7523456789012345678'});
+  if(mutate==='addOwnedBlankTabAfterSummary')pages.push({...pages[0],_url:'about:blank'});
+  if(mutate==='addOwnedLiveTabAfterSummary')pages.push({...pages[0],_url:'https://live.douyin.com/12345'});
   return aiStatus==='blocked'?{status:'blocked',reasonCode:'AI_FRAME_CHANGED_AFTER_READ'}:{status:aiStatus,videoId:id,evidenceSource:'visible_official_ai_iframe_entry_only',matchingFrameCount:aiStatus==='entry_visible'?1:0,aiSummaryEntryVisible:aiStatus==='entry_visible',aiSummaryGenerated:false,aiSummaryText:null};};
  const acquireReadLock=async()=>{
   calls.push('lock.acquire');if(lockFail)throw Error('SECRETS MUST NOT LEAK');
@@ -78,6 +80,36 @@ test('another owned Douyin homepage blocks the target, but personal and offsite 
   labels:['deepseek-douyin-api','personal-tab','deepseek-douyin-api']});
  assert.equal((await personal.run()).status,'read_only_evidence');
 });
+test('a second upstream-owned about:blank tab is ambiguous before any comment reading',async()=>{
+ const f=make({urls:[address,'about:blank'],
+   labels:['deepseek-douyin-api','deepseek-douyin-dsh']});
+ const r=await f.run();
+ assert.equal(r.reasonCode,'OWNED_VIDEO_PAGE_AMBIGUOUS');
+ assert.deepEqual(r.comments,[]);assert.ok(!f.calls.includes('comments.read'));
+});
+test('upstream-owned live.douyin.com room is counted but unrelated private pages are not read',async()=>{
+ const f=make({urls:[address,'https://live.douyin.com/12345'],
+   labels:['deepseek-douyin-api','deepseek-douyin-api']});
+ const r=await f.run();
+ assert.equal(r.reasonCode,'OWNED_VIDEO_PAGE_AMBIGUOUS');
+ assert.ok(!f.calls.includes('comments.read'));
+ const safe=make({urls:[address,'about:blank','https://live.douyin.com/profile','https://private.example/account'],
+   labels:['deepseek-douyin-api','personal-tab','deepseek-douyin-dsh','deepseek-douyin-api']});
+ assert.equal((await safe.run()).status,'read_only_evidence');
+});
+test('blank or live owned tab appearing DURING the read invalidates all earlier evidence',async()=>{
+ for(const mutate of ['addOwnedBlankTabAfterSummary','addOwnedLiveTabAfterSummary']){
+  const f=make({mutate}),r=await f.run();
+  assert.equal(r.reasonCode,'OWNED_VIDEO_PAGE_CHANGED_DURING_INSPECTION');
+  assert.deepEqual(r.comments,[]);assert.equal(r.aiSummaryEntryVisible,false);
+ }
+});
+test('malformed browser page URL fails closed instead of being skipped silently',async()=>{
+ const f=make({urls:[address,'not-a-valid-page-url'],labels:['deepseek-douyin-api','deepseek-douyin-dsh']});
+ const r=await f.run();assert.equal(r.status,'blocked');assert.equal(r.reasonCode,'OWNED_VIDEO_PAGE_READ_FAILED');
+ assert.ok(!f.calls.includes('comments.read'));
+});
+
 test('missing visible comments and AI entry are valid but never called summary content',async()=>{
  const f=make({commentStatus:'no_visible_comments',aiStatus:'not_observed'});const r=await f.run();
  assert.equal(r.status,'no_visible_evidence');assert.equal(r.reasonCode,'NO_PUBLIC_COMMENTS_OR_AI_ENTRY_VISIBLE');
