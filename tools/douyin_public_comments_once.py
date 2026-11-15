@@ -11,8 +11,10 @@ import hashlib
 import importlib
 import importlib.util
 import json
+import os
 from pathlib import Path
 import re
+from urllib.parse import urlsplit
 
 UPSTREAM_COMMIT = "96502f35b0a643a578d3841d83d11228224c3dca"
 UPSTREAM_CORE_BLOB = "9671cbc1b79cba84f5da3d92b586ebedbe29044e"
@@ -88,15 +90,33 @@ def classify_response(raw, video_id, limit, observed_at):
     }
 
 
+def _ambient_http_credentials_possible():
+    # requests.get consults .netrc and environment proxy credentials by default.
+    if os.environ.get("NETRC") or any((Path.home() / name).is_file() for name in (".netrc", "_netrc")):
+        return True
+    for name in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
+        proxy = os.environ.get(name)
+        if proxy:
+            try:
+                parsed = urlsplit(proxy if "://" in proxy else "http://" + proxy)
+                if parsed.username is not None or parsed.password is not None:
+                    return True
+            except ValueError:
+                return True
+    return False
+
+
 def run_once(video_id, limit=10, load_sampler=_load_pinned_free_sampler):
     if not isinstance(video_id, str) or not WORK_ID.fullmatch(video_id) or type(limit) is not int or not 1 <= limit <= 12:
         return _blocked(str(video_id), "INVALID_ARGS")
+    if _ambient_http_credentials_possible():
+        return _blocked(video_id, "AMBIENT_HTTP_CREDENTIALS_UNSAFE")
     try:
         sample = load_sampler()
     except Exception:
         return _blocked(video_id, "PINNED_UPSTREAM_UNAVAILABLE")
     try:
-        # Exactly one call. Never send cookies, credentials, TikHub keys, or retries.
+        # Exactly one upstream public-HTTP call; no explicit auth, paid fallback or retry.
         raw = sample(video_id, limit=limit, sort_by="likes")
     except Exception:
         return _blocked(video_id, "PUBLIC_ENDPOINT_UNAVAILABLE")
