@@ -33,25 +33,47 @@
     },
     "existing_edge_reader": {
       "passed": 26,
-      "blob": "90d7d005c83ce8387f91f28dc215659ecd41ba1e",
+      "blob": "66c06c3e619dba16ffb524727469c476c86eec40",
       "path": "tools/douyin-existing-browser-readonly.mjs",
       "tests_path": "tests/douyin-existing-browser-readonly.test.mjs",
       "tests_blob": "7f22cd431d290693a4bb86091fcd1a9cc081e8ae"
     },
-    "passed_total": 80,
+    "passed_total": 94,
     "failed_total": 0,
-    "scope_limitation": "80 passing real Node.js 22.16.0 isolated Linux unit/integration checks and real environment-gate CLI exit; no Windows dedicated Edge, live Douyin video or comment DOM accepted.",
+    "scope_limitation": "94/94 passed Node.js 22.16.0 isolated Linux tests with deterministic response events and DOM mocks. No actual dedicated Windows Edge, live Douyin comments, or official AI summary text has been independently observed.",
     "source_preflight_cli": {
-      "passed": 15,
+      "passed": 17,
       "path": "tools/run-douyin-existing-browser-readonly.mjs",
-      "blob": "928fca3f91430caba790f26d92578789623a7aa9",
+      "blob": "20f5ca49bfa841ab0ace9e63fd93e67b11838132",
       "tests_path": "tests/douyin-existing-browser-cli.test.mjs",
-      "tests_blob": "9498763644db6b88809063b59d11bf4acf19c219"
+      "tests_blob": "2d4b6bca9b1fb808b6991006d820f7c2e07514fb"
     },
     "regression_reproduced_pre_fix": {
       "details": "Old source incorrectly accepted an expected video tab when an additional upstream-owned public Douyin tab was on another video or homepage.",
       "red_tests_before_fix": 2,
       "pass_after_fix": true
+    },
+    "passive_comment_network": {
+      "adopted_from": [
+        {
+          "repo": "qinuoyun/douyin",
+          "license": "MIT",
+          "commit": "7b0a7ec2792600cff3616191866c4d82309a1e47"
+        },
+        {
+          "repo": "Tommyapi/OpenMediaCrawl",
+          "license": "MIT",
+          "commit": "cd69576e9b5609654bbbeefdae738e0e1f13eff8"
+        }
+      ],
+      "path": "tools/douyin-passive-comment-network.mjs",
+      "path_blob": "3e11c2146f05e7b4d9dcead74889d4c4f545b3a4",
+      "tests_path": "tests/douyin-passive-comment-network.test.mjs",
+      "tests_blob": "86a2812ad3d66c4190645ad5eb33a0d7a74c8e52",
+      "passed": 12,
+      "integration_tests_added": 2,
+      "effect": "Passive Playwright response listener on the already owned video page. Validates GET, HTTPS origin, endpoint, video ID and status_code=0; extracts only commentId and bounded text. Does not send requests, click, scroll or log credentials. API capture marked distinctly from visible DOM evidence.",
+      "license_notice": "docs/douyin-mit-network-reuse-notice.md"
     }
   },
   "site_and_browser_access": {
@@ -84,7 +106,10 @@
       "ai_summary_iframe_verified": false,
       "no_login_or_click": true,
       "notes": "Both requests failed with per-URL timeout; search-index text is not a live page verification. Further automatic retries stopped."
-    }
+    },
+    "passive_comment_response_capture_added": true,
+    "passive_comment_response_capture_windows_validated": false,
+    "passive_comment_response_capture_live_response_observed": false
   },
   "safety_policy_for_next_step": {
     "do_not_modify_main": true,
@@ -96,5 +121,5 @@
     "use_existing_dedicated_edge_only": true,
     "no_claim_of_real_success_without_raw_browser_receipt": true
   },
-  "next_acceptance": "Real live Douyin comment and official AI-entry verification remains BLOCKED in this Chat session: two public-page render/extract requests timed out. Do not count search results as live evidence. The source-only CLI needs a separately authorized, existing dedicated YuTang Edge/Windows execution environment. Do not trigger paid Windows CI, modify main, sign or publish based on these failures."
+  "next_acceptance": "No CI or local computer action has been performed. To obtain real evidence, execute the already-integrated one-shot probe on a preexisting authorized Windows YuTang dedicated Edge with a public target video, while the video page itself emits a comment/list response; evidence from the API response will be labeled separately from DOM-visible comments. If site never emits a response, report not_observed rather than initiating fetch, scrolling, logging in, or clicking. No proof of official AI-summary contents."
 }
