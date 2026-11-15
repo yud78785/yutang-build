@@ -114,3 +114,62 @@ test('CLI refuses pinned upstream missing tab-api lock export',async()=>{
   controllerFactory:()=>{throw Error('must not instantiate')}});
  assert.equal(r.reasonCode,'PINNED_UPSTREAM_EXPORTS_MISSING');
 });
+
+test('MIT reused passive API listener captures existing response and returns separately labeled evidence',async()=>{
+ const readState=()=>{},readComments=()=>{};
+ const state={url:`https://www.douyin.com/video/${videoId}`,pageKind:'video',videoSelection:{candidateCount:1,ambiguous:false,identityConflict:false},
+   video:{id:videoId,url:`https://www.douyin.com/video/${videoId}`,readyState:4},
+   loginRequired:false,verificationRequired:false,privateChatVisible:false,unsupportedPage:false};
+ const callbacks=new Set(), calls=[];
+ const page={url(){return state.url},isClosed(){return false},frames(){return[]},
+   on(name,fn){assert.equal(name,'response');callbacks.add(fn)},
+   off(name,fn){assert.equal(name,'response');callbacks.delete(fn)},
+   async evaluate(fn){
+     if(fn===readState)return state;
+     if(fn===readComments){
+       calls.push('read_existing_comment_DOM');
+       const response={
+         url:()=>`https://www.douyin.com/aweme/v1/web/comment/list/?aweme_id=${videoId}&cursor=0`,
+         status:()=>200,request:()=>({method:()=> 'GET'}),
+         text:async()=>JSON.stringify({status_code:0,comments:[{cid:'123456',aweme_id:videoId,text:'公开接口评论',user:{email:'never_return_this'}}]})};
+       for(const cb of callbacks)cb(response);
+       return {rows:[]};
+     }
+     if(String(fn).includes('documentOrigin'))return{label:'deepseek-douyin-api',documentOrigin:13579,locationHref:state.url};
+     return 'deepseek-douyin-api';
+   },
+   goto(){throw Error('navigation forbidden')},click(){throw Error('click forbidden')},fetch(){throw Error('network request forbidden')}
+ };
+ const browser={isConnected(){return true},contexts(){return[{pages(){return [page]}}]}};
+ let locks=0,releases=0;
+ const r=await runReadOnlySourcePreflight({...base,
+   load:async()=>[{BrowserController:class{},readPageState:readState,
+     acquireBrowserOperationLock:async()=>{locks++;return()=>{releases++}}},{readCommentDom:readComments}],
+   controllerFactory:()=>({controlDirectory:'/tmp',async connectExistingBrowser(){return browser}})
+ });
+ assert.equal(r.status,'read_only_evidence');assert.equal(r.publicCommentsStatus,'no_visible_comments');
+ assert.deepEqual(r.comments,[]);assert.equal(r.publicNetworkCommentsStatus,'api_response_observed');
+ assert.deepEqual(r.publicNetworkComments,[{commentId:'123456',text:'公开接口评论'}]);
+ assert.equal(r.aiSummaryGenerated,false);assert.equal(locks,1);assert.equal(releases,1);
+ assert.equal(callbacks.size,0);assert.doesNotMatch(JSON.stringify(r),/never_return_this/);
+ assert.deepEqual(calls,['read_existing_comment_DOM']);
+});
+
+test('forged passive network result cannot override an empty public DOM',async()=>{
+ const old=()=>{},other=()=>{};
+ const url=`https://www.douyin.com/video/${videoId}`;
+ const page={url:()=>url,isClosed:()=>false,frames:()=>[],async evaluate(fn){if(String(fn).includes('documentOrigin'))return{label:'deepseek-douyin-api',documentOrigin:1234,locationHref:url};return 'deepseek-douyin-api'}};
+ const browser={isConnected:()=>true,contexts:()=>[{pages:()=>[page]}]};
+ const fake=await (await import('../tools/douyin-existing-browser-readonly.mjs')).inspectExistingDedicatedDouyinVideoReadOnly({
+  controller:{connectExistingBrowser:async()=>browser},acquireReadLock:async()=>()=>{},readPageState:old,readCommentDom:other,
+  observeComments:async()=>({status:'no_visible_comments',source:'visible_public_comment_dom',
+   observationScope:'currently_visible_loaded_rows_only',videoId,comments:[],visibleCommentCount:0,
+   passiveNetwork:{status:'api_response_observed',source:'already_loaded_first_party_comment_api',
+    scope:'captured_page_response_only_not_independently_dom_visible',videoId,
+    comments:[{commentId:'123',videoId:'incorrect',text:'forged'}],count:1,aiSummaryGenerated:false,aiSummaryText:null}}),
+  inspectSummary:async()=>({status:'not_observed',evidenceSource:'visible_official_ai_iframe_entry_only',
+    videoId,matchingFrameCount:0,aiSummaryEntryVisible:false,aiSummaryGenerated:false,aiSummaryText:null}),expectedVideoId:videoId
+ });
+ assert.equal(fake.status,'blocked');assert.equal(fake.reasonCode,'PASSIVE_NETWORK_RECEIPT_INVALID');
+ assert.deepEqual(fake.comments,[]);
+});
