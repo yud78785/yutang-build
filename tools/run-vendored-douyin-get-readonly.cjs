@@ -35,6 +35,35 @@ function parseBridgeConfig(env) {
     return {ok:false,reasonCode:'BRIDGE_PORT_INVALID'};
   return {ok:true,token,port:Number(inputPort)};
 }
+function validateSingleTargetTab(status, videoId) {
+  if (!status || status.ok !== true || !status.connections ||
+      typeof status.connections !== 'object' || Array.isArray(status.connections))
+    return {ok:false,reasonCode:'BRIDGE_STATUS_INVALID'};
+  const connected = status.connections['douyin.com'];
+  if (!Array.isArray(connected) || connected.length !== 1)
+    return {ok:false,reasonCode:'TARGET_TAB_NOT_UNIQUE'};
+  const tab = connected[0];
+  if (!tab || tab.alive !== true || typeof tab.url !== 'string')
+    return {ok:false,reasonCode:'TARGET_TAB_NOT_READY'};
+  try {
+    const url = new URL(tab.url);
+    if (url.origin !== 'https://www.douyin.com' || url.username || url.password || url.hash ||
+        url.pathname !== `/video/${videoId}` ||
+        ['modal_id', 'aweme_id'].some(key => url.searchParams.getAll(key).some(v => v !== videoId)))
+      return {ok:false,reasonCode:'TARGET_TAB_ROUTE_MISMATCH'};
+  } catch { return {ok:false,reasonCode:'TARGET_TAB_ROUTE_MISMATCH'}; }
+  return {ok:true};
+}
+function guardGetExpression(originalExpression, videoId) {
+  // Original MIT get.js still constructs the exact getComments call. This
+  // wrapper additionally checks the CURRENT browser URL inside page context,
+  // because a registered Bridge tab URL can be stale after SPA navigation.
+  return `(async()=>{const u=new URL(location.href);`+
+    `if(u.origin!=='https://www.douyin.com'||u.username||u.password||u.hash||`+
+    `u.pathname!=='/video/${videoId}'||`+
+    `['modal_id','aweme_id'].some(k=>u.searchParams.getAll(k).some(v=>v!=='${videoId}')))`+
+    `return {status_code:-1,comments:[]};return await ${originalExpression};})()`;
+}
 function sanitizeText(s) {return s.replace(/[\u0000-\u001f\u007f]/g,'').trim().slice(0,120);}
 function verifyApiResponse(response, videoId, count) {
   if (!response || response.ok !== true) throw Error('BRIDGE_CALL_FAILED');
@@ -63,7 +92,13 @@ async function run({argv=process.argv.slice(2),env=process.env,makeClient=opts=>
   let requests=0;
   try {
     const client=makeClient({host:'127.0.0.1',port:cfg.port,token:cfg.token});
-    if (typeof client?.call!=='function') throw Error('BRIDGE_UNAVAILABLE');
+    if (typeof client?.call!=='function' || typeof client?.status!=='function')
+      return blocked('BRIDGE_STATUS_UNAVAILABLE',options.id);
+    let snapshot;
+    try { snapshot=await client.status(); }
+    catch { return blocked('BRIDGE_STATUS_UNAVAILABLE',options.id); }
+    const tabCheck=validateSingleTargetTab(snapshot,options.id);
+    if (!tabCheck.ok) return blocked(tabCheck.reasonCode,options.id);
     const ctx={
       audit:{startOperation(){},endOperation(){},findLastFetchTime(){return null}},
       bridgeCall(){throw Error('REPLIES_DISABLED')},
@@ -74,7 +109,7 @@ async function run({argv=process.argv.slice(2),env=process.env,makeClient=opts=>
             params?.cursor!==0 || params?.count!==options.count || expression!==expected)
           throw Error('NON_GET_ACTION_REJECTED');
         requests++;
-        return verifyApiResponse(await client.call({site:'douyin.com',expression,awaitPromise:true,connIndex:0,timeout:15000}),options.id,options.count);
+        return verifyApiResponse(await client.call({site:'douyin.com',expression:guardGetExpression(expression,options.id),awaitPromise:true,connIndex:0,timeout:15000}),options.id,options.count);
       },
     };
     const originalRows=await originalGet(ctx,[options.id,'--count',String(options.count),'--pages','1','--depth','0']);
@@ -93,7 +128,7 @@ async function run({argv=process.argv.slice(2),env=process.env,makeClient=opts=>
       comments:result,count:result.length,readOnlyCommand:true};
   } catch {return blocked('BRIDGE_GET_OR_VALIDATION_FAILED',options.id);}
 }
-module.exports={run,parseArgs,parseBridgeConfig,verifyApiResponse};
+module.exports={run,parseArgs,parseBridgeConfig,verifyApiResponse,validateSingleTargetTab,guardGetExpression};
 if (require.main===module) {
   run().then(result=>{
     process.stdout.write(JSON.stringify(result)+'\n',()=>process.exit(result.status==='ok'?0:2));
