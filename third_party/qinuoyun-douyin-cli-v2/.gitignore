@@ -1,0 +1,10 @@
+node_modules/
+.idea/
+logs/
+docs/
+*.pid
+
+# 安全：不提交包含密钥的配置文件
+config.json
+
+reply-strategy.md

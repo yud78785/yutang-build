@@ -1,0 +1,23 @@
+{
+  "name": "douyin-comment-cli",
+  "version": "2.0.0",
+  "description": "抖音评论 CLI 工具 — Bridge Framework 版（WebSocket + HTTP 轮询双模式）",
+  "scripts": {
+    "search": "node cli.js search",
+    "get": "node cli.js get",
+    "post": "node cli.js post",
+    "my": "node cli.js my",
+    "analyze": "node cli.js analyze",
+    "suggest": "node cli.js suggest",
+    "dashboard": "node cli.js dashboard",
+    "log": "node cli.js log",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.8"
+  }
+}
