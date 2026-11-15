@@ -33,10 +33,22 @@
     },
     "existing_edge_reader": {
       "passed": 26,
-      "blob": "66c06c3e619dba16ffb524727469c476c86eec40",
+      "blob": "69facb057cf0c3ed633d4acfb4152fc343e76d2b",
       "path": "tools/douyin-existing-browser-readonly.mjs",
       "tests_path": "tests/douyin-existing-browser-readonly.test.mjs",
-      "tests_blob": "7f22cd431d290693a4bb86091fcd1a9cc081e8ae"
+      "tests_blob": "370d80e7f1fbf977e1289886b15984b8574d93f9",
+      "previous_full_suite_passed": 26,
+      "new_regression_test_declarations": 4,
+      "full_suite_retested_this_round": false,
+      "new_targeted_classifier_checks_passed": 14,
+      "new_github_structural_checks_passed": 7,
+      "upstream_blank_and_live_tab_fix": {
+        "upstream": "LockyBee/dsh-douyin-agent@9c49833078f4b4d18b9211ef86d024e7f2e15739/browser-pages.mjs",
+        "old_gap": "Skipped upstream-owned about:blank and https://live.douyin.com/{numeric-room} tabs during both initial and final uniqueness checks.",
+        "fix": "Scan and compare matching upstream-owned candidate URLs; evaluate only window.name for eligible candidates. Private or offsite tabs remain untouched; invalid URLs fail closed.",
+        "validation": "14 targeted Node.js URL classifier cases passed, 7/7 committed-source structural checks passed. Four added repository integration regressions committed but not executed in this turn.",
+        "live_browser_validation": false
+      }
     },
     "passed_total": 94,
     "failed_total": 0,
@@ -100,7 +112,7 @@
         "new_upstream_tests_included": false
       }
     },
-    "total_scope_note": "18 current v3 read-only BridgeClient tests run on isolated Node.js 22.16.0 Linux; 94 prior mocked browser tests and 14 old-fork CLI tests are independent historical runs, not part of this 18.",
+    "total_scope_note": "This turn verified the updated existing-Edge owner URL classifier via 14 isolated Node tests and 7 static committed-file checks, but did NOT rerun all 30 existing-browser tests. Historical 26/26 existing-browser, 94/94 mixed and 18/18 v3 results refer to separate earlier runs and older source blobs. Do not report those old counts as verified for this new source revision.",
     "latest_source_snapshot": {
       "repository": "Yht20927/douyin-cli",
       "pinned_commit": "f9b73666ed1b24fcbbf208ed81b24acc3ff47688",
@@ -208,7 +220,9 @@
     "no_douyin_tabs_in_shared_browser": true,
     "latest_original_upstream_read_dedupe_only_same_page_task": true,
     "upstream_userscript_published_token_present": true,
-    "original_upstream_requires_logged_in_douyin_account": true
+    "original_upstream_requires_logged_in_douyin_account": true,
+    "blank_and_live_owned_tab_scan_added": true,
+    "blank_and_live_owned_tab_scan_windows_validated": false
   },
   "safety_policy_for_next_step": {
     "do_not_modify_main": true,
@@ -220,5 +234,5 @@
     "use_existing_dedicated_edge_only": true,
     "no_claim_of_real_success_without_raw_browser_receipt": true
   },
-  "next_acceptance": "Actual read-only public Douyin video comments/AI summary remain BLOCKED: no shared Douyin browser tab and no authorized local Windows Bridge/CDP host reachable from this chat. Latest v3 runner now deduplicates identical page eval tasks against upstream WS->HTTP dispatch fallback (18/18 offline tests) but original upstream userscript contains a public hard-coded token and v3 requires an account. Preserve vendor for review only, do not auto install, login, merge main, publish or trigger paid Windows CI."
+  "next_acceptance": "Existing dedicated Windows Edge/CDP remains inaccessible from the present chat. The source-only existing-browser adapter now rejects extra upstream-owned about:blank or numeric Douyin live-room tabs in both scans (14 targeted classifier checks). New source+tests are committed but full suite and live public video/comments/AI-summary evidence require authorized Windows host; do not claim source-only checks as live acceptance. No paid CI, main merge or EXE changes."
 }
