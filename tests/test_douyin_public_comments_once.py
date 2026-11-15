@@ -99,7 +99,7 @@ class PublicSampleGateTests(unittest.TestCase):
             core = root / "social_media_toolkit" / "platforms" / "core.py"
             core.parent.mkdir(parents=True)
             marker = root / "UNTRUSTED_SOURCE_WAS_RUN"
-            core.write_text(f"from pathlib import Path\\nPath({str(marker)!r}).write_text('bad')\\n")
+            core.write_text(f"from pathlib import Path\nPath({str(marker)!r}).write_text('bad')\n")
             dist = SimpleNamespace(locate_file=lambda name: core)
             with patch.object(module, "distribution", return_value=dist):
                 with self.assertRaisesRegex(RuntimeError, "UPSTREAM_SOURCE_MISMATCH"):
@@ -114,15 +114,15 @@ class PublicSampleGateTests(unittest.TestCase):
             platforms.mkdir(parents=True)
             marker = root / "UNVERIFIED_INIT_WAS_RUN"
             (pkg / "__init__.py").write_text(
-                "from pathlib import Path\\nPath(" + repr(str(marker)) + ").write_text('bad')\\n"
+                "from pathlib import Path\nPath(" + repr(str(marker)) + ").write_text('bad')\n"
             )
-            (platforms / "__init__.py").write_text("raise RuntimeError('untrusted package init')\\n")
+            (platforms / "__init__.py").write_text("raise RuntimeError('untrusted package init')\n")
             core = platforms / "core.py"
             core.write_text(
-                "from dataclasses import dataclass\\n"
-                "@dataclass\\nclass Item:\\n    video_id: str\\n"
-                "def fetch_douyin_public_comments(video_id, *, limit, sort_by):\\n"
-                "    return Item(video_id).video_id\\n"
+                "from dataclasses import dataclass\n"
+                "@dataclass\nclass Item:\n    video_id: str\n"
+                "def fetch_douyin_public_comments(video_id, *, limit, sort_by):\n"
+                "    return Item(video_id).video_id\n"
             )
             dist = SimpleNamespace(locate_file=lambda name: core)
             sha = module._git_blob_sha1(core.read_bytes())
