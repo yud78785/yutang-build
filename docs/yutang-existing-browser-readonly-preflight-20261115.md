@@ -108,3 +108,59 @@ The source-only `inspectExistingDedicatedDouyinVideoReadOnly` now defaults to `o
 **Residual limitation:** `Promise.race` bounds return time but cannot cancel an already pending Playwright `page.evaluate` request inside a long-lived process. The intended source runner is one-shot and ends after a single receipt, but its Windows connection/process lifetime has not yet been exercised. Other upstream startup/connect delays also have their own timers. This is **not** real Windows/Douyin acceptance. Neither an isolated Linux success nor a `WINDOWS_REQUIRED` output may be represented as a real comment or AI-summary result. No new CI run was started.
 
 **Execution preconditions remain:** the source runner is not part of the accepted EXE, and a separately authorized Windows executor with the pinned upstream source checkout, dependencies, and an existing owned Douyin Edge tab is required for genuine live evidence.
+
+## 2026-11-15 — existing MIT implementations reused, not another scraper
+
+After reviewing open-source, license and original code, we integrated only
+read-only *comment API response* handling from two genuinely available
+MIT projects, without installing their servers or login/stealth/browser tools:
+- [qinuoyun/douyin](https://github.com/qinuoyun/douyin) — GET
+  `/aweme/v1/web/comment/list/`, `aweme_id`, `cid`, `text`, `digg_count`,
+  `reply_comment_total`; MIT.
+- [Tommyapi/OpenMediaCrawl](https://github.com/Tommyapi/OpenMediaCrawl) —
+  `comment(c,itemId)` normalization fields and source-to-video association; MIT.
+- The authors' complete MIT notices are retained at
+  [douyin-mit-network-reuse-notice.md](douyin-mit-network-reuse-notice.md).
+
+New `tools/douyin-passive-comment-network.mjs` registers ONLY a
+Playwright `page.on('response',...)` listener on the single pre-verified
+dedicated video tab. It parses only **already-occurring** HTTPS GET responses
+from the exact first-party `/aweme/v1/web/comment/list/` path and the
+expected `aweme_id`; it checks the success status and boundaries and emits
+only comment ID and bounded text. It stores no request headers, cookies,
+tokens, author profiles, photos or video URLs; it never calls `page.goto`,
+`page.click`, `fetch`, a signing SDK, a login action, or automated scrolling.
+
+The existing one-shot source CLI now wraps `observePublicCommentsReadOnly`
+with `makePassiveDouyinCommentReader`. The top-level receipt strictly
+separates `comments` (currently visible DOM comments) and
+`publicNetworkComments` (comments seen only in a captured first-party
+network response). **An API response is not proof that the comment panel is
+visibly open.** An empty or missing response is not treated as a success; the
+DOM and AI-entry tests remain independently fail-closed.
+
+Verification on isolated Node.js 22.16.0 Linux: **94/94 offline tests pass,
+0 failures, 0 skips**. New 12 passive-response parser/listener tests plus
+two full CLI integration tests cover the path from a simulated existing
+page response through lock, read-only wrapper and truthful output; malformed
+video IDs, remote domains and forged result fields are rejected. Newly
+committed exact Git blobs:
+
+- `tools/douyin-passive-comment-network.mjs` —
+  `3e11c2146f05e7b4d9dcead74889d4c4f545b3a4`
+- `tests/douyin-passive-comment-network.test.mjs` —
+  `86a2812ad3d66c4190645ad5eb33a0d7a74c8e52`
+- `tools/douyin-existing-browser-readonly.mjs` —
+  `66c06c3e619dba16ffb524727469c476c86eec40`
+- `tools/run-douyin-existing-browser-readonly.mjs` —
+  `20f5ca49bfa841ab0ace9e63fd93e67b11838132`
+- `tests/douyin-existing-browser-cli.test.mjs` —
+  `2d4b6bca9b1fb808b6991006d820f7c2e07514fb`
+
+**Real-world blocker remains.** There was no actual Windows dedicated Edge
+connection, no live Douyin comment response, and no verified official AI
+summary body in this session. The first-party comments response may not fire
+on an already fully loaded page unless the site triggers it naturally;
+the passive observer will not force a fetch, navigation or click. New site
+tests, EXE modifications, signing or release still require a separately
+authorized environment. No paid Windows CI or main changes were made.
