@@ -1,4 +1,5 @@
-// Source-only, optional Windows acceptance runner. No browser launch or writes.
+// Source-only Windows acceptance runner. No browser launch or API requests.
+// It uses the existing upstream temporary tab-api lockfile for read coordination.
 // Requires a clean, pinned *source* checkout of the upstream project.
 import path from 'node:path';
 import fs from 'node:fs';
@@ -6,6 +7,7 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { inspectExistingDedicatedDouyinVideoReadOnly } from './douyin-existing-browser-readonly.mjs';
 import { observePublicCommentsReadOnly } from './douyin-public-comment-readonly.mjs';
+import { makePassiveDouyinCommentReader } from './douyin-passive-comment-network.mjs';
 import { inspectDouyinAiSummaryEntryReadOnly } from './douyin-ai-summary-entry-readonly.mjs';
 
 const UPSTREAM_SHA = '9c49833078f4b4d18b9211ef86d024e7f2e15739';
@@ -82,7 +84,8 @@ export async function runReadOnlySourcePreflight({argv, platform=process.platfor
   try{
     return await inspectExistingDedicatedDouyinVideoReadOnly({
       controller,readPageState:core.readPageState,readCommentDom:comments.readCommentDom,
-      observeComments:observePublicCommentsReadOnly,inspectSummary:inspectDouyinAiSummaryEntryReadOnly,
+      observeComments:makePassiveDouyinCommentReader(observePublicCommentsReadOnly),
+      inspectSummary:inspectDouyinAiSummaryEntryReadOnly,
       acquireReadLock: ({signal}) => core.acquireBrowserOperationLock('tab-api', {
         signal, directory:controller.controlDirectory, timeoutMs:4000,
       }),
