@@ -1,0 +1,52 @@
+{
+  "name": "douyin-comment-cli",
+  "version": "2.0.0",
+  "description": "抖音评论运营 CLI — Bridge Framework（油猴 + WebSocket），含 AI 人格化回复、节奏守卫、SQLite 记忆层、推广引擎",
+  "license": "MIT",
+  "author": "Yht20927",
+  "homepage": "https://github.com/Yht20927/douyin-cli#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Yht20927/douyin-cli.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Yht20927/douyin-cli/issues"
+  },
+  "keywords": [
+    "douyin", "tiktok", "comment", "automation", "bridge",
+    "tampermonkey", "cli", "sqlite"
+  ],
+  "main": "cli.js",
+  "bin": {
+    "dy": "./cli.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "server": "node server.js",
+    "help": "node cli.js help",
+    "search": "node cli.js search",
+    "get": "node cli.js get",
+    "post": "node cli.js post",
+    "like": "node cli.js like",
+    "delete-comment": "node cli.js delete-comment",
+    "download": "node cli.js download",
+    "my": "node cli.js my",
+    "analyze": "node cli.js analyze",
+    "suggest": "node cli.js suggest",
+    "dashboard": "node cli.js dashboard",
+    "log": "node cli.js log",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.10.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "protobufjs": "^8.6.4",
+    "protobufjs-cli": "^2.5.5",
+    "vitest": "^4.1.8"
+  }
+}

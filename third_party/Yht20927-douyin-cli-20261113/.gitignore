@@ -1,0 +1,27 @@
+node_modules/
+.idea/
+logs/
+docs/
+downloads/
+storage/
+*.pid
+
+# 安全：不提交包含密钥的配置文件
+config.json
+
+reply-strategy.md
+
+downloads/
+
+用户配置.md
+# 运行时产物
+*.log
+*.bak
+
+# 抓包样本（含真实用户数据/session cookie，不入库）
+请求.txt
+响应.txt
+*.har
+
+# 崩溃堆栈转储
+*.stackdump
