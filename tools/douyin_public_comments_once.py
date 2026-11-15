@@ -8,12 +8,13 @@ retry, or claim video/audio playback or complete comment coverage.
 import argparse
 from datetime import datetime, timezone
 import hashlib
-import importlib
-import importlib.util
+from importlib.metadata import PackageNotFoundError, distribution
 import json
 import os
 from pathlib import Path
 import re
+import sys
+from types import ModuleType
 from urllib.parse import urlsplit
 
 UPSTREAM_COMMIT = "96502f35b0a643a578d3841d83d11228224c3dca"
@@ -34,14 +35,36 @@ def _git_blob_sha1(content):
 
 
 def _load_pinned_free_sampler():
-    # Check the exact source file before importing its HTTP implementation.
-    spec = importlib.util.find_spec(UPSTREAM_MODULE)
-    if spec is None or not spec.origin or not Path(spec.origin).is_file():
-        raise RuntimeError("UPSTREAM_NOT_INSTALLED")
-    if _git_blob_sha1(Path(spec.origin).read_bytes()) != UPSTREAM_CORE_BLOB:
+    # find_spec('package.child') executes unverified package __init__.py!
+    # Locate the distribution's core file via package metadata instead.
+    try:
+        dist = distribution("social-media-toolkit")
+    except PackageNotFoundError as exc:
+        raise RuntimeError("UPSTREAM_NOT_INSTALLED") from exc
+    core_path = Path(dist.locate_file("social_media_toolkit/platforms/core.py"))
+    if not core_path.is_file() or core_path.is_symlink():
+        raise RuntimeError("UPSTREAM_FILE_NOT_REGULAR")
+    pinned_bytes = core_path.read_bytes()
+    if _git_blob_sha1(pinned_bytes) != UPSTREAM_CORE_BLOB:
         raise RuntimeError("UPSTREAM_SOURCE_MISMATCH")
-    module = importlib.import_module(UPSTREAM_MODULE)
-    return module.fetch_douyin_public_comments
+
+    # The pinned core.py has no relative imports, only stdlib + requests.
+    # Execute *the verified bytes*, never package __init__.py or a re-read file.
+    module_name = "_yutang_pinned_douyin_core"
+    module = ModuleType(module_name)
+    module.__file__ = str(core_path)
+    if module_name in sys.modules:
+        raise RuntimeError("UPSTREAM_MODULE_NAME_OCCUPIED")
+    sys.modules[module_name] = module  # required by the pinned dataclasses
+    try:
+        exec(compile(pinned_bytes, str(core_path), "exec"), module.__dict__)
+        sampler = getattr(module, "fetch_douyin_public_comments", None)
+        if not callable(sampler):
+            raise RuntimeError("UPSTREAM_SAMPLER_MISSING")
+    except BaseException:
+        sys.modules.pop(module_name, None)
+        raise
+    return sampler
 
 
 def classify_response(raw, video_id, limit, observed_at):
