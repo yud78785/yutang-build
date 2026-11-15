@@ -126,7 +126,7 @@ class PublicSampleGateTests(unittest.TestCase):
             )
             dist = SimpleNamespace(locate_file=lambda name: core)
             sha = module._git_blob_sha1(core.read_bytes())
-            with patch.object(module, "distribution", return_value=dist), \\
+            with patch.object(module, "distribution", return_value=dist), \
                  patch.object(module, "UPSTREAM_CORE_BLOB", sha):
                 sampler = module._load_pinned_free_sampler()
             self.assertEqual(sampler(ID, limit=2, sort_by="likes"), ID)
