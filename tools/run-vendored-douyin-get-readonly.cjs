@@ -66,7 +66,13 @@ function guardGetExpression(originalExpression, videoId) {
 }
 function sanitizeText(s) {return s.replace(/[\u0000-\u001f\u007f]/g,'').trim().slice(0,120);}
 function verifyApiResponse(response, videoId, count) {
-  if (!response || response.ok !== true) throw Error('BRIDGE_CALL_FAILED');
+  if (!response || response.ok !== true) {
+    const msg=typeof response?.error==='string'?response.error:'';
+    if (msg.startsWith('Unauthorized')) throw Error('BRIDGE_TOKEN_REJECTED');
+    if (msg.includes('No connection for site') || msg.includes('No connection for'))
+      throw Error('BRIDGE_NO_CONNECTED_BROWSER');
+    throw Error('BRIDGE_CALL_FAILED');
+  }
   const data=response.value;
   if (!data || typeof data !== 'object' || Array.isArray(data) || data.status_code!==0)
     throw Error('COMMENT_API_NOT_SUCCESS');
@@ -96,7 +102,10 @@ async function run({argv=process.argv.slice(2),env=process.env,makeClient=opts=>
       return blocked('BRIDGE_STATUS_UNAVAILABLE',options.id);
     let snapshot;
     try { snapshot=await client.status(); }
-    catch { return blocked('BRIDGE_STATUS_UNAVAILABLE',options.id); }
+    catch (error) {
+      return blocked(typeof error?.message==='string' && error.message.includes('Bridge Server 未启动')?
+        'BRIDGE_SERVER_NOT_RUNNING':'BRIDGE_STATUS_UNAVAILABLE',options.id);
+    }
     const tabCheck=validateSingleTargetTab(snapshot,options.id);
     if (!tabCheck.ok) return blocked(tabCheck.reasonCode,options.id);
     const ctx={
@@ -126,7 +135,11 @@ async function run({argv=process.argv.slice(2),env=process.env,makeClient=opts=>
     return {status:'ok',source:'vendored_original_get_v2',videoId:options.id,
       observationScope:'single_read_only_first_page_bridge_get_not_complete_inventory',
       comments:result,count:result.length,readOnlyCommand:true};
-  } catch {return blocked('BRIDGE_GET_OR_VALIDATION_FAILED',options.id);}
+  } catch (error) {
+    const diagnostic=typeof error?.message==='string'?error.message:'';
+    const safeCodes=new Set(['BRIDGE_TOKEN_REJECTED','BRIDGE_NO_CONNECTED_BROWSER','COMMENT_API_NOT_SUCCESS','COMMENT_API_BAD_PAYLOAD']);
+    return blocked(safeCodes.has(diagnostic)?diagnostic:'BRIDGE_GET_OR_VALIDATION_FAILED',options.id);
+  }
 }
 module.exports={run,parseArgs,parseBridgeConfig,verifyApiResponse,validateSingleTargetTab,guardGetExpression};
 if (require.main===module) {
