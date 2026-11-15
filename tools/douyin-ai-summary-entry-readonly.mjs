@@ -31,19 +31,22 @@ function videoGate(state, id) {
   });
 }
 
-export async function inspectDouyinAiSummaryEntryReadOnly({page, readPageState, expectedVideoId}={}) {
+export async function inspectDouyinAiSummaryEntryReadOnly({page, readPageState, expectedVideoId, signal}={}) {
   if (typeof expectedVideoId !== 'string' || !VIDEO_ID.test(expectedVideoId)) throw new TypeError('INVALID_VIDEO_ID');
   if (typeof page?.evaluate !== 'function' || typeof page?.frames !== 'function' || typeof readPageState !== 'function')
     throw new TypeError('READ_ONLY_FRAME_ADAPTER_REQUIRED');
+  if (signal?.aborted) return result('blocked', 'READ_ABORTED', expectedVideoId);
   let before;
   try { before = await page.evaluate(readPageState); }
   catch { return result('blocked', 'INITIAL_PAGE_READ_FAILED', expectedVideoId); }
+  if (signal?.aborted) return result('blocked', 'READ_ABORTED', expectedVideoId);
   const first = videoGate(before, expectedVideoId);
   if (first.status === 'blocked') return result('blocked', first.reasonCode, expectedVideoId);
 
   let frames;
   try { frames = page.frames(); }
   catch { return result('blocked', 'FRAME_LIST_FAILED', expectedVideoId); }
+  if (signal?.aborted) return result('blocked', 'READ_ABORTED', expectedVideoId);
   if (!Array.isArray(frames) || frames.length > 30) return result('blocked', 'FRAME_LIST_UNVERIFIED', expectedVideoId);
   const matched = [];
   try { for (const frame of frames) if (aiFrameUrl(frame?.url?.())) matched.push(frame); }
@@ -57,9 +60,11 @@ export async function inspectDouyinAiSummaryEntryReadOnly({page, readPageState, 
       initialFrameUrl = frame.url();
       const entry = frame.getByText('视频总结', { exact: true });
       const count = await entry.count();
+      if (signal?.aborted) return result('blocked', 'READ_ABORTED', expectedVideoId, 1);
       if (!Number.isSafeInteger(count) || count < 0 || count > 1)
         return result('blocked', 'SUMMARY_ENTRY_AMBIGUOUS', expectedVideoId, 1);
       labelVisible = count === 1 && await entry.isVisible();
+      if (signal?.aborted) return result('blocked', 'READ_ABORTED', expectedVideoId, 1);
       if (!aiFrameUrl(frame.url()) || initialFrameUrl !== frame.url())
         return result('blocked', 'AI_FRAME_CHANGED', expectedVideoId, 1);
     } catch { return result('blocked', 'AI_FRAME_READ_FAILED', expectedVideoId, 1); }
@@ -68,6 +73,7 @@ export async function inspectDouyinAiSummaryEntryReadOnly({page, readPageState, 
   let after;
   try { after = await page.evaluate(readPageState); }
   catch { return result('blocked', 'FINAL_PAGE_READ_FAILED', expectedVideoId, matched.length); }
+  if (signal?.aborted) return result('blocked', 'READ_ABORTED', expectedVideoId, matched.length);
   const second = videoGate(after, expectedVideoId);
   if (second.status === 'blocked') return result('blocked', 'POST_OBSERVATION_' + second.reasonCode, expectedVideoId, matched.length);
   if (before.url !== after.url || before.video.url !== after.video.url)
@@ -83,6 +89,7 @@ export async function inspectDouyinAiSummaryEntryReadOnly({page, readPageState, 
         (matched.length === 1 && (currentMatched[0] !== matched[0] || currentMatched[0]?.url() !== initialFrameUrl)))
       return result('blocked', 'AI_FRAME_CHANGED_AFTER_READ', expectedVideoId, matched.length);
   } catch { return result('blocked', 'FINAL_FRAME_IDENTITY_READ_FAILED', expectedVideoId, matched.length); }
+  if (signal?.aborted) return result('blocked', 'READ_ABORTED', expectedVideoId, matched.length);
   if (matched.length === 0 || !labelVisible)
     return result('not_observed', 'SUMMARY_ENTRY_NOT_VISIBLE', expectedVideoId, matched.length);
   return result('entry_visible', null, expectedVideoId, 1);
