@@ -27,8 +27,12 @@ These files are **byte-for-byte identical** to upstream and are not patched.
 It rejects malformed IDs before making a network call, including injection
 strings that would otherwise be interpolated into the upstream JavaScript
 expression. It accepts only exact 10–30 digit video IDs and validates that
-the only expression sent to the original `BridgeClient.call()` is
-`window.__bridge.getComments('<digits>', 0, <count>)`. Local host is fixed
+the original `get.js` builds exactly
+`window.__bridge.getComments('<digits>', 0, <count>)`. The wrapper now
+confirms that expression, and only then encloses it in a fixed, no-post
+current-page URL guard before `BridgeClient.call()`. An already-connected
+Douyin tab MUST be unique and the registered target must match the exact
+`https://www.douyin.com/video/<digits>` route. Local host is fixed
 to `127.0.0.1`. A nonempty authenticated Bridge token is required; no
 tokens, cookies, user names, user IDs, avatars, headers or raw server errors
 appear in the output. If a response belongs to another video, fails API
@@ -47,20 +51,24 @@ Git blobs** and tested this new wrapper end to end:
 
 ```text
 node --test tests/vendored-douyin-get-readonly.test.cjs
-# tests 10
-# pass 10
+# tests 14
+# pass 14
 # fail 0
 # skipped 0
 ```
 
 An actual in-process loopback HTTP test server received **one**
-`POST /api/call` via the **unmodified BridgeClient**, containing exactly
-the original `window.__bridge.getComments('7433523124836060416', 0, 10)`
-expression. The mock returned a synthetic comment payload; the original
+`GET /api/status` preflight followed by **one** `POST /api/call` via the
+**unmodified BridgeClient**. The submitted expression is the original
+`window.__bridge.getComments('7433523124836060416', 0, 10)` enclosed in a
+fail-closed browser-context URL guard. The mock returned a synthetic comment payload; the original
 `get.js` parsed it; the wrapper returned only its comment ID and text.
 Other tests reject cross-video data, malformed IDs, wrong API status,
 missing credentials, unexpected commands, over-limit rows and sensitive
-fields. **No Douyin login or public website was accessed in this test.**
+fields. New tests reject zero/multiple Bridge tabs, incorrect registered
+video URLs and same-tab SPA navigation; a sandboxed JavaScript VM verifies
+that the current-page guard refuses to call `getComments` when the visible
+video changes. **No Douyin login or public website was accessed in this test.**
 The locally tested source/test files match their committed Git blob SHA-1.
 
 ## Requirements for a later real run
@@ -106,5 +114,47 @@ The user's accepted YuTang 1.4.7 EXE remains unchanged. This is source-only
 work on an experimental branch. No new paid CI, main merge, signing, release,
 real Windows Edge activity, user login or original Douyin comments have been
 verified. Earlier experimental 94 mocked-page tests are separate from the
-10 newly executed original-command HTTP tests; they were not all rerun in
+14 newly executed original-command HTTP tests; they were not all rerun in
 one combined test session.
+
+## 2026-11-16 — real connection identity gate and fixed diagnostics
+
+On repeat execution, the original MIT getter, helpers and BridgeClient remained
+unchanged and byte-identical to upstream. The opt-in `get` wrapper now:
+
+1. Uses the original client's `GET /api/status` first to require **exactly
+   one** alive Douyin site connection whose last registered URL is the
+   expected `/video/{id}`; all other outcomes exit with a fixed BLOCKED code.
+2. Refuses multi-tab ambiguity rather than blindly using the first registered
+   connection (`connIndex=0`). The original userscript only records its URL
+   at connect time: this **may be stale** after SPA navigation.
+3. Wraps the original getter expression in a fixed `location.href` guard
+   inside the browser's page context immediately before the original
+   `window.__bridge.getComments` call. This rejects a tab that navigated to
+   a different video since registration; it does not send a publish or
+   account-management command.
+4. Distinguishes `BRIDGE_SERVER_NOT_RUNNING`,
+   `BRIDGE_STATUS_UNAVAILABLE`, `TARGET_TAB_NOT_UNIQUE`,
+   `TARGET_TAB_NOT_READY`, `TARGET_TAB_ROUTE_MISMATCH`,
+   `BRIDGE_TOKEN_REJECTED`, `COMMENT_API_NOT_SUCCESS` and
+   `COMMENT_API_BAD_PAYLOAD`. Output contains no token, profile data,
+   registered URLs or untrusted server error strings.
+
+**Reproduced validation:** 14/14 actual isolated Node.js tests pass with
+unmodified vendored get/HTTP client, including one real local HTTP
+status+call sequence and a JavaScript VM test that confirms the in-page
+guard blocks stale/incorrect URLs before invoking the getter.
+Exact Git blob IDs:
+- `tools/run-vendored-douyin-get-readonly.cjs`:
+  `602e5581acf239ffd9e041440a1eec237c17fa32`.
+- `tests/vendored-douyin-get-readonly.test.cjs`:
+  `fbb0fe1b825a1ca659a18381a8c6cd96bba425ec`.
+
+**Outstanding actual site blocker:** the original userscript ships with a
+blank `CONFIG.token`, while the original Bridge server can generate a new
+token into its local `config.json` during startup. A non-matching token will
+produce `BRIDGE_TOKEN_REJECTED` or no registered tab. On an approved
+isolated host, the same **privately managed** token must be configured in
+server, userscript and runner environment; never copy it into GitHub or chat.
+This experimental repo branch has not installed, enabled, or authenticated
+that setup on the user's Windows device. No live Douyin comments were read.
