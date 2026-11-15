@@ -117,3 +117,53 @@ test('simulated unavailable bridge does not leak address or token',async()=>{
  assert.equal(r.status,'blocked');assert.deepEqual(r.comments,[]);
  assert.doesNotMatch(JSON.stringify(r),/0123456789abcdef-secret-123456|127\.0\.0\.1/);
 });
+
+test('same server-dispatched expression is idempotent across WS timeout HTTP retry',async()=>{
+ let apiCalls=0;
+ const holder={resolve:null};
+ const response=new Promise(resolve=>{holder.resolve=resolve});
+ const context={URL,location:{href:`https://www.douyin.com/video/${vid}`},window:{__bridge:{getComments(){apiCalls++;return response}}}};
+ const id='11111111-2222-4333-8444-555555555555';
+ const script=makeReadOnlyExpression(vid,10,id);
+ const p1=vm.runInNewContext(script,context);
+ const p2=vm.runInNewContext(script,context);
+ holder.resolve({status_code:0,comments:[{cid:'12345',aweme_id:vid,text:'single request'}]});
+ const [v1,v2]=await Promise.all([p1,p2]);
+ assert.equal(apiCalls,1,'WS-to-HTTP retry must not cause two Douyin comment requests');
+ assert.equal(v1.status,'ok');assert.equal(v2.status,'ok');
+ assert.deepEqual(JSON.parse(JSON.stringify(v1.comments)),JSON.parse(JSON.stringify(v2.comments)));
+});
+
+test('late HTTP retry after first response reuses sanitized result, no second site GET',async()=>{
+ let calls=0;
+ const context={URL,location:{href:`https://www.douyin.com/video/${vid}`},window:{__bridge:{async getComments(){calls++;return {status_code:0,comments:[{cid:'12345',aweme_id:vid,text:'comment'}]}}}}};
+ const expr=makeReadOnlyExpression(vid,10,'aaaa1111-bbbb-4ccc-8ddd-eeeeeeeeeeee');
+ const first=await vm.runInNewContext(expr,context);
+ const late=await vm.runInNewContext(expr,context);
+ assert.equal(calls,1);
+ assert.equal(first.status,'ok');assert.equal(late.status,'ok');
+ assert.equal(context.window[Symbol.for('yutang.public_comment_readonly_once.v1')].size,1);
+});
+test('two distinct read request IDs do not share the site response',async()=>{
+ let calls=0;
+ const context={URL,location:{href:`https://www.douyin.com/video/${vid}`},window:{__bridge:{async getComments(){calls++;return{status_code:0,comments:[{cid:'12345',text:'ok'}]}}}}};
+ const one=makeReadOnlyExpression(vid,10,'11111111-2222-4333-8444-555555555555');
+ const two=makeReadOnlyExpression(vid,10,'22222222-3333-4444-8555-666666666666');
+ await Promise.all([vm.runInNewContext(one,context),vm.runInNewContext(two,context)]);
+ assert.equal(calls,2);
+});
+test('invalid task identifiers cannot be injected into the page eval',()=>{
+ for(const id of ["x');window.__bridge.post()//",'','1234','11111111-2222-4333-8444-555555555555\npost']){
+  assert.throws(()=>makeReadOnlyExpression(vid,10,id),/INVALID_REQUEST_ID/);
+ }
+});
+test('cached result is not returned after navigation to a different video',async()=>{
+ let calls=0;
+ const context={URL,location:{href:`https://www.douyin.com/video/${vid}`},window:{__bridge:{async getComments(){calls++;return{status_code:0,comments:[{cid:'12345',text:'first'}]}}}}};
+ const expr=makeReadOnlyExpression(vid,10,'11111111-2222-4333-8444-555555555555');
+ assert.equal((await vm.runInNewContext(expr,context)).status,'ok');
+ context.location.href='https://www.douyin.com/video/7999999999999999999';
+ const recheck=await vm.runInNewContext(expr,context);
+ assert.equal(recheck.status,'route_mismatch');assert.deepEqual(JSON.parse(JSON.stringify(recheck.comments)),[]);
+ assert.equal(calls,1);
+});
