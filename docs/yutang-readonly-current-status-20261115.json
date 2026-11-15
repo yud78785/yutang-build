@@ -76,7 +76,7 @@
       "license_notice": "docs/douyin-mit-network-reuse-notice.md"
     },
     "vendored_original_get_readonly": {
-      "passed": 10,
+      "passed": 14,
       "failed": 0,
       "skipped": 0,
       "test_host": "isolated Linux Node v22.16.0",
@@ -87,14 +87,14 @@
         "bridge_client": "c69757008661e13f37707002f1a4bc3a8d666044"
       },
       "runner": "tools/run-vendored-douyin-get-readonly.cjs",
-      "runner_blob": "b2fc4c76bc6b65f7992ca0547393d28c2bc0c0ef",
+      "runner_blob": "602e5581acf239ffd9e041440a1eec237c17fa32",
       "tests": "tests/vendored-douyin-get-readonly.test.cjs",
-      "tests_blob": "229209d89c0d52cee0bf1c39626f85a32099002f",
-      "verification": "Unmodified original get.js and BridgeClient completed one real loopback HTTP POST /api/call against a synthetic mock server. Verified allowed expression, 19 digit IDs, response validation, redacted output, blocked malformed and unauthenticated cases.",
+      "tests_blob": "fbb0fe1b825a1ca659a18381a8c6cd96bba425ec",
+      "verification": "Independent rerun with exact MIT-original get.js, helpers.js and BridgeClient: 14/14 passed locally on Node v22.16.0/Linux. One real localhost GET /api/status then one POST /api/call was received by mock server; JavaScript VM confirmed live page route guard aborts after SPA navigation to another video. Fixed diagnostics for unreachable Bridge, incorrect tab count/route, rejected token and rejected API response. This is NOT a real Douyin site check.",
       "live_douyin_verified": false,
       "local_windows_verified": false
     },
-    "total_scope_note": "Previous 94 simulated DOM/network tests were previously run and not rerun jointly in this turn. New 10 original-get HTTP mock tests passed independently on exact-byte vendored dependencies. Do not claim 104 tests were rerun together."
+    "total_scope_note": "Previously recorded 94 mocked page/network checks were not rerun during this particular call. 14 original get/BridgeClient tests were independently rerun on Node 22.16.0 Linux. No all-suite simultaneous aggregate asserted."
   },
   "site_and_browser_access": {
     "public_web_index_douyin_comments_observed": true,
@@ -132,7 +132,11 @@
     "passive_comment_response_capture_live_response_observed": false,
     "vendored_original_get_command_tested_mock_http": true,
     "vendored_original_get_live_douyin_verified": false,
-    "vendored_original_get_token_handshake_awaiting_isolated_runtime": true
+    "vendored_original_get_token_handshake_awaiting_isolated_runtime": true,
+    "original_bridge_get_tab_identity_gate_added": true,
+    "original_bridge_get_live_site_verified": false,
+    "original_bridge_get_binding": "Original get.js unmodified; wrapper preflights exact one alive registered target and wraps original get expression in a browser-context live location.href gate. Registered URLs can be stale on SPA navigation; live guard rejects incorrect current routes.",
+    "original_bridge_token_setup_blocker": "Original userscript CONFIG.token is blank in the MIT snapshot; server may generate its own runtime token at startup. Matching server/userscript/runner local token required for actual site handshake. Do not upload or ask for token; no real user device accessed."
   },
   "safety_policy_for_next_step": {
     "do_not_modify_main": true,
@@ -144,5 +148,5 @@
     "use_existing_dedicated_edge_only": true,
     "no_claim_of_real_success_without_raw_browser_receipt": true
   },
-  "next_acceptance": "A real host must first run the original MIT Bridge server in an isolated local browser context with a matching server/userscript auth token; the optional get-only wrapper imports byte-exact original CLI code and issues at most one read-only first-page GET. Do not start browsers, install userscript or log in on the user's device without explicit approved environment; live Douyin result is NOT VERIFIED."
+  "next_acceptance": "Actual live acceptance requires isolated authorized Windows host with the original MIT Bridge server and userscript already configured to the same local token, one registered target /video/{id} tab, and an approved browser session. Source-only original get wrapper now preflights registry and guards the current URL before a single read-only comment GET. No real comments yet; do not start paid CI, install userscript in daily Chrome, modify EXE, or merge main."
 }
