@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "project": "YuTang 1.4.7 public video comments and AI-entry read-only",
-  "as_of_date": "2026-11-15",
+  "as_of_date": "2026-11-16",
   "repository": "yud78785/yutang-build",
   "experiment_branch": "experiment/yutang-public-comment-readonly-20261115",
   "source_baseline_commit": "924963f01842c6a98f0e9d8d78281924d9825d48",
@@ -100,7 +100,7 @@
         "new_upstream_tests_included": false
       }
     },
-    "total_scope_note": "Previously recorded 94 mocked page/network checks were not rerun during this particular call. 14 original get/BridgeClient tests were independently rerun on Node 22.16.0 Linux. No all-suite simultaneous aggregate asserted.",
+    "total_scope_note": "13 newly verified latest upstream v3 BridgeClient tests were run on isolated Linux/Node v22.16.0; they do NOT include prior independently run old-fork 14 or mocked-browser 94 tests. No combined 121 test-run claim.",
     "latest_source_snapshot": {
       "repository": "Yht20927/douyin-cli",
       "pinned_commit": "f9b73666ed1b24fcbbf208ed81b24acc3ff47688",
@@ -121,6 +121,33 @@
         "ws"
       ],
       "notice_path": "docs/yutang-upstream-full-snapshot-20261116.md"
+    },
+    "upstream_v3_get_readonly": {
+      "passed": 13,
+      "failed": 0,
+      "skipped": 0,
+      "test_host": "isolated Linux Node.js v22.16.0",
+      "source_pinned": "Yht20927/douyin-cli@f9b73666ed1b24fcbbf208ed81b24acc3ff47688",
+      "bridge_client_git_blob": "5c7fd38f25c27f198a2ea5021343ed3c9376fd3e",
+      "runner": "tools/run-upstream-douyin-get-readonly.cjs",
+      "runner_git_blob": "1d369115ce9dafd6afca5160a42254d39c963576",
+      "tests": "tests/upstream-douyin-get-readonly.test.cjs",
+      "tests_git_blob": "b2f6396ce54ad6b2dfb7443b289f0ce99f46eae9",
+      "docs": "docs/yutang-upstream-v3-get-readonly-acceptance-20261116.md",
+      "imported_original_new_get_js": false,
+      "sqlite_reads_or_writes_by_runner": false,
+      "browser_started": false,
+      "verified_mock_real_http": true,
+      "verifies": [
+        "v3 connection and account identity",
+        "one local HTTP status+call via actual MIT BridgeClient",
+        "explicit opType read and account pinned",
+        "video identity pre/post await",
+        "no user profile data in output",
+        "no malformed cross-video comment output"
+      ],
+      "site_tested": false,
+      "windows_tested": false
     }
   },
   "site_and_browser_access": {
@@ -165,7 +192,10 @@
     "original_bridge_get_binding": "Original get.js unmodified; wrapper preflights exact one alive registered target and wraps original get expression in a browser-context live location.href gate. Registered URLs can be stale on SPA navigation; live guard rejects incorrect current routes.",
     "original_bridge_token_setup_blocker": "Original userscript CONFIG.token is blank in the MIT snapshot; server may generate its own runtime token at startup. Matching server/userscript/runner local token required for actual site handshake. Do not upload or ask for token; no real user device accessed.",
     "latest_original_upstream_read_only_enabled": false,
-    "latest_original_upstream_windows_validated": false
+    "latest_original_upstream_windows_validated": false,
+    "latest_original_upstream_read_only_adapter_added": true,
+    "latest_original_upstream_read_only_adapter_live_tested": false,
+    "no_douyin_tabs_in_shared_browser": true
   },
   "safety_policy_for_next_step": {
     "do_not_modify_main": true,
@@ -177,5 +207,5 @@
     "use_existing_dedicated_edge_only": true,
     "no_claim_of_real_success_without_raw_browser_receipt": true
   },
-  "next_acceptance": "The active, MIT original Yht20927/douyin-cli source is now vendored intact for review (125/125 exact source files excluding a crash dump), but DO NOT run or replace the existing old-fork read-only get wrapper because the newer get writes SQLite users/comments, and current runtime is not a verified read-only bridge. Live authorized Windows Douyin browser access, official AI-summary text and real comment receipts remain unverified. No paid CI/release without explicit approval."
+  "next_acceptance": "The latest original MIT upstream BridgeClient is used in a separately authored get-only runner with protocol-v3 explicit account binding and no SQLite import (13/13 isolated local HTTP/VM tests). Actual Douyin public video, comments and AI summary still BLOCKED because no authorized Windows Douyin browser or Bridge v3 session is exposed to this chat. No main or EXE changes, no paid CI. A live read requires a separately approved isolated browser/server/userscript with a privately coordinated token and exactly identified account; do not assume source tests are live acceptance."
 }
