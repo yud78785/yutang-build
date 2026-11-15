@@ -1,6 +1,8 @@
 """Negative-path tests for the one-shot pinned upstream public sample wrapper."""
 import importlib.util
 from pathlib import Path
+from types import SimpleNamespace
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -90,6 +92,46 @@ class PublicSampleGateTests(unittest.TestCase):
             result = module.run_once(ID, load_sampler=lambda: calls.append(1))
         self.assertEqual(result["reason"], "AMBIENT_HTTP_CREDENTIALS_UNSAFE")
         self.assertEqual(calls, [])
+
+    def test_unverified_core_bytes_never_execute(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            root = Path(tempdir)
+            core = root / "social_media_toolkit" / "platforms" / "core.py"
+            core.parent.mkdir(parents=True)
+            marker = root / "UNTRUSTED_SOURCE_WAS_RUN"
+            core.write_text(f"from pathlib import Path\\nPath({str(marker)!r}).write_text('bad')\\n")
+            dist = SimpleNamespace(locate_file=lambda name: core)
+            with patch.object(module, "distribution", return_value=dist):
+                with self.assertRaisesRegex(RuntimeError, "UPSTREAM_SOURCE_MISMATCH"):
+                    module._load_pinned_free_sampler()
+            self.assertFalse(marker.exists())
+
+    def test_verified_core_executes_without_loading_parent_init(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            root = Path(tempdir)
+            pkg = root / "social_media_toolkit"
+            platforms = pkg / "platforms"
+            platforms.mkdir(parents=True)
+            marker = root / "UNVERIFIED_INIT_WAS_RUN"
+            (pkg / "__init__.py").write_text(
+                "from pathlib import Path\\nPath(" + repr(str(marker)) + ").write_text('bad')\\n"
+            )
+            (platforms / "__init__.py").write_text("raise RuntimeError('untrusted package init')\\n")
+            core = platforms / "core.py"
+            core.write_text(
+                "from dataclasses import dataclass\\n"
+                "@dataclass\\nclass Item:\\n    video_id: str\\n"
+                "def fetch_douyin_public_comments(video_id, *, limit, sort_by):\\n"
+                "    return Item(video_id).video_id\\n"
+            )
+            dist = SimpleNamespace(locate_file=lambda name: core)
+            sha = module._git_blob_sha1(core.read_bytes())
+            with patch.object(module, "distribution", return_value=dist), \\
+                 patch.object(module, "UPSTREAM_CORE_BLOB", sha):
+                sampler = module._load_pinned_free_sampler()
+            self.assertEqual(sampler(ID, limit=2, sort_by="likes"), ID)
+            self.assertFalse(marker.exists())
+            self.assertNotIn("social_media_toolkit", __import__("sys").modules)
 
     def test_no_network_for_invalid_video_id(self):
         calls = []
