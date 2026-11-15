@@ -5,10 +5,12 @@ const http=require('node:http');
 const fs=require('node:fs');
 const crypto=require('node:crypto');
 const path=require('node:path');
-const {run,parseArgs,parseBridgeConfig}=require('../tools/run-vendored-douyin-get-readonly.cjs');
+const vm=require('node:vm');
+const {run,parseArgs,parseBridgeConfig,validateSingleTargetTab,guardGetExpression}=require('../tools/run-vendored-douyin-get-readonly.cjs');
 const videoId='7433523124836060416';
 const token='0123456789abcdef1234567890abcdef';
 const env={YUTANG_DOUYIN_BRIDGE_TOKEN:token};
+const targetStatus={ok:true,connections:{'douyin.com':[{alive:true,url:`https://www.douyin.com/video/${videoId}`}]}};
 
 function blob(file) {const content=fs.readFileSync(file);return crypto.createHash('sha1').update(`blob ${content.length}\0`).update(content).digest('hex')}
 const vendor=path.resolve(__dirname,'../third_party/qinuoyun-douyin-cli-v2');
@@ -35,17 +37,19 @@ test('must have a valid secret before any local HTTP request',async()=>{
 test('rejects invalid or remote port and keeps host pinned to loopback',async()=>{
  for(const port of ['0','65536','abc','127.0.0.1:19422','-1'])assert.equal(parseBridgeConfig({...env,YUTANG_DOUYIN_BRIDGE_PORT:port}).ok,false);
  let opts;
- const r=await run({argv:[videoId],env,makeClient:config=>{opts=config;return {call:async()=>({ok:true,value:{status_code:0,comments:[]}})}}});
+ const r=await run({argv:[videoId],env,makeClient:config=>{opts=config;return {status:async()=>targetStatus,call:async()=>({ok:true,value:{status_code:0,comments:[]}})}}});
  assert.equal(opts.host,'127.0.0.1');assert.equal(r.reasonCode,'NO_COMMENTS_RETURNED');
 });
 async function withMockBridge(value, fn, options={}){
  const seen=[];
  const server=http.createServer(async(req,res)=>{
   let content='';for await(const b of req)content+=b;
-  const body=JSON.parse(content);
+  const body=content?JSON.parse(content):null;
   seen.push({path:req.url,method:req.method,authorization:req.headers.authorization,body});
   res.setHeader('content-type','application/json');
-  res.end(JSON.stringify(options.reply??{ok:true,value}));
+  if(req.url==='/api/status' && req.method==='GET')res.end(JSON.stringify(options.statusReply??targetStatus));
+  else if(req.url==='/api/call' && req.method==='POST')res.end(JSON.stringify(options.reply??{ok:true,value}));
+  else {res.statusCode=404;res.end(JSON.stringify({ok:false,error:'Invalid path'}));}
  });
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
  try{return await fn({port:server.address().port,seen});}
@@ -59,9 +63,10 @@ test('FULL original get.js -> original BridgeClient -> real loopback HTTP reques
   assert.equal(r.status,'ok');assert.equal(r.videoId,videoId);
   assert.deepEqual(r.comments,[{commentId:'7646173181204321234',text:'测试公开评论，注意只读'}]);
   assert.equal(r.readOnlyCommand,true);
-  assert.equal(seen.length,1);assert.equal(seen[0].method,'POST');assert.equal(seen[0].path,'/api/call');
-  assert.equal(seen[0].authorization,'Bearer '+token);
-  assert.deepEqual(seen[0].body,{site:'douyin.com',expression:`window.__bridge.getComments('${videoId}', 0, 10)`,awaitPromise:true,connIndex:0,timeout:15000});
+  assert.equal(seen.length,2);assert.equal(seen[0].method,'GET');assert.equal(seen[0].path,'/api/status');
+  assert.equal(seen[1].method,'POST');assert.equal(seen[1].path,'/api/call');
+  assert.equal(seen[1].authorization,'Bearer '+token);
+  assert.deepEqual(seen[1].body,{site:'douyin.com',expression:guardGetExpression(`window.__bridge.getComments('${videoId}', 0, 10)`,videoId),awaitPromise:true,connIndex:0,timeout:15000});
   assert.doesNotMatch(JSON.stringify(r),/private|SECRET|nickname|uid|digg|cookie/i);
  });
 });
@@ -88,4 +93,37 @@ test('Bridge denial, arbitrary server error payloads, and HTML errors are redact
 test('missing local Bridge server returns a blocked receipt, not a false success',async()=>{
  const r=await run({argv:[videoId],env:{...env,YUTANG_DOUYIN_BRIDGE_PORT:'1'}});
  assert.equal(r.status,'blocked');assert.deepEqual(r.comments,[]);
+});
+
+test('no tab, multiple tabs and wrong video registration refuse command BEFORE calling eval',async()=>{
+ for(const statusReply of [
+   {ok:true,connections:{}},
+   {ok:true,connections:{'douyin.com':[]}},
+   {ok:true,connections:{'douyin.com':[targetStatus.connections['douyin.com'][0],targetStatus.connections['douyin.com'][0]]}},
+   {ok:true,connections:{'douyin.com':[{alive:false,url:`https://www.douyin.com/video/${videoId}`}]}} ,
+   {ok:true,connections:{'douyin.com':[{alive:true,url:'https://www.douyin.com/video/7999999999999999999'}]}} ,
+   {ok:true,connections:{'douyin.com':[{alive:true,url:`https://www.douyin.com/video/${videoId}?modal_id=123`}]}} ,
+ ]){
+  await withMockBridge({status_code:0,comments:[{cid:'123',text:'not allowed'}]},async({port,seen})=>{
+   const r=await run({argv:[videoId],env:{...env,YUTANG_DOUYIN_BRIDGE_PORT:String(port)}});
+   assert.equal(r.status,'blocked');assert.deepEqual(r.comments,[]);
+   assert.deepEqual(seen.map(x=>x.path),['/api/status']);
+  },{statusReply});
+ }
+});
+test('stale registered URL cannot bypass current-page route guard during SPA navigation',async()=>{
+ const expression=guardGetExpression(`window.__bridge.getComments('${videoId}', 0, 10)`,videoId);
+ let called=0;
+ const browser={window:{__bridge:{async getComments(){called++;return {status_code:0,comments:[{cid:'1',text:'ok'}]}}}},URL,location:{href:'https://www.douyin.com/video/7999999999999999999'}};
+ assert.equal(JSON.stringify(await vm.runInNewContext(expression,browser)),JSON.stringify({status_code:-1,comments:[]}));assert.equal(called,0);
+ browser.location.href=`https://www.douyin.com/video/${videoId}?modal_id=123`;
+ assert.equal(JSON.stringify(await vm.runInNewContext(expression,browser)),JSON.stringify({status_code:-1,comments:[]}));assert.equal(called,0);
+ browser.location.href=`https://www.douyin.com/video/${videoId}`;
+ const result=await vm.runInNewContext(expression,browser);assert.equal(result.status_code,0);assert.equal(called,1);
+});
+test('invalid or missing status payload cannot be mistaken for a registered target',()=>{
+ for(const s of [null,{}, {ok:false}, {ok:true,connections:[]}, {ok:true,connections:{'douyin.com':[{}]}},
+   {ok:true,connections:{'douyin.com':[{alive:true,url:'javascript:alert(1)'}]}}]){
+   assert.equal(validateSingleTargetTab(s,videoId).ok,false);
+ }
 });
