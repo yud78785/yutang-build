@@ -226,3 +226,48 @@ test('invalid observation deadlines are rejected before any browser connection',
  }
  assert.equal(connected,0);
 });
+
+test('deadline aborts later read stages but does not falsely claim an in-flight DOM read has stopped',async()=>{
+ const f=make();let releaseDeferred;let laterAiCalls=0,releaseCount=0,seenSignal;
+ const readPending=new Promise(resolve=>{releaseDeferred=resolve});
+ const r=await inspect({controller:f.controller,acquireReadLock:async()=>()=>{releaseCount++},
+  readPageState:()=>{},readCommentDom:()=>{},
+  observeComments:({signal})=>{seenSignal=signal;return readPending},
+  inspectSummary:async()=>{laterAiCalls++;throw Error('must not inspect AI after timeout')},
+  expectedVideoId:id,observationTimeoutMs:40});
+ assert.equal(r.reasonCode,'READ_ONLY_OBSERVATION_TIMEOUT');
+ assert.equal(releaseCount,1);assert.equal(r.temporaryOperationLockCleanupVerified,true);
+ assert.equal(r.inFlightBrowserReadTerminationVerified,false);
+ assert.equal(r.timedOutBeforeBrowserInspectionSettled,true);
+ assert.equal(seenSignal.aborted,true);
+ releaseDeferred({status:'ok',videoId:id,source:'visible_public_comment_dom',
+  observationScope:'currently_visible_loaded_rows_only',comments:[{text:'late private snippet',commentId:'123'}],visibleCommentCount:1});
+ await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(laterAiCalls,0);
+ assert.doesNotMatch(JSON.stringify(r),/late private snippet/);
+});
+
+test('normal finished inspection positively verifies termination before lock release',async()=>{
+ const f=make();const r=await f.run();
+ assert.equal(r.status,'read_only_evidence');
+ assert.equal(r.inFlightBrowserReadTerminationVerified,true);
+ assert.equal(r.timedOutBeforeBrowserInspectionSettled,false);
+});
+
+test('timeout while AI phase is pending aborts inspection and preserves no earlier comments',async()=>{
+ const f=make();let seenSignal,finishAi,releases=0;
+ const pending=new Promise(resolve=>{finishAi=resolve});
+ const r=await inspect({controller:f.controller,acquireReadLock:async()=>()=>{releases++},
+  readPageState:()=>{},readCommentDom:()=>{},
+  observeComments:async()=>({status:'ok',videoId:id,source:'visible_public_comment_dom',
+    observationScope:'currently_visible_loaded_rows_only',comments:[{text:'prior comment',commentId:'123'}],visibleCommentCount:1}),
+  inspectSummary:({signal})=>{seenSignal=signal;return pending},
+  expectedVideoId:id,observationTimeoutMs:40});
+ assert.equal(r.reasonCode,'READ_ONLY_OBSERVATION_TIMEOUT');
+ assert.deepEqual(r.comments,[]);assert.equal(releases,1);
+ assert.equal(r.inFlightBrowserReadTerminationVerified,false);assert.equal(seenSignal.aborted,true);
+ finishAi({status:'entry_visible',videoId:id,evidenceSource:'visible_official_ai_iframe_entry_only',
+  matchingFrameCount:1,aiSummaryEntryVisible:true,aiSummaryGenerated:false,aiSummaryText:null});
+ await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(r.aiSummaryEntryVisible,false);
+});
