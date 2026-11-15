@@ -247,3 +247,74 @@ review does **not** constitute a real lockfile/Windows ownership test.
 This complete test is isolated mocked-browser behavior. **No Windows
 Edge/CDP connection or live Douyin comments/AI-summary text were obtained**.
 Do not conflate a full offline regression run with website acceptance.
+
+## 2026-11-16 — cooperative cancellation across all read-only observation stages
+
+After auditing the **actual pinned** `core.mjs#readPageState` return schema
+(`pageKind`, `videoSelection`, `video.id`, `video.url`, `video.readyState`,
+login/verification/private-chat flags), all fields required by the YuTang
+comment and AI-entry gates were confirmed compatible. This was *not* the
+source of the missing live website acceptance.
+
+A real long-running-host correctness flaw was then fixed: before this revision,
+the 15s observation deadline returned a BLOCKED receipt and released the
+temporary upstream `tab-api` lock, but an unresolved `page.evaluate` could
+continue running. Release of the cooperative lockfile was therefore not
+proof that browser inspection had stopped. A late asynchronous reader might
+try to advance into the next AI-entry phase.
+
+The experimental existing-browser probe now has a per-inspection
+`AbortController`. Expiration aborts future stages, passes its signal down
+to both comment-DOM and AI-entry readers, and explicitly separates:
+
+- `temporaryOperationLockCleanupVerified` — whether the upstream lock
+  release call succeeded.
+- `inFlightBrowserReadTerminationVerified` — whether the underlying
+  inspection promise had settled **before the returned receipt**.
+- `timedOutBeforeBrowserInspectionSettled` — true only if the deadline won
+  while inspection was still pending.
+
+The read-only comment adapter checks the signal before its first
+`page.evaluate`, after its page-state read, after comment extraction, and
+before interpreting final results. The AI-entry adapter checks before
+reading, after initial state, after iframe enumeration/count/visibility
+and after final page state. Already-aborted reads return a redacted
+`READ_ABORTED` BLOCKED receipt, never previously observed comments.
+
+**Verification performed on the exact bytes subsequently committed:**
+
+```text
+node --test tests/*.test.mjs
+# tests 44
+# pass 44
+# fail 0
+# skipped 0
+```
+
+The suite consists of 33 existing-browser integration unit tests,
+5 focused comment abort tests and 6 focused AI-entry abort tests. In
+particular, new deferred-promise tests prove that a time-out returns
+`inFlightBrowserReadTerminationVerified:false` while the underlying
+comment/AI observer is still unresolved, and that late completion cannot
+start the next stage or cause the earlier data to be returned.
+
+Exact Git blob SHA-1 (compared to isolated Node.js 22.16.0 test files):
+
+| File | Git SHA-1 |
+| --- | --- |
+| `tools/douyin-existing-browser-readonly.mjs` | `0fbeb2ee5bcdf116820795ee0c261516f707fa5f` |
+| `tests/douyin-existing-browser-readonly.test.mjs` | `6d4594d3380d6b296d84d68fd7904a30d532b38e` |
+| `tools/douyin-public-comment-readonly.mjs` | `07c57615241ace97607b5a017f2cc714e2bf231e` |
+| `tests/douyin-comment-abort.test.mjs` | `cc91c7afa886e8467a438b50efc4e9a268d284c1` |
+| `tools/douyin-ai-summary-entry-readonly.mjs` | `5f9eb66739dd9020b667dc9ce6ef16ffbcd79bd5` |
+| `tests/douyin-ai-abort.test.mjs` | `835af38d1ee9259747e0c67d60c6147699ec3302` |
+
+**Crucial limitation:** `AbortController` is cooperative; the upstream
+Playwright `page.evaluate` call itself is not forcibly interrupted.
+Therefore a timeout can still leave an unresolved read, and this is now
+reported honestly. The one-shot runner exits after writing its receipt;
+a future persistent host must not assume an unfinished read is fully
+terminated or start overlapping work based solely on successful lockfile
+release. This work has **not** connected to the user's real Windows Edge,
+read any live Douyin comment, or obtained official AI-summary text.
+No paid CI, `main` modification, new EXE or release was triggered.
