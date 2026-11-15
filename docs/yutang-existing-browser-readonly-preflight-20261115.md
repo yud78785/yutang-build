@@ -203,3 +203,47 @@ This remains a source-only defensive fix, **not** an installed Windows
 extension, actual Edge/CDP attachment, live Douyin comment result, or AI
 summary. The other upstream tab-api lock, timeout and source hashes
 remain as separately documented.
+
+## 2026-11-16 — exact-blob full suite and red-to-green regression verified
+
+The current experiment source and test file were reconstructed in the isolated
+Linux Node v22.16.0 container from GitHub and verified by `git hash-object`:
+- `tools/douyin-existing-browser-readonly.mjs` blob
+  `69facb057cf0c3ed633d4acfb4152fc343e76d2b`
+- `tests/douyin-existing-browser-readonly.test.mjs` blob
+  `370d80e7f1fbf977e1289886b15984b8574d93f9`
+
+This time **the exact files were actually executed**:
+
+```text
+node --test tests/douyin-existing-browser-readonly.test.mjs
+# tests 30
+# pass 30
+# fail 0
+# skipped 0
+```
+
+Three additional consecutive isolated runs also passed **30/30 each**.
+As a regression control, in an *uncommitted temporary copy only*, reverting
+both `upstreamOwnedCandidateUrl(page.url())` checks to the original
+`www.douyin.com`-only filter produced **27 passes / 3 failures**, specifically:
+- second owned `about:blank` tab,
+- second owned `https://live.douyin.com/12345` tab,
+- new owned blank/live tab appearing during the read.
+
+Returning to the committed source restored all 30 passing tests. No changes
+were made to GitHub by this temporary old-version experiment.
+
+**Pinned upstream API contract audited:** in
+`LockyBee/dsh-douyin-agent@9c49833078f4b4d18b9211ef86d024e7f2e15739`
+`core.mjs`, `acquireBrowserOperationLock` is really exported and accepts
+`(name, {signal, directory, timeoutMs})`; `BrowserController` sets
+`this.controlDirectory`; and `connectExistingBrowser({signal})` attaches
+to a running dedicated browser instead of launching it. The probe's
+`tab-api` lock call is source-signature compatible. Upstream lock
+acquisition creates and release deletes a transient lock file; this source
+review does **not** constitute a real lockfile/Windows ownership test.
+
+This complete test is isolated mocked-browser behavior. **No Windows
+Edge/CDP connection or live Douyin comments/AI-summary text were obtained**.
+Do not conflate a full offline regression run with website acceptance.
