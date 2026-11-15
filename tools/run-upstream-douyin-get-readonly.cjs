@@ -4,6 +4,7 @@
 // BridgeClient. Do NOT import upstream get.js: it writes users/comments to SQLite.
 // No login, browser launch, post, like, DM, audit log, DB or persistent writes.
 const { BridgeClient } = require('../third_party/Yht20927-douyin-cli-20261113/lib/client/bridge-client.js');
+const { randomUUID } = require('node:crypto');
 
 const SITE = 'douyin.com';
 const PROTOCOL_VERSION = 3; // upstream lib/commands/helpers.js CLIENT_PROTOCOL_VERSION
@@ -81,9 +82,11 @@ function selectUpstreamConnection(status, videoId, desiredAccount=null) {
   return {ok:true,account:tab.account};
 }
 
-function makeReadOnlyExpression(videoId,count) {
+function makeReadOnlyExpression(videoId,count,requestId=randomUUID()) {
   if(!VIDEO_ID.test(videoId)||!Number.isInteger(count)||count<1||count>MAX_COMMENTS)
     throw new TypeError('INVALID_READ_QUERY');
+  if(typeof requestId!=='string'||!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(requestId))
+    throw new TypeError('INVALID_REQUEST_ID');
   // Only digits are embedded. All raw API data stay INSIDE the existing page;
   // only bounded public comment IDs and texts are returned via the Bridge.
   return `(async()=>{
@@ -99,21 +102,50 @@ function makeReadOnlyExpression(videoId,count) {
     const api=window.__bridge;
     if(!api || typeof api.getComments!=='function')
       return {tag:'yt_readonly_v1',status:'bridge_get_unavailable',videoId:id,comments:[]};
-    const data=await api.getComments(id,0,${count});
-    if(!target())return {tag:'yt_readonly_v1',status:'route_mismatch',videoId:id,comments:[]};
-    if(!data || data.status_code!==0 || !Array.isArray(data.comments)||data.comments.length>${count})
-      return {tag:'yt_readonly_v1',status:'api_invalid',videoId:id,comments:[]};
-    const comments=[],seen=new Set();
-    for(const row of data.comments){
-      if(!row || typeof row.cid!=='string' || !/^\\d{1,64}$/.test(row.cid) ||
-         (row.aweme_id!=null && row.aweme_id!==id) ||
-         typeof row.text!=='string' || row.text.length>512 || seen.has(row.cid))
-        return {tag:'yt_readonly_v1',status:'api_invalid',videoId:id,comments:[]};
-      seen.add(row.cid);
-      const text=row.text.replace(/[\\u0000-\\u001f\\u007f]/g,'').trim().slice(0,120);
-      if(text)comments.push({commentId:row.cid,text});
+    // Upstream can dispatch the SAME expression twice when a timed-out
+    // WebSocket request falls back to HTTP polling. One transient, per-tab
+    // promise cache prevents the duplicate first-party comment GET.
+    const key=Symbol.for('yutang.public_comment_readonly_once.v1');
+    let cache=window[key];
+    if(!(cache instanceof Map)) {
+      cache=new Map();
+      Object.defineProperty(window,key,{value:cache,configurable:true});
     }
-    return {tag:'yt_readonly_v1',status:'ok',videoId:id,comments};
+    const requestKey=${JSON.stringify(requestId)};
+    const now=Date.now();
+    for(const [k,entry] of cache) if(!entry || entry.until<now) cache.delete(k);
+    let entry=cache.get(requestKey);
+    if(!entry) {
+      // Never retain more than 32 short-lived read receipts on one page.
+      if(cache.size>=32) cache.delete(cache.keys().next().value);
+      const promise=(async()=>{
+        const data=await api.getComments(id,0,${count});
+        if(!target())return {tag:'yt_readonly_v1',status:'route_mismatch',videoId:id,comments:[]};
+        if(!data || data.status_code!==0 || !Array.isArray(data.comments)||data.comments.length>${count})
+          return {tag:'yt_readonly_v1',status:'api_invalid',videoId:id,comments:[]};
+        const comments=[],seen=new Set();
+        for(const row of data.comments){
+          if(!row || typeof row.cid!=='string' || !/^\\d{1,64}$/.test(row.cid) ||
+             (row.aweme_id!=null && row.aweme_id!==id) ||
+             typeof row.text!=='string' || row.text.length>512 || seen.has(row.cid))
+            return {tag:'yt_readonly_v1',status:'api_invalid',videoId:id,comments:[]};
+          seen.add(row.cid);
+          const text=row.text.replace(/[\\u0000-\\u001f\\u007f]/g,'').trim().slice(0,120);
+          if(text)comments.push({commentId:row.cid,text});
+        }
+        return {tag:'yt_readonly_v1',status:'ok',videoId:id,comments};
+      })();
+      entry={promise,until:now+120000};
+      cache.set(requestKey,entry);
+      // A normal browser frees page-local state even without further probes.
+      if(typeof window.setTimeout==='function') window.setTimeout(()=>{
+        if(cache.get(requestKey)===entry) cache.delete(requestKey);
+        if(cache.size===0 && window[key]===cache) delete window[key];
+      },120000);
+    }
+    const output=await entry.promise;
+    if(!target())return {tag:'yt_readonly_v1',status:'route_mismatch',videoId:id,comments:[]};
+    return output;
   })()`;
 }
 
