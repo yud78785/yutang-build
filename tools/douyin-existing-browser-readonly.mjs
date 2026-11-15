@@ -8,6 +8,19 @@ const VIDEO = /^\d{10,30}$/;
 const LABELS = new Set(['deepseek-douyin-api', 'deepseek-douyin-dsh']);
 const LIMIT_PAGES = 30;
 
+// Match the pinned upstream browser-pages.mjs ownership candidate scope.
+// An owned Edge page can be about:blank while navigating, or a Douyin live
+// room, not only www.douyin.com. Never evaluate window.name on offsite or
+// private tabs; malformed page URLs fail the whole inspection closed.
+function upstreamOwnedCandidateUrl(value) {
+  if (typeof value !== 'string') throw new TypeError('UNVERIFIED_PAGE_URL');
+  if (value === 'about:blank' || value.startsWith('about:blank#')) return true;
+  const address = new URL(value);
+  if (address.username || address.password) return false;
+  if (address.origin === ORIGIN) return true;
+  return address.origin === 'https://live.douyin.com' && /^\/\d{4,30}\/?$/.test(address.pathname);
+}
+
 function blocked(reasonCode, videoId) {
   return {
     status: 'blocked', reasonCode, videoId,
@@ -154,8 +167,7 @@ async function inspectConnectedBrowserReadOnly({
     for (const page of pages) {
       if (isAbort(signal)) return blocked('CANCELLED_DURING_PAGE_SELECTION', expectedVideoId);
       if (page?.isClosed?.() !== false) continue;
-      const address = new URL(page.url());
-      if (address.origin !== ORIGIN || address.username || address.password) continue;
+      if (!upstreamOwnedCandidateUrl(page.url())) continue;
       const label = await page.evaluate(() => window.name);
       if (LABELS.has(label)) owned.push(page);
     }
@@ -216,8 +228,7 @@ async function inspectConnectedBrowserReadOnly({
     for (const candidate of finalPages) {
       if (isAbort(signal)) return blocked('CANCELLED_DURING_FINAL_PAGE_SELECTION', expectedVideoId);
       if (candidate?.isClosed?.() !== false) continue;
-      const address = new URL(candidate.url());
-      if (address.origin !== ORIGIN || address.username || address.password) continue;
+      if (!upstreamOwnedCandidateUrl(candidate.url())) continue;
       if (LABELS.has(await candidate.evaluate(() => window.name))) finalOwned.push(candidate);
     }
     if (finalOwned.length !== 1 || finalOwned[0] !== page)
