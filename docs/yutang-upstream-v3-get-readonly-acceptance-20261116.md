@@ -1,7 +1,7 @@
 # YuTang — Latest upstream Douyin Bridge v3, read-only comment probe
 
 **Status: source-only experimental implementation.** Node v22.16.0 isolated
-Linux test: **13/13 passing** (0 failed, 0 skipped). No Windows Edge or
+Linux test: **18/18 passing** (0 failed, 0 skipped). No Windows Edge or
 live Douyin comment session was accessed. This is **not** production or
 live-site acceptance.
 
@@ -62,15 +62,15 @@ comments. No live Douyin content was accessed.
 
 ```text
 node --test tests/upstream-douyin-get-readonly.test.cjs
-13 tests / 13 passing / 0 failing / 0 skipped
+18 tests / 18 passing / 0 failing / 0 skipped
 ```
 
 Exact code/test byte audit:
 
 | File | Git blob SHA-1 |
 | --- | --- |
-| New read-only runner | `1d369115ce9dafd6afca5160a42254d39c963576` |
-| Its 13 tests | `b2f6396ce54ad6b2dfb7443b289f0ce99f46eae9` |
+| New read-only runner | `ed93ac5ec4b2783d56c0aa6cf7cfd695f59d5266` |
+| Its 18 tests | `bc45980c20e76ad68b2e6d0ccc4ad74094871e65` |
 | Unmodified MIT upstream BridgeClient | `5c7fd38f25c27f198a2ea5021343ed3c9376fd3e` |
 
 The older fork's independent 14 test results and separate 94 mocked
@@ -105,3 +105,64 @@ installed full upstream server and userscript.
 video, first-party comment GET response, official AI summary content and
 actual endpoint behavior have not been independently verified in this
 session. No current shared Douyin browser tab was available.
+
+## 2026-11-16 — critical read dedup fix, reproduced before repair
+
+The pinned upstream v3 server `lib/server/router.js` dispatches eval through
+WebSocket first. If its pending response exceeds the configured timeout, the
+router falls back to HTTP polling. A **late first response** can therefore
+cause the same eval to execute twice. A single `POST /api/call` from the
+runner does *not* by itself guarantee one request to the Douyin site.
+
+One additional test used the exact *same browser eval string twice*
+(concurrent WS / HTTP dispatch). Before the fix, the fake
+`window.__bridge.getComments` was actually invoked **twice**, and the test
+failed (2 !== 1). The fixed read-only runner now:
+
+- Generates an unpredictable `crypto.randomUUID()` for **each invocation**,
+  embeds the same ID in the one expression submitted to the Bridge, and
+  rejects any malformed task ID before generating eval text.
+- Uses an ephemeral `Symbol.for('yutang.public_comment_readonly_once.v1')`
+  map on the existing page. A second evaluation of the **same** expression
+  reuses the first pending/completed promise instead of invoking
+  `getComments` again.
+- Rechecks the exact current video route **after** awaiting either the
+  original or shared promise. If navigation changed the video, the cached
+  result is rejected. A different fresh task ID is never treated as a
+  duplicate.
+- Limits cache size to 32 entries, keeps them at most 120 seconds, and uses
+  a page-local cleanup timer when available. This creates **transient
+  in-page memory state**, but no persistent account/DB/browser-profile writes.
+  It does not install or activate a userscript.
+
+After the fix, all **18/18** isolated Node v22.16.0 tests pass, including
+the red-to-green retry regression, late retry, different ID isolation,
+untrusted task ID refusal and video switching. Exact Git blob SHA-1:
+runner `ed93ac5ec4b2783d56c0aa6cf7cfd695f59d5266`;
+tests `bc45980c20e76ad68b2e6d0ccc4ad74094871e65`.
+
+**Limit:** This protects only repeated dispatch of the identical expression
+inside one still-running page. It cannot deduplicate across page reloads,
+different browser profiles or separate fresh task IDs, and has **not** been
+tested on a live Douyin page. Do not claim globally exactly-once API calls.
+
+### Previously hidden upstream credential hazard
+
+The pinned original `scripts/douyin.user.js` contains a **nonempty
+literal bearer token** in its `CONFIG.token` field. It is committed to
+public upstream source, so it must be treated as exposed, not a trusted secret.
+Separately, the upstream `server.js` generates a random local token when
+config is unset. Installing these files unchanged can lead to mismatched
+authentication and exposure of the credential.
+
+The vendor snapshot is retained byte-for-byte for review only. **Do not
+install the original script or reuse its embedded value.** A future isolated
+deployment must remove the embedded value, provision a distinct local token
+privately and review the broad `unsafeWindow.eval`, public `/api/status`
+and account-data access surfaces before enabling the full Bridge. Do not ask
+the user to paste any credentials into the chat.
+
+**Original upstream v3 requires an authenticated Douyin account connection.**
+It is not a proven login-free public video/comment/AI-summary solution;
+if a login-free workflow is required, the separately developed existing
+Edge/CDP passive reader remains the candidate, pending real Windows access.
