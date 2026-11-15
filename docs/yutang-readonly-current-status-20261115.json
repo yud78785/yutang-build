@@ -32,11 +32,11 @@
       "path": "tools/douyin-ai-summary-entry-readonly.mjs"
     },
     "existing_edge_reader": {
-      "passed": 30,
-      "blob": "69facb057cf0c3ed633d4acfb4152fc343e76d2b",
+      "passed": 33,
+      "blob": "0fbeb2ee5bcdf116820795ee0c261516f707fa5f",
       "path": "tools/douyin-existing-browser-readonly.mjs",
       "tests_path": "tests/douyin-existing-browser-readonly.test.mjs",
-      "tests_blob": "370d80e7f1fbf977e1289886b15984b8574d93f9",
+      "tests_blob": "6d4594d3380d6b296d84d68fd7904a30d532b38e",
       "previous_full_suite_passed": 26,
       "new_regression_test_declarations": 4,
       "full_suite_retested_this_round": true,
@@ -80,6 +80,15 @@
           "existingConnection": "connectExistingBrowser({signal})",
           "native_windows_lockfile_tested": false
         }
+      },
+      "observation_deadline_safety": {
+        "cooperative_abort_controller": true,
+        "propagated_to_comment_dom": true,
+        "propagated_to_ai_entry": true,
+        "in_flight_read_termination_reported_separately_from_lockfile_cleanup": true,
+        "hard_cancel_of_page_evaluate_verified": false,
+        "test_count": 33,
+        "detail": "Unsettled page.evaluate after timeout must not be treated as terminated; later read stages are prevented cooperatively."
       }
     },
     "passed_total": 94,
@@ -144,7 +153,7 @@
         "new_upstream_tests_included": false
       }
     },
-    "total_scope_note": "This round actually ran 30/30 current exact GitHub existing-browser tests on Node.js 22.16.0 isolated Linux, plus 3 additional full passing runs; a temporary two-line old-scanner revert caused 3/30 failures. Historical 94/94 mixed, old-vendor 14/14 and v3 18/18 are separate prior runs, not a new combined total. No real Douyin or Windows live browser test.",
+    "total_scope_note": "44 current read-only abort tests were run together on exact subsequently committed Git blobs, covering existing-browser (33), comment reader (5), and AI iframe reader (6) only. Prior historical 94 mocked page suite, v3 18 and old-vendor 14 are NOT included in this run. No real Windows or Douyin service connected.",
     "latest_source_snapshot": {
       "repository": "Yht20927/douyin-cli",
       "pinned_commit": "f9b73666ed1b24fcbbf208ed81b24acc3ff47688",
@@ -202,6 +211,45 @@
       },
       "live_site_tested": false,
       "original_userscript_secret_warning": "Pinned original MIT userscript contains a nonempty hardcoded token in publicly tracked source, whereas the server may generate a new random token. Do not install unchanged, do not reuse published token, never request secrets in chat."
+    },
+    "comment_abort_reader": {
+      "passed": 5,
+      "failed": 0,
+      "skipped": 0,
+      "source_path": "tools/douyin-public-comment-readonly.mjs",
+      "source_blob": "07c57615241ace97607b5a017f2cc714e2bf231e",
+      "test_path": "tests/douyin-comment-abort.test.mjs",
+      "test_blob": "cc91c7afa886e8467a438b50efc4e9a268d284c1",
+      "windows_tested": false,
+      "live_douyin_tested": false
+    },
+    "ai_entry_abort_reader": {
+      "passed": 6,
+      "failed": 0,
+      "skipped": 0,
+      "source_path": "tools/douyin-ai-summary-entry-readonly.mjs",
+      "source_blob": "5f9eb66739dd9020b667dc9ce6ef16ffbcd79bd5",
+      "test_path": "tests/douyin-ai-abort.test.mjs",
+      "test_blob": "835af38d1ee9259747e0c67d60c6147699ec3302",
+      "windows_tested": false,
+      "official_ai_summary_text_verified": false
+    },
+    "current_abort_regression_combined": {
+      "tests_run": 44,
+      "passed": 44,
+      "failed": 0,
+      "skipped": 0,
+      "command": "node --test tests/*.test.mjs",
+      "host": "isolated Linux Node.js v22.16.0",
+      "included": [
+        "33 existing-browser suite tests",
+        "5 comment reader abort tests",
+        "6 AI entry abort tests"
+      ],
+      "evidence_file": "/mnt/data/yutang_browser_bridge/abort-full-regression.log",
+      "same_git_blobs_verified_after_push": true,
+      "full_historical_94_tests_rerun": false,
+      "full_historical_v3_get_tests_rerun": false
     }
   },
   "site_and_browser_access": {
@@ -255,7 +303,10 @@
     "original_upstream_requires_logged_in_douyin_account": true,
     "blank_and_live_owned_tab_scan_added": true,
     "blank_and_live_owned_tab_scan_windows_validated": false,
-    "pinned_upstream_browser_lock_signature_audited": true
+    "pinned_upstream_browser_lock_signature_audited": true,
+    "page_state_upstream_schema_verified": true,
+    "abort_propagation_in_three_layers_source_only": true,
+    "playwright_hard_cancel_verified": false
   },
   "safety_policy_for_next_step": {
     "do_not_modify_main": true,
@@ -267,5 +318,5 @@
     "use_existing_dedicated_edge_only": true,
     "no_claim_of_real_success_without_raw_browser_receipt": true
   },
-  "next_acceptance": "Source-only existing Edge module and its exact 30 current tests rerun 30/30 (plus three consecutive repetitions); temporary old scanner had 3 failures. Pinned upstream lock export and controller field verified. No authorized Windows YuTang Edge/CDP or live Douyin tab available in this chat; real comment/official AI-summary text still NOT VERIFIED. Do not run paid Windows CI, modify main, install original unsafe upstream userscript or change accepted EXE without authorization."
+  "next_acceptance": "The source-only dedicated Edge/CDP read-only path now propagates a cooperative timeout signal across controller, DOM comments and AI-entry inspection, and reports whether in-flight browser read actually settled independently of temporary lock release. Current three-suite offline run passed 44/44; pinned core.mjs readPageState schema is compatible. Actual Windows Edge/CDP attachment and live public Douyin comment/official AI-summary text remain UNVERIFIED. Do not install the unsafe upstream userscript or start paid Windows CI, merge main, or modify the accepted EXE."
 }
