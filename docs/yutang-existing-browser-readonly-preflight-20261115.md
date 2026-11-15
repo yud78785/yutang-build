@@ -164,3 +164,42 @@ on an already fully loaded page unless the site triggers it naturally;
 the passive observer will not force a fetch, navigation or click. New site
 tests, EXE modifications, signing or release still require a separately
 authorized environment. No paid Windows CI or main changes were made.
+
+## 2026-11-16 — restore upstream-owned about:blank/live tab checks
+
+Source comparison against pinned upstream
+`LockyBee/dsh-douyin-agent@9c49833078f4b4d18b9211ef86d024e7f2e15739`
+(`browser-pages.mjs`) found a real gap. Upstream treats
+`about:blank` and public `https://live.douyin.com/<numeric-room-id>` as
+possible shared-browser-owned tabs before it reads `window.name`.
+Our experimental wrapper previously checked only `www.douyin.com`,
+so it could miss a second owned blank/live tab and wrongly report a unique
+owner.
+
+Both the **initial and final** scans now apply the pinned upstream
+ownership candidate scope: `www.douyin.com`, transient `about:blank`
+(including hash), and numeric Douyin live rooms. Only candidates have
+their `window.name` read; private/offsite tabs remain untouched. Two
+owned candidates now block at the initial read; an owned candidate that
+appears during the read invalidates all evidence at the final read.
+Unparseable page URLs fail closed rather than silently being excluded.
+
+Targeted local Node.js classifier verification: **14 cases passed**,
+including the two old missed categories, malicious origin lookalikes,
+invalid live-room paths, personal tabs and no-login pages.
+GitHub static checks: **7/7 passed** against fetched committed bytes.
+Four additional repository integration regressions have been committed,
+but the **full existing-browser test suite was not rerun on the exact
+GitHub files in this turn**. Do not add the four test declarations to
+the previously verified 26 as if their execution had been confirmed.
+
+New Git blob SHA-1 values:
+- `tools/douyin-existing-browser-readonly.mjs`:
+  `69facb057cf0c3ed633d4acfb4152fc343e76d2b`
+- `tests/douyin-existing-browser-readonly.test.mjs`:
+  `370d80e7f1fbf977e1289886b15984b8574d93f9`
+
+This remains a source-only defensive fix, **not** an installed Windows
+extension, actual Edge/CDP attachment, live Douyin comment result, or AI
+summary. The other upstream tab-api lock, timeout and source hashes
+remain as separately documented.
