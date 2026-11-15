@@ -41,6 +41,29 @@ function validCommentReceipt(receipt, expectedVideoId, limit) {
     typeof row.text === 'string' && row.text.length > 0 && row.text.length <= 512 &&
     (row.commentId === null || typeof row.commentId === 'string' && /^\d{1,64}$/.test(row.commentId)));
 }
+function validPassiveNetworkReceipt(receipt, expectedVideoId, limit) {
+  if (receipt == null) return {valid:true,comments:[],status:'not_instrumented'};
+  if (receipt.status === 'not_observed') return {
+    valid:receipt.videoId === expectedVideoId && Array.isArray(receipt.comments) && receipt.comments.length === 0,
+    comments:[],status:'not_observed',
+  };
+  if (receipt.status !== 'api_response_observed' ||
+      receipt.source !== 'already_loaded_first_party_comment_api' ||
+      receipt.scope !== 'captured_page_response_only_not_independently_dom_visible' ||
+      receipt.videoId !== expectedVideoId || receipt.aiSummaryGenerated !== false || receipt.aiSummaryText !== null ||
+      !Array.isArray(receipt.comments) || receipt.comments.length < 1 || receipt.comments.length > limit ||
+      receipt.count !== receipt.comments.length) return {valid:false,comments:[],status:'invalid'};
+  const comments=[];
+  for(const entry of receipt.comments){
+    if (!entry || entry.videoId !== expectedVideoId ||
+        typeof entry.commentId !== 'string' || !/^\d{1,64}$/.test(entry.commentId) ||
+        typeof entry.text !== 'string' || !entry.text.trim() || entry.text.length > 512)
+      return {valid:false,comments:[],status:'invalid'};
+    comments.push({commentId:entry.commentId,text:entry.text});
+  }
+  return {valid:true,comments,status:'api_response_observed'};
+}
+
 function validAiReceipt(receipt, expectedVideoId) {
   return receipt && receipt.videoId === expectedVideoId &&
     receipt.evidenceSource === 'visible_official_ai_iframe_entry_only' &&
@@ -159,6 +182,8 @@ async function inspectConnectedBrowserReadOnly({
   } catch { return blocked('PUBLIC_COMMENT_INSPECTION_FAILED', expectedVideoId); }
   if (commentResult?.status === 'blocked') return blocked('COMMENT_' + safeCode(commentResult.reasonCode), expectedVideoId);
   if (!validCommentReceipt(commentResult, expectedVideoId, limit)) return blocked('PUBLIC_COMMENT_RECEIPT_INVALID', expectedVideoId);
+  const passiveNetwork = validPassiveNetworkReceipt(commentResult.passiveNetwork, expectedVideoId, limit);
+  if (!passiveNetwork.valid) return blocked('PASSIVE_NETWORK_RECEIPT_INVALID', expectedVideoId);
   if (isAbort(signal)) return blocked('CANCELLED_AFTER_COMMENTS', expectedVideoId);
   try {
     aiResult = await inspectSummary({ page, readPageState, expectedVideoId });
@@ -199,7 +224,8 @@ async function inspectConnectedBrowserReadOnly({
       return blocked('OWNED_VIDEO_PAGE_CHANGED_DURING_INSPECTION', expectedVideoId);
   } catch { return blocked('FINAL_BROWSER_STATE_UNAVAILABLE', expectedVideoId); }
   // This receipt refers ONLY to this probe's calls, not concurrent user/agent actions.
-  const anyObserved = commentResult.status === 'ok' || aiResult.status === 'entry_visible';
+  const anyObserved = commentResult.status === 'ok' || aiResult.status === 'entry_visible' ||
+    passiveNetwork.comments.length > 0;
   return {
     status: anyObserved ? 'read_only_evidence' : 'no_visible_evidence',
     videoId: expectedVideoId,
@@ -207,6 +233,11 @@ async function inspectConnectedBrowserReadOnly({
     connectionMethod: 'upstream_connectExistingBrowser',
     publicCommentsStatus: commentResult.status,
     comments: commentResult.comments.slice(0, limit).map(row => ({text: row.text, commentId: row.commentId ?? null})),
+    // First-party API data and currently visible DOM comments are deliberately
+    // separated. A captured response is not proof of a visually opened panel.
+    publicNetworkCommentsStatus: passiveNetwork.status,
+    publicNetworkCommentsScope: 'captured_page_response_only_not_independently_dom_visible',
+    publicNetworkComments: passiveNetwork.comments,
     aiSummaryEntryVisible: aiResult.status === 'entry_visible',
     aiSummaryEntryStatus: aiResult.status,
     aiSummaryGenerated: false,
