@@ -43,7 +43,7 @@ test('numeric IDs only and at most 20 comments, optional exact account',()=>{
 test('requires locally managed token and loopback port before any connection',async()=>{
  assert.equal(parseBridgeConfig({}).ok,false);
  for(const p of ['0','65536','abc','127.0.0.1:19422'])assert.equal(parseBridgeConfig({...env,YUTANG_DOUYIN_BRIDGE_PORT:p}).ok,false);
- let created=0;const r=await run({argv:[vid],env:{},makeClient:()=>{created++;throw Error('must not instantiate')});assert.equal(r.reasonCode,'BRIDGE_TOKEN_REQUIRED');assert.equal(created,0);
+ let created=0;const r=await run({argv:[vid],env:{},makeClient:()=>{created++;throw Error('must not instantiate')}});assert.equal(r.reasonCode,'BRIDGE_TOKEN_REQUIRED');assert.equal(created,0);
 });
 test('newer multi-account schema and protocol v3 are enforced',()=>{
  assert.equal(selectUpstreamConnection(summary(),vid).account,acct);
