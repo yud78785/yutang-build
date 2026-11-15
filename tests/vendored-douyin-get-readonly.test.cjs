@@ -73,7 +73,7 @@ test('FULL original get.js -> original BridgeClient -> real loopback HTTP reques
 test('a response bound to a different video fails closed without leaking any comments',async()=>{
  await withMockBridge({status_code:0,comments:[{cid:'123',aweme_id:'7999999999999999999',text:'wrong-video'}]},async({port})=>{
   const r=await run({argv:[videoId],env:{...env,YUTANG_DOUYIN_BRIDGE_PORT:String(port)}});
-  assert.equal(r.reasonCode,'BRIDGE_GET_OR_VALIDATION_FAILED');assert.deepEqual(r.comments,[]);
+  assert.equal(r.reasonCode,'COMMENT_API_BAD_PAYLOAD');assert.deepEqual(r.comments,[]);
  });
 });
 test('refuses body with missing status code, non-array comments, malformed comment ID and excessive rows',async()=>{
@@ -126,4 +126,19 @@ test('invalid or missing status payload cannot be mistaken for a registered targ
    {ok:true,connections:{'douyin.com':[{alive:true,url:'javascript:alert(1)'}]}}]){
    assert.equal(validateSingleTargetTab(s,videoId).ok,false);
  }
+});
+
+test('recognizes server-not-running, rejected token and API rejection without copying private error text',async()=>{
+ const unavailable=await run({argv:[videoId],env:{...env,YUTANG_DOUYIN_BRIDGE_PORT:'1'}});
+ assert.equal(unavailable.reasonCode,'BRIDGE_SERVER_NOT_RUNNING');
+ await withMockBridge({},async({port})=>{
+   const r=await run({argv:[videoId],env:{...env,YUTANG_DOUYIN_BRIDGE_PORT:String(port)}});
+   assert.equal(r.reasonCode,'BRIDGE_TOKEN_REJECTED');
+   assert.doesNotMatch(JSON.stringify(r),/secret|password|abc123/i);
+ },{reply:{ok:false,error:'Unauthorized — 无效的 access token secret-password-abc123'}});
+ await withMockBridge({status_code:403,comments:[],message:'private session expired'},async({port})=>{
+   const r=await run({argv:[videoId],env:{...env,YUTANG_DOUYIN_BRIDGE_PORT:String(port)}});
+   assert.equal(r.reasonCode,'COMMENT_API_NOT_SUCCESS');
+   assert.doesNotMatch(JSON.stringify(r),/private session/);
+ });
 });
