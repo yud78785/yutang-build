@@ -159,9 +159,9 @@ async function inspectConnectedBrowserReadOnly({
     pages = contexts[0].pages();
     if (!Array.isArray(pages) || pages.length > LIMIT_PAGES) return blocked('DEDICATED_PAGE_LIST_UNVERIFIED', expectedVideoId);
   } catch { return blocked('BROWSER_PAGE_ENUMERATION_FAILED', expectedVideoId); }
-  // Count *all* upstream-owned public Douyin tabs, not only tabs already at
-  // the target video. Otherwise a second owned tab on another work/homepage
-  // could concurrently mutate the same upstream browser session unnoticed.
+  // Count every upstream-owned page candidate, including transient
+  // about:blank and Douyin live rooms, not only tabs at the target video.
+  // Otherwise an additional owned tab could mutate the same browser session.
   const owned = [];
   try {
     for (const page of pages) {
