@@ -37,3 +37,15 @@ Metadata from GitHub stated expiry at 2026-11-21 01:50:44 UTC, 01:50:49 UTC and 
 - No change to `main` (verified `4745ed23cbb748cb4b070ed70390703d1261aea0` at review), no Actions rerun, merge, rebuild, paid browser agent, credential access or release.
 
 **Next priority:** preserve artifact provenance, then resume only a real missing acceptance gate with a permitted execution environment. Do not repeat successful prior security runs or count source-only tests as EXE tests.
+
+## Exact fifth diagnostic receipt excerpts (read from raw Windows job log)
+
+The following are the actual final gate markers observed in Windows 2025 [Run 43643545361](https://github.com/yud78785/yutang-build/actions/runs/43643545361), job `132596128747` (2026-11-14 UTC), not extrapolated from a green check:
+
+```text
+2026-11-14T21:35:28.1214955Z WINDOWS_PUBLIC_PAGE_GATE_OK {"exeSha256":"3201d433df727a5d5fddf8e68a0f69ea1654057e04cfad7833fd3ed7dc241a34","httpStatus":200,"rendered":true,"cleanupPending":true}
+2026-11-14T21:35:33.1024447Z WINDOWS_PUBLIC_WEB_CLEANUP_OK {"exeSha256":"3201d433df727a5d5fddf8e68a0f69ea1654057e04cfad7833fd3ed7dc241a34","verifiedDesktop":true,"trackedCandidateProcessCount":24,"trackedProcessesRemaining":0,"cdpListenersRemaining":0,"isolatedDirectoriesRemoved":true}
+2026-11-14T21:35:33.1028333Z WINDOWS_PUBLIC_WEB_EXE_RECEIPT {"status":"PASS_WINDOWS_EXE_PUBLIC_WEB_ONLY","exeSha256":"3201d433df727a5d5fddf8e68a0f69ea1654057e04cfad7833fd3ed7dc241a34","exeBytes":125446071,"sourceCandidate":"9cc16d7e64d59dc141e9c6687b8dd461934fcc35","documentHttpStatus":200,"renderedPage":true,"rendererSandboxVerified":true,"networkServiceAppContainer":true,"networkServiceLowIntegrity":true,"cdpLoopbackOnly":true,"noResidualCandidateProcesses":true,"trackedEdgeProcessCount":10,"accountUsed":false,"modelKeyUsed":false,"videoPlaybackClaimed":false,"personalComputerAcceptance":false,"releaseAuthorized":false}
+```
+
+Raw Windows job log also reported 68 passing negative-path unit tests with 0 failures. Those unit tests are separate from the real EXE gate; this receipt **explicitly** sets `videoPlaybackClaimed=false`, `personalComputerAcceptance=false` and `releaseAuthorized=false`.
