@@ -7,7 +7,6 @@ Only the encrypted result bundle leaves the ephemeral runner.
 from __future__ import annotations
 
 import argparse
-import asyncio
 import hashlib
 import hmac
 import ipaddress
@@ -161,79 +160,100 @@ def safe_download(url: str, out_path: Path, max_bytes: int, user_agent: str) -> 
         raise ProbeError("MEDIA_FETCH_FAILED") from None
 
 
-async def fetch_exact_detail(video_id: str, user_agent: str) -> tuple[dict, int]:
-    """Capture one first-party detail response and require the exact aweme_id."""
-    from playwright.async_api import async_playwright
+class DouyinPageRedirectHandler(SafeRedirectHandler):
+    ALLOWED_HOSTS = {"www.iesdouyin.com", "www.douyin.com"}
 
-    future = asyncio.get_running_loop().create_future()
-    tasks: set[asyncio.Task] = set()
-    browser = None
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        host = urllib.parse.urlsplit(newurl).hostname
+        if host not in self.ALLOWED_HOSTS:
+            raise ProbeError("SHARE_PAGE_REDIRECT_HOST_REJECTED")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def safe_fetch_text(url: str, max_bytes: int, user_agent: str) -> tuple[str, str, int]:
+    """One anonymous bounded GET for the official Douyin share-page HTML."""
+    validate_public_https_url(url)
+    opener = urllib.request.build_opener(
+        urllib.request.ProxyHandler({}),
+        urllib.request.HTTPSHandler(context=ssl.create_default_context()),
+        DouyinPageRedirectHandler(),
+    )
+    request = urllib.request.Request(url, headers={
+        "User-Agent": user_agent,
+        "Referer": "https://www.douyin.com/",
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+        "Accept": "text/html,application/xhtml+xml",
+    })
     try:
-        async with async_playwright() as playwright:
-            browser = await playwright.chromium.launch(headless=True)
-            context = await browser.new_context(
-                user_agent=user_agent,
-                locale="zh-CN",
-                viewport={"width": 1280, "height": 720},
-                extra_http_headers={"Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8"},
-            )
-            if await context.cookies():
-                raise ProbeError("ANONYMOUS_CONTEXT_NOT_EMPTY")
-            page = await context.new_page()
-
-            async def parse_response(response):
-                try:
-                    if response.status != 200:
-                        return
-                    payload = await response.json()
-                    detail = exact_aweme_detail(payload, video_id)
-                    if detail is not None and not future.done():
-                        future.set_result((detail, int(response.status)))
-                except Exception:
-                    return
-
-            def on_response(response):
-                if future.done():
-                    return
-                try:
-                    parsed = urllib.parse.urlsplit(response.url)
-                    if parsed.scheme != "https" or parsed.hostname != "www.douyin.com":
-                        return
-                    if "/aweme/v1/web/aweme/detail" not in parsed.path:
-                        return
-                    task = asyncio.create_task(parse_response(response))
-                    tasks.add(task)
-                    task.add_done_callback(tasks.discard)
-                except Exception:
-                    return
-
-            page.on("response", on_response)
-            try:
-                await page.goto(TARGET_URL, wait_until="commit", timeout=20_000)
-            except Exception:
-                # The exact detail response may arrive even if navigation reports a timeout.
-                pass
-            if not is_target_page_url(page.url, video_id):
-                raise ProbeError("VIDEO_PAGE_IDENTITY_MISMATCH")
-            try:
-                detail, status = await asyncio.wait_for(future, timeout=18)
-            except asyncio.TimeoutError:
-                raise ProbeError("EXACT_DETAIL_RESPONSE_NOT_OBSERVED") from None
-            if str(detail.get("aweme_id", "")) != video_id:
-                raise ProbeError("VIDEO_ID_MISMATCH")
-            return detail, status
+        with opener.open(request, timeout=18) as response:
+            final_url = response.geturl()
+            validate_public_https_url(final_url)
+            parsed = urllib.parse.urlsplit(final_url)
+            if parsed.hostname not in DouyinPageRedirectHandler.ALLOWED_HOSTS:
+                raise ProbeError("SHARE_PAGE_FINAL_HOST_REJECTED")
+            expected_path = f"/share/video/{TARGET_ID}/"
+            alternate_path = f"/video/{TARGET_ID}"
+            if parsed.path not in {expected_path, alternate_path}:
+                raise ProbeError("SHARE_PAGE_FINAL_IDENTITY_MISMATCH")
+            total = int(response.headers.get("Content-Length") or 0) or None
+            if total is not None and total > max_bytes:
+                raise ProbeError("SHARE_PAGE_SIZE_LIMIT")
+            chunks = []
+            size = 0
+            while True:
+                chunk = response.read(64 * 1024)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > max_bytes:
+                    raise ProbeError("SHARE_PAGE_SIZE_LIMIT")
+                chunks.append(chunk)
+            if not size or total is not None and size != total:
+                raise ProbeError("SHARE_PAGE_INCOMPLETE")
+            charset = response.headers.get_content_charset() or "utf-8"
+            return b"".join(chunks).decode(charset, "replace"), final_url, int(response.status)
     except ProbeError:
         raise
+    except urllib.error.HTTPError as exc:
+        raise ProbeError(f"SHARE_PAGE_HTTP_{int(exc.code)}") from None
     except Exception:
-        raise ProbeError("ANONYMOUS_PLAYWRIGHT_DETAIL_FAILED") from None
-    finally:
-        for task in list(tasks):
-            task.cancel()
-        if browser is not None:
-            try:
-                await browser.close()
-            except Exception:
-                pass
+        raise ProbeError("SHARE_PAGE_FETCH_FAILED") from None
+
+
+def find_exact_aweme_detail(value: object, expected_id: str, depth: int = 0, budget: list[int] | None = None) -> dict | None:
+    if budget is None:
+        budget = [100000]
+    budget[0] -= 1
+    if budget[0] < 0 or depth > 40:
+        return None
+    if isinstance(value, dict):
+        if str(value.get("aweme_id", "")) == expected_id and isinstance(value.get("video"), dict):
+            return value
+        for child in value.values():
+            found = find_exact_aweme_detail(child, expected_id, depth + 1, budget)
+            if found is not None:
+                return found
+    elif isinstance(value, list):
+        for child in value:
+            found = find_exact_aweme_detail(child, expected_id, depth + 1, budget)
+            if found is not None:
+                return found
+    return None
+
+
+def fetch_share_page_detail(upstream, video_id: str) -> tuple[dict, int]:
+    if video_id != TARGET_ID:
+        raise ProbeError("TARGET_VIDEO_ID_NOT_PINNED")
+    share_url = f"https://www.iesdouyin.com/share/video/{video_id}/"
+    html, _final_url, status = safe_fetch_text(share_url, 4 * 1024 * 1024, upstream._MOBILE_UA)
+    try:
+        router_data = upstream._extract_json_object_after_marker(html, "window._ROUTER_DATA")
+    except Exception:
+        raise ProbeError("SHARE_PAGE_ROUTER_DATA_NOT_FOUND") from None
+    detail = find_exact_aweme_detail(router_data, video_id)
+    if detail is None or not upstream._looks_like_douyin_video(detail.get("video")):
+        raise ProbeError("SHARE_PAGE_EXACT_VIDEO_ID_NOT_FOUND")
+    return detail, status
 
 
 def ffprobe(path: Path) -> dict:
@@ -360,8 +380,6 @@ def main() -> int:
     sys.path.insert(0, str(upstream_root))
     import server as upstream
     import recognition
-    upstream._DETAIL_RESPONSE_RETRIES = 1
-    upstream._DETAIL_RESPONSE_TIMEOUT = 18.0
 
     work_dir = Path(tempfile.mkdtemp(prefix="yutang-media-result-"))
     media_dir = Path(tempfile.mkdtemp(prefix="yutang-media-temp-"))
@@ -371,7 +389,7 @@ def main() -> int:
         "schema": 1,
         "target_video_id": TARGET_ID,
         "source_url": TARGET_URL,
-        "source_method": "anonymous_playwright_aweme_detail_exact_id",
+        "source_method": "anonymous_iesdouyin_share_router_data_exact_id",
         "upstream_repo": "ZY-ZhichaoYu/shared-video-transcriber",
         "upstream_commit": UPSTREAM_COMMIT,
         "authenticated": False,
@@ -384,7 +402,7 @@ def main() -> int:
         "frames": [],
     }
     try:
-        detail, detail_status = asyncio.run(fetch_exact_detail(TARGET_ID, upstream._UA))
+        detail, detail_status = fetch_share_page_detail(upstream, TARGET_ID)
         result["detail_id_verified"] = str(detail.get("aweme_id")) == TARGET_ID
         result["detail_http_status"] = detail_status
         if not result["detail_id_verified"]:
