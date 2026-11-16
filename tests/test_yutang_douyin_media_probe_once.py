@@ -47,6 +47,17 @@ class FakeOpener:
 
 
 class TargetIdentityTests(unittest.TestCase):
+    def test_empty_or_wrong_detail_never_counts_as_verified(self):
+        self.assertFalse(media_probe.is_verified_detail(None, "7445301722639060233"))
+        self.assertFalse(media_probe.is_verified_detail({}, "7445301722639060233"))
+        self.assertFalse(media_probe.is_verified_detail(
+            {"aweme_id": "7577614489533680959", "video": {}}, "7445301722639060233"))
+        self.assertFalse(media_probe.is_verified_detail(
+            {"aweme_id": "7445301722639060233", "video": None}, "7445301722639060233"))
+        self.assertTrue(media_probe.is_verified_detail(
+            {"aweme_id": "7445301722639060233", "video": {"play_addr": {}}},
+            "7445301722639060233"))
+
     def test_only_expected_numeric_video_id_shape(self):
         self.assertTrue(media_probe.validate_video_id("7445301722639060233"))
         for value in ("", "abc", "123", "https://www.douyin.com/video/7445301722639060233", "1" * 31):
