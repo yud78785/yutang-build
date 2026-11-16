@@ -124,6 +124,42 @@ class NetworkBoundaryTests(unittest.TestCase):
             handler.redirect_request(None, None, 302, "Found", {}, "http://127.0.0.1/private")
 
 
+    def test_share_router_search_requires_exact_aweme_id(self):
+        payload = {"outer": [{"aweme_detail": {"aweme_id": "7577614489533680959", "video": {}}},
+                             {"aweme_id": "7445301722639060233", "video": {"play_addr": {}}}]}
+        found = media_probe.find_exact_aweme_detail(payload, "7445301722639060233")
+        self.assertEqual(found["aweme_id"], "7445301722639060233")
+        self.assertIsNone(media_probe.find_exact_aweme_detail(payload, "7000000000000000000"))
+
+    def test_share_page_parser_rejects_redirect_identity_and_mismatched_data(self):
+        fake_upstream = type("Upstream", (), {
+            "_MOBILE_UA": "test-agent",
+            "_extract_json_object_after_marker": staticmethod(lambda html, marker: {
+                "aweme_detail": {"aweme_id": "7445301722639060233", "video": {"play_addr": {}, "duration": 1000}}
+            }),
+            "_looks_like_douyin_video": staticmethod(lambda video: isinstance(video, dict) and "play_addr" in video and "duration" in video),
+        })()
+        with patch.object(media_probe, "safe_fetch_text", return_value=("html", "https://www.iesdouyin.com/share/video/7445301722639060233/", 200)):
+            detail, status = media_probe.fetch_share_page_detail(fake_upstream, "7445301722639060233")
+            self.assertEqual(detail["aweme_id"], "7445301722639060233")
+            self.assertEqual(status, 200)
+        fake_wrong = type("Upstream", (), {
+            "_MOBILE_UA": "test-agent",
+            "_extract_json_object_after_marker": staticmethod(lambda html, marker: {
+                "aweme_detail": {"aweme_id": "7577614489533680959", "video": {"play_addr": {}, "duration": 1000}}
+            }),
+            "_looks_like_douyin_video": staticmethod(lambda video: isinstance(video, dict) and "play_addr" in video and "duration" in video),
+        })()
+        with patch.object(media_probe, "safe_fetch_text", return_value=("html", "https://www.iesdouyin.com/share/video/7445301722639060233/", 200)):
+            with self.assertRaisesRegex(media_probe.ProbeError, "SHARE_PAGE_EXACT_VIDEO_ID_NOT_FOUND"):
+                media_probe.fetch_share_page_detail(fake_wrong, "7445301722639060233")
+
+    def test_share_page_redirect_only_allows_official_hosts(self):
+        handler = media_probe.DouyinPageRedirectHandler()
+        with self.assertRaises(media_probe.ProbeError):
+            handler.redirect_request(None, None, 302, "Found", {}, "https://evil.example/video/7445301722639060233")
+
+
 class EncryptionTests(unittest.TestCase):
     def test_bundle_is_encrypted_authenticated_and_roundtrips(self):
         with tempfile.TemporaryDirectory() as root:
