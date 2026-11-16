@@ -204,6 +204,46 @@ class NetworkBoundaryTests(unittest.TestCase):
         self.assertEqual(len(values), 2)
 
 
+    def test_first_party_api_response_requires_exact_id_and_video_object(self):
+        payload = {"aweme_detail": {
+            "aweme_id": "7445301722639060233",
+            "video": {"play_addr": {"url_list": ["https://cdn.example.test/signed-secret"]}, "duration": 355000},
+        }}
+        inspected = media_probe.inspect_first_party_api_json(
+            "www.douyin.com", "/aweme/v1/web/aweme/detail", 200,
+            "application/json; charset=utf-8", json.dumps(payload).encode(),
+            "7445301722639060233")
+        self.assertIsNotNone(inspected)
+        self.assertTrue(media_probe.is_verified_detail(inspected["detail"], "7445301722639060233"))
+        self.assertNotIn("signed-secret", json.dumps(inspected["diagnostic"]))
+
+    def test_first_party_api_rejects_other_host_wrong_status_and_unrelated_path(self):
+        body = json.dumps({"aweme_detail": {"aweme_id": "7445301722639060233", "video": {"play_addr": {}}}}).encode()
+        self.assertIsNone(media_probe.inspect_first_party_api_json(
+            "evil.example", "/aweme/v1/web/aweme/detail", 200, "application/json", body,
+            "7445301722639060233"))
+        self.assertIsNone(media_probe.inspect_first_party_api_json(
+            "www.douyin.com", "/aweme/v1/web/aweme/detail", 403, "application/json", body,
+            "7445301722639060233"))
+        self.assertIsNone(media_probe.inspect_first_party_api_json(
+            "www.douyin.com", "/static/app.js", 200, "application/json", body,
+            "7445301722639060233"))
+
+    def test_first_party_api_mismatch_and_size_limit_are_fail_closed(self):
+        body = json.dumps({"aweme_detail": {"aweme_id": "7577614489533680959", "video": {"play_addr": {}}}}).encode()
+        inspected = media_probe.inspect_first_party_api_json(
+            "www.douyin.com", "/aweme/v1/web/aweme/detail", 200, "application/json", body,
+            "7445301722639060233")
+        self.assertIsNotNone(inspected)
+        self.assertIsNone(inspected["detail"])
+        self.assertEqual(inspected["diagnostic"]["exact_target_id_match_count"], 0)
+        oversized = b" " * (2 * 1024 * 1024 + 1)
+        limited = media_probe.inspect_first_party_api_json(
+            "www.douyin.com", "/aweme/v1/web/aweme/detail", 200, "application/json", oversized,
+            "7445301722639060233")
+        self.assertEqual(limited["reason"], "JSON_BODY_LIMIT")
+
+
 class EncryptionTests(unittest.TestCase):
     def test_bundle_is_encrypted_authenticated_and_roundtrips(self):
         with tempfile.TemporaryDirectory() as root:
