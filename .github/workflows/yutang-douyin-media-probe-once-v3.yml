@@ -17,7 +17,7 @@ concurrency:
 jobs:
   media-probe:
     name: One bounded public media extraction
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
       PYTHONUNBUFFERED: "1"
