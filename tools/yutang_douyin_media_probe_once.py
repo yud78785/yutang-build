@@ -480,6 +480,57 @@ async def fetch_browser_api_detail(upstream, video_id: str) -> tuple[dict | None
             }
             if not page_state["target_page_matched"]:
                 return None, None, diagnostics, captured_payloads, page_state
+
+            async def read_player_state():
+                try:
+                    return await page.evaluate("""() => {
+                      const videos = Array.from(document.querySelectorAll('video'));
+                      const buttons = Array.from(document.querySelectorAll('.xgplayer-play'));
+                      const visibleButtons = buttons.filter(el => {
+                        const rect = el.getBoundingClientRect();
+                        const style = getComputedStyle(el);
+                        return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+                      });
+                      return {
+                        videoCount: videos.length,
+                        playButtonCount: buttons.length,
+                        visiblePlayButtonCount: visibleButtons.length,
+                        playerError: document.querySelector('.xgplayer-is-error') !== null,
+                        videos: videos.slice(0, 3).map(video => ({
+                          paused: !!video.paused,
+                          currentTimeMs: Number.isFinite(video.currentTime) ? Math.round(video.currentTime * 1000) : null,
+                          durationMs: Number.isFinite(video.duration) ? Math.round(video.duration * 1000) : null,
+                          readyState: Number.isInteger(video.readyState) ? video.readyState : null,
+                          networkState: Number.isInteger(video.networkState) ? video.networkState : null,
+                          errorCode: video.error?.code ?? null,
+                          videoWidth: video.videoWidth || 0,
+                          videoHeight: video.videoHeight || 0
+                        }))
+                      };
+                    }""")
+                except Exception:
+                    return {"status": "player_state_unavailable"}
+
+            player_before = await read_player_state()
+            play_clicked_once = False
+            play_click_result = "not_attempted"
+            if (
+                not player_before.get("playerError", False)
+                and player_before.get("visiblePlayButtonCount") == 1
+            ):
+                try:
+                    await page.locator(".xgplayer-play:visible").click(timeout=3000)
+                    play_clicked_once = True
+                    play_click_result = "clicked_once"
+                    await page.wait_for_timeout(5000)
+                except Exception:
+                    play_click_result = "safe_play_button_click_failed"
+            player_after = await read_player_state()
+            page_state["player_before"] = player_before
+            page_state["play_clicked_once"] = play_clicked_once
+            page_state["play_click_result"] = play_click_result
+            page_state["player_after"] = player_after
+
             try:
                 detail, response_status = await asyncio.wait_for(asyncio.shield(detail_future), timeout=14)
                 return detail, response_status, diagnostics, captured_payloads, page_state
