@@ -265,6 +265,46 @@ class NetworkBoundaryTests(unittest.TestCase):
         self.assertEqual(invalid["reason"], "INVALID_JSON")
 
 
+    def test_video_info_res_is_bound_to_same_page_exact_item_id(self):
+        fake_upstream = type("Upstream", (), {
+            "_looks_like_douyin_video": staticmethod(
+                lambda video: isinstance(video, dict) and isinstance(video.get("play_addr"), dict)
+            )
+        })()
+        payload = [{
+            "loaderData": {
+                "video_(id)/page": {
+                    "itemId": "7445301722639060233",
+                    "videoInfoRes": {
+                        "item_list": [{
+                            "desc": "target caption",
+                            "author": {"nickname": "public-author"},
+                            "video": {"play_addr": {"url_list": ["https://cdn.example.test/private-signed"]}},
+                        }]
+                    },
+                }
+            }
+        }]
+        detail = media_probe.find_video_from_router_data(payload, "7445301722639060233", fake_upstream)
+        self.assertTrue(media_probe.is_verified_detail(detail, "7445301722639060233"))
+        self.assertEqual(detail["_metadata"]["title"], "target caption")
+        self.assertNotIn("private-signed", json.dumps(detail["_metadata"]))
+
+    def test_video_info_res_rejects_page_item_id_mismatch(self):
+        fake_upstream = type("Upstream", (), {
+            "_looks_like_douyin_video": staticmethod(lambda video: isinstance(video, dict) and "play_addr" in video)
+        })()
+        payload = [{
+            "loaderData": {
+                "video_(id)/page": {
+                    "itemId": "7577614489533680959",
+                    "videoInfoRes": {"item_list": [{"video": {"play_addr": {}}}]},
+                }
+            }
+        }]
+        self.assertIsNone(media_probe.find_video_from_router_data(payload, "7445301722639060233", fake_upstream))
+
+
 class EncryptionTests(unittest.TestCase):
     def test_bundle_is_encrypted_authenticated_and_roundtrips(self):
         with tempfile.TemporaryDirectory() as root:
