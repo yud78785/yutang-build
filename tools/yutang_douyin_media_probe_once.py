@@ -340,7 +340,10 @@ def fetch_share_page_detail(upstream, video_id: str) -> tuple[dict | None, int, 
 
 def inspect_first_party_api_json(host: str, path: str, status: int, content_type: str, body: bytes, expected_id: str) -> dict | None:
     allowed_hosts = {"www.douyin.com", "www.iesdouyin.com", "iesdouyin.com"}
-    if host not in allowed_hosts or status != 200 or "json" not in (content_type or "").lower():
+    mime_type = (content_type or "").split(";", 1)[0].strip().lower()
+    normalized_path = path.rstrip("/").lower()
+    is_aweme_detail_text = normalized_path.endswith("/aweme/v1/web/aweme/detail") and mime_type == "text/plain"
+    if host not in allowed_hosts or status != 200 or not ("json" in mime_type or is_aweme_detail_text):
         return None
     if not any(token in path.lower() for token in ("/aweme/", "/api/", "/video/", "/feed/", "/detail/")):
         return None
@@ -383,14 +386,16 @@ async def fetch_browser_api_detail(upstream, video_id: str) -> tuple[dict | None
             if not any(token in path.lower() for token in ("/aweme/", "/api/", "/video/", "/feed/", "/detail/")):
                 return
             content_type = response.headers.get("content-type", "")
-            if int(response.status) != 200 or "json" not in content_type.lower():
+            mime_type = content_type.split(";", 1)[0].strip().lower()
+            is_aweme_detail_text = path.rstrip("/").lower().endswith("/aweme/v1/web/aweme/detail") and mime_type == "text/plain"
+            if int(response.status) != 200 or not ("json" in mime_type or is_aweme_detail_text):
                 if len(diagnostics) < 40:
                     diagnostics.append({
                         "host": host,
                         "path": path[:220],
                         "status": int(response.status),
-                        "content_type": content_type.split(";", 1)[0][:80],
-                        "reason": "NON_200_OR_NON_JSON",
+                        "content_type": mime_type[:80],
+                        "reason": "NON_200_OR_UNSUPPORTED_CONTENT_TYPE",
                     })
                 return
             body = await response.body()
