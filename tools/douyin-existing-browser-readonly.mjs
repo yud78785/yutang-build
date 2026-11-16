@@ -1,3 +1,4 @@
+import { inspectDouyinMediaStateReadOnly } from './douyin-media-state-readonly.mjs';
 // Optional host-side integration for YuTang's EXISTING dedicated Edge session.
 // Calls only upstream connectExistingBrowser (never connect, openBrowser, navigate or create).
 // Read-only page functions are injected by the pinned runtime; this file contains
@@ -191,6 +192,10 @@ async function inspectConnectedBrowserReadOnly({
   if (aiResult?.status === 'blocked') return blocked('AI_ENTRY_' + safeCode(aiResult.reasonCode), expectedVideoId);
   if (!validAiReceipt(aiResult, expectedVideoId)) return blocked('AI_ENTRY_RECEIPT_INVALID', expectedVideoId);
   if (isAbort(signal)) return blocked('CANCELLED_AFTER_AI_ENTRY', expectedVideoId);
+  // Read only HTMLMediaElement state. A single snapshot is NEVER video/audio playback proof.
+  // The existing final document identity and owner-tab checks also cover this observation.
+  const mediaDiagnostic = await inspectDouyinMediaStateReadOnly({ page, expectedVideoId });
+  if (isAbort(signal)) return blocked('CANCELLED_AFTER_MEDIA_STATE', expectedVideoId);
   try {
     if (page.isClosed() || page.url() !== initialUrl) return blocked('PAGE_CHANGED_DURING_INSPECTION', expectedVideoId);
     const finalDocument = await page.evaluate(() => ({
@@ -242,6 +247,7 @@ async function inspectConnectedBrowserReadOnly({
     aiSummaryEntryStatus: aiResult.status,
     aiSummaryGenerated: false,
     aiSummaryText: null,
+    mediaDiagnostic,
     browserLaunchedByThisProbe: false, navigationByThisProbe: false,
     clickedByThisProbe: false, persistentDataModifiedByThisProbe: false,
   };
