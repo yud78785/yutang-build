@@ -107,3 +107,34 @@ Windows 2022 作业先验证来源 Run、Artifact ID、名称、大小、ZIP dig
 - 继续做只读发布门禁检查；签名、真实更新和用户电脑现场测试保持独立。
 - 本记录提交仅写入本实验分支的 `docs/`，不修改 `main`，不触发新 Windows Actions，不创建 Release。
 
+
+
+## 9. 原始候选包内更新信任回执复核（只读，无新 Windows 运行）
+
+The exact downloaded original ZIP was also inspected locally, without executing or modifying the EXE:
+
+- ZIP SHA-256 recomputed from the downloaded file: `718d52af838a4fa0c375ae51f0b1f71aa2dc20d3615b58f79f7355ca1bf3342a` (matches GitHub Artifact digest).
+- EXE extracted from the ZIP as a stream and SHA-256 recomputed: `3201d433df727a5d5fddf8e68a0f69ea1654057e04cfad7833fd3ed7dc241a34`.
+- `desktop/release-api/windows-candidate-receipt.json`: productVersion `1.4.7`; `sha256` and `bytes` match the exact EXE; `signatureStatus=NotSigned`; `release=false`; `status=PASS_WINDOWS_PACKAGED_SMOKE_AND_EDGE_SECURITY`.
+- Packaged `windows-update-trust-patch-receipt.json` and the nested candidate receipt both state:
+  - `PASS_FAIL_CLOSED_UPDATE_TRUST_AND_HEALTH_HANDSHAKE_PATCH`
+  - `manifestPublicKeyConfigured=false`
+  - `authenticodePublisherThumbprintConfigured=false`
+  - `updatesDisabledUntilTrustConfigured=true`
+  - `startupHealthHandshake=true`
+  - `startupHealthAfterRendererReady=true`
+  - `stagedShortcutUntilHealthy=true`
+  - `postSwitchRollbackWindowMs=30000`
+  - `startupCrashRecovery=true`
+  - `rollbackFailurePreservesBackupPath=true`
+  - `recoveryDoesNotOverwriteUnknownShortcut=true`
+  - `release=false`
+- Exact patched-source SHA-256 values recorded in the package:
+  - `desktop/src/update-service.mjs`: `d40a93f8be2cc2c33b380ec1c20f35ca82c5e3440c4a1e352ad0a405d4bcf800`
+  - `desktop/src/update-launcher.mjs`: `dbf3bfe0d2270f613f77fc5eb0a917f363b0c10810981a2346abcfadca187271`
+  - `desktop/src/update-transaction.mjs`: `35b8f28b5de61b5b80631bfbb34aa538141cbd8256966e9c07f1508f221a0b3d`
+  - `desktop/src/main.mjs`: `ce48d7f2e1bafc514a36db335c8ec8a1f771f974fe14c5c731a8ba220bd6e3cf`
+
+**Interpretation:** the candidate package contains the fail-closed update trust and startup-health/rollback code, but because the real Ed25519 public key and Authenticode publisher thumbprint are intentionally blank, the updater correctly refuses to use an untrusted release channel. The synthetic updater/transaction regression suite and packaged receipt do not prove a real signed EXE update or end-to-end Windows rollback. Do not enable automatic updates until genuine trust material is configured and the signed candidate is independently re-tested.
+
+This section is a read-only ZIP/receipt verification only. It does not create another Actions run, change the EXE, enable updates, sign, merge, or publish.
