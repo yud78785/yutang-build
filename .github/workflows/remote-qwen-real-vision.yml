@@ -1,0 +1,186 @@
+name: YuTang genuine independent-frame vision check - original Windows video
+
+on:
+  push:
+    branches:
+      - experiment/remote-qwen-vision-20261112
+    paths:
+      - .github/workflows/remote-qwen-real-vision.yml
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: yutang-one-remote-vision-20261112
+  cancel-in-progress: false
+
+jobs:
+  genuine-vision:
+    if: github.repository == 'yud78785/yutang-build' && github.ref == 'refs/heads/experiment/remote-qwen-vision-20261112'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 9
+    env:
+      EXPECTED_WINDOWS_SHA: 00f5ac8d560f8459f333cadeb9e9cb227cfaeca6
+      MODEL_REV: 52d6c8ffea26cc873ac5ad116f8631268d7eb503
+    steps:
+      - name: Confirm isolated GitHub-hosted runner, public repo and minimal resources
+        env:
+          RUNNER_ENV: "${{ runner.environment }}"
+          REPO_VISIBILITY: "${{ github.event.repository.visibility }}"
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_ACTIONS" = true
+          test "$RUNNER_ENV" = github-hosted
+          test "$REPO_VISIBILITY" = public
+          test "$RUNNER_OS" = Linux
+          test "$RUNNER_ARCH" = X64
+          echo 'CLOUD_CPU_ONLY; NO_MODEL_API_KEY; NO_USER_WINDOWS; NO_ACCOUNT_LOGIN; TWO_INDEPENDENT_FRAMES'
+          free -h
+
+      - name: Independently confirm original Windows run metadata
+        env:
+          GH_READ_TOKEN: "${{ github.token }}"
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 2 --connect-timeout 15 --max-time 45 \
+            -H "Authorization: Bearer $GH_READ_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/yud78785/yutang-build/actions/runs/43233257378" \
+            | jq -e --arg sha "$EXPECTED_WINDOWS_SHA" \
+                '.head_sha == $sha and .status == "completed" and .conclusion == "success" and .repository.full_name == "yud78785/yutang-build"'
+          echo ORIGINAL_WINDOWS_RUN_HEAD_AND_SUCCESS_VERIFIED
+
+      - name: Download exact original public-video artifact by immutable ID
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          artifact-ids: 13951609541
+          repository: yud78785/yutang-build
+          run-id: 43233257378
+          github-token: "${{ github.token }}"
+          path: evidence
+
+      - name: Verify original public-video probe and all three JPEG SHA-256
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+          root=Path('evidence')
+          expected={
+            'probe-result.json':'a2027c0c3f58c6ca04ff0a8a8b626e999e7d6b2bc40bbc9dd005e2214dd8bc2a',
+            'frame-1.jpg':'c6b3493339f0e93c133ea429353715945417d00feef3fc30f193a0abde6ec1c3',
+            'frame-2.jpg':'2dbf955f09556718613eae3abf342d524a62d436c1eaa323e9c51b1a0166d595',
+            'frame-3.jpg':'17fbadb356f2f28879f22f93868cd96567e9068ec07692b30ee4bc135269b5b9',
+          }
+          assert root.is_dir() and not root.is_symlink()
+          assert {p.name for p in root.iterdir()}==set(expected)
+          for name, digest in expected.items():
+              p=root/name
+              assert p.is_file() and not p.is_symlink() and p.stat().st_size<2_000_000
+              assert hashlib.sha256(p.read_bytes()).hexdigest()==digest, name
+              if name.endswith('.jpg'):
+                  data=p.read_bytes()
+                  assert data[:2]==b'\xff\xd8' and data[-2:]==b'\xff\xd9'
+          probe=json.loads((root/'probe-result.json').read_text())
+          assert probe['requestedVideoId']=='7577614489533680959'
+          assert probe['actualVideoId']=='7577614489533680959'
+          assert probe['proofValid'] is True
+          assert probe['loginRequired'] is False
+          assert probe['verificationRequired'] is False
+          assert probe['modelInferencePerformed'] is False
+          assert probe['playbackProgressSeconds']>2
+          print('PINNED_REAL_WINDOWS_JPEG_BYTES_VERIFIED; CAPTURE_ONLY; NO_INFERENCE_YET')
+          PY
+
+      - name: Download and verify pinned official llama.cpp CPU binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p tools
+          curl -fL --retry 2 --retry-delay 2 --connect-timeout 20 --max-time 120 \
+            -o tools/llama-bin.tar.gz \
+            https://github.com/ggml-org/llama.cpp/releases/download/b12248/llama-b12248-bin-ubuntu-x64.tar.gz
+          echo '6b3a530b44f6b0a4ae4872d3b3c8d1edc2ac6bba7d8bd211329a4ba644c0dc65  tools/llama-bin.tar.gz' | sha256sum -c -
+          mkdir -p tools/llama
+          tar -xzf tools/llama-bin.tar.gz -C tools/llama
+          find tools/llama -type f -name 'llama-mtmd-cli' -print -quit | grep -q .
+          echo PINNED_LLAMA_CPP_BINARY_VERIFIED
+
+      - name: Verify official Qwen3-VL 2B weights from earlier successful one-frame experiment
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p model
+          curl -fL --retry 2 --retry-delay 2 --connect-timeout 20 --max-time 240 \
+            -o model/Qwen3VL-2B-Instruct-Q4_K_M.gguf \
+            "https://huggingface.co/Qwen/Qwen3-VL-2B-Instruct-GGUF/resolve/$MODEL_REV/Qwen3VL-2B-Instruct-Q4_K_M.gguf"
+          echo '089d75c52f4b7ffc56ba998ffc50aae89fcafc755f9e7208aacca281dca6c2ae  model/Qwen3VL-2B-Instruct-Q4_K_M.gguf' | sha256sum -c -
+          curl -fL --retry 2 --retry-delay 2 --connect-timeout 20 --max-time 240 \
+            -o model/mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf \
+            "https://huggingface.co/Qwen/Qwen3-VL-2B-Instruct-GGUF/resolve/$MODEL_REV/mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf"
+          echo 'f9a68fabba69c3b81e153367b2c7521030b0fa8bb0de400c9599c8e6725f9c82  model/mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf' | sha256sum -c -
+          echo OFFICIAL_QWEN3_VL_WEIGHTS_VERIFIED
+
+      - name: Infer original frames 1 and 3 independently (frame 2 already passed before)
+        shell: bash
+        run: |
+          set -euo pipefail
+          exe="$(find tools/llama -type f -name 'llama-mtmd-cli' -print -quit)"
+          test -n "$exe"
+          chmod +x "$exe"
+          echo 'FIRST_AND_THIRD_REAL_JPEGS; TWO_SEPARATE_VISION_INFERENCES; FRAME2_REUSED_FROM_RUN_43308457146'
+          for i in 1 3; do
+            echo "START_GENUINE_FRAME_${i}_INFERENCE"
+            timeout --signal=TERM --kill-after=10s 110s "$exe" \
+              -m model/Qwen3VL-2B-Instruct-Q4_K_M.gguf \
+              --mmproj model/mmproj-Qwen3VL-2B-Instruct-Q8_0.gguf \
+              --image "evidence/frame-${i}.jpg" \
+              -p '请只根据这一张图片独立判断：画面里可直接看到什么物品及它们的位置？底部是否出现中文字幕？如有请完整抄录；如无请回答无。不能确定的内容要说不能确定。不要猜视频前后动作，不要根据标题推断。简洁回答。' \
+              --no-mmproj-offload -t 4 -c 4096 --temp 0 -n 180 \
+              2>&1 | tee "frame-${i}-model.log"
+            test -s "frame-${i}-model.log"
+            echo "GENUINE_FRAME_${i}_PROCESS_COMPLETED; SEMANTIC_REVIEW_STILL_REQUIRED"
+          done
+          python3 - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+          frame_hashes = {
+              1:'c6b3493339f0e93c133ea429353715945417d00feef3fc30f193a0abde6ec1c3',
+              2:'2dbf955f09556718613eae3abf342d524a62d436c1eaa323e9c51b1a0166d595',
+              3:'17fbadb356f2f28879f22f93868cd96567e9068ec07692b30ee4bc135269b5b9'
+          }
+          logs={}
+          for number in (1,3):
+              raw=Path(f'frame-{number}-model.log').read_bytes()
+              assert raw and len(raw)<250_000
+              logs[str(number)]={'modelProcessCompleted':True,'rawLogSha256':hashlib.sha256(raw).hexdigest(),'imageSha256':frame_hashes[number]}
+          report={
+            'kind':'REAL_OPEN_WEIGHT_INDEPENDENT_JPEG_OBSERVATIONS_PENDING_REVIEW',
+            'windowsCandidateSha':'00f5ac8d560f8459f333cadeb9e9cb227cfaeca6',
+            'windowsExeSha256':'51ac3c9e842aae7a44524d59da30d81269a3ad93785ad2071e0c2d461d9d9575',
+            'originalVideoRun':43233257378,'originalArtifactId':13951609541,
+            'videoId':'7577614489533680959','model':'Qwen3-VL-2B-Instruct-Q4_K_M',
+            'previousIndependentlyReviewedMiddleFrame':{'frame':2,'runId':43308457146,'imageSha256':frame_hashes[2]},
+            'newIndependentObservations':logs,'allThreeFramesProcessedInOneModelRequest':False,
+            'continuousVideoWatched':False,'semanticSequenceReviewPassed':False,
+            'autonomousActionExecuted':False,'modelCallBillingUsd':0
+          }
+          Path('independent-frames-manifest.json').write_text(json.dumps(report,ensure_ascii=False,indent=2)+'\n')
+          print('INDEPENDENT_FRAME_MANIFEST_SAVED; NO_SEQUENCE_SEMANTIC_PASS_CLAIM')
+          PY
+      - name: Preserve bounded inference log as read-only evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: yutang-real-qwen2b-independent-frames-20261112
+          path: |
+            frame-1-model.log
+            frame-3-model.log
+            independent-frames-manifest.json
+          if-no-files-found: ignore
+          retention-days: 7
