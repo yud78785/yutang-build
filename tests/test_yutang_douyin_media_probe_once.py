@@ -139,10 +139,11 @@ class NetworkBoundaryTests(unittest.TestCase):
             }),
             "_looks_like_douyin_video": staticmethod(lambda video: isinstance(video, dict) and "play_addr" in video and "duration" in video),
         })()
-        with patch.object(media_probe, "safe_fetch_text", return_value=("html", "https://www.iesdouyin.com/share/video/7445301722639060233/", 200)):
-            detail, status = media_probe.fetch_share_page_detail(fake_upstream, "7445301722639060233")
+        with patch.object(media_probe, "safe_fetch_text", return_value=("window._ROUTER_DATA = {}", "https://www.iesdouyin.com/share/video/7445301722639060233/", 200)):
+            detail, status, router_data = media_probe.fetch_share_page_detail(fake_upstream, "7445301722639060233")
             self.assertEqual(detail["aweme_id"], "7445301722639060233")
             self.assertEqual(status, 200)
+            self.assertEqual(len(router_data), 1)
         fake_wrong = type("Upstream", (), {
             "_MOBILE_UA": "test-agent",
             "_extract_json_object_after_marker": staticmethod(lambda html, marker: {
@@ -150,7 +151,7 @@ class NetworkBoundaryTests(unittest.TestCase):
             }),
             "_looks_like_douyin_video": staticmethod(lambda video: isinstance(video, dict) and "play_addr" in video and "duration" in video),
         })()
-        with patch.object(media_probe, "safe_fetch_text", return_value=("html", "https://www.iesdouyin.com/share/video/7445301722639060233/", 200)):
+        with patch.object(media_probe, "safe_fetch_text", return_value=("window._ROUTER_DATA = {}", "https://www.iesdouyin.com/share/video/7445301722639060233/", 200)):
             detail, status, router_data = media_probe.fetch_share_page_detail(fake_wrong, "7445301722639060233")
             self.assertIsNone(detail)
             self.assertEqual(status, 200)
