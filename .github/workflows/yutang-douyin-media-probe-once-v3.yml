@@ -1,4 +1,4 @@
-name: YuTang anonymous Douyin media probe v3 (Ubuntu only)
+name: YuTang anonymous Douyin media probe v3.1 (Ubuntu only)
 
 on:
   push:
@@ -66,13 +66,12 @@ jobs:
           printf 'UPSTREAM_COMMIT=%s\n' "$UPSTREAM_SHA"
           head -n 1 "$UPSTREAM_ROOT/LICENSE"
 
-      - name: Install dependencies and isolated Chromium
+      - name: Install pinned dependencies and FFmpeg
         shell: bash
         run: |
           set -euo pipefail
           UPSTREAM_ROOT="$RUNNER_TEMP/shared-video-transcriber"
           python -m pip install --no-input -r "$UPSTREAM_ROOT/requirements.txt" -c "$UPSTREAM_ROOT/constraints.txt"
-          python -m playwright install --with-deps chromium
           if ! command -v ffmpeg >/dev/null 2>&1 || ! command -v ffprobe >/dev/null 2>&1; then
             sudo apt-get update
             sudo apt-get install -y ffmpeg
@@ -99,7 +98,7 @@ jobs:
       - name: Upload only encrypted result bundle for private retrieval
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: yutang-douyin-media-probe-encrypted-v3
+          name: yutang-douyin-media-probe-encrypted-v3-1
           path: .media-probe-output/*
           if-no-files-found: error
           retention-days: 1
