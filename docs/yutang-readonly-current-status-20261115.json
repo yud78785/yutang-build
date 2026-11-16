@@ -153,7 +153,7 @@
         "new_upstream_tests_included": false
       }
     },
-    "total_scope_note": "The new no-npm CDP public comment reader independently passed 16/16 actual local Node 22.16.0 tests including local CDP-style WebSocket. Prior 44/44 read-only stage tests, 16/16 host-only diagnostic, 18/18 v3 MIT Bridge and older results were not all rerun in one combined execution. NO LIVE WINDOWS or LIVE DOUYIN acceptance claimed.",
+    "total_scope_note": "The current no-npm CDP diagnostic and visible-comment reader suites were executed together and passed 32/32 on isolated Linux Node 22.16.0 with actual localhost HTTP and WebSocket fixture. Older 44/44, 18/18, 14/14 and historical 94 mock runs are NOT included. Real Windows Edge and real Douyin comments are NOT VERIFIED.",
     "latest_source_snapshot": {
       "repository": "Yht20927/douyin-cli",
       "pinned_commit": "f9b73666ed1b24fcbbf208ed81b24acc3ff47688",
@@ -312,6 +312,23 @@
       "model_api_invocations": 0,
       "paid_windows_ci_runs_this_turn": 0,
       "caveat": "One CDP Runtime.evaluate read of already visible, already loaded comment DOM in one project-owned video tab only; no lazy loading, no official AI summary and no cross-origin account data. Host owner and Windows profile checks remain unverified on the user's real machine."
+    },
+    "current_no_npm_cdp_combined": {
+      "tests_run": 32,
+      "passed": 32,
+      "failed": 0,
+      "skipped": 0,
+      "host": "isolated Linux Node.js 22.16.0",
+      "command": "node --test tests/*.test.mjs",
+      "included": [
+        "16 original standalone Windows Edge owner/CDP diagnostic tests",
+        "16 new no-npm CDP visible public comment reader tests"
+      ],
+      "real_loopback_http_and_websocket_used": true,
+      "actual_windows_browser_tested": false,
+      "actual_douyin_public_comments_tested": false,
+      "exact_committed_git_blobs_verified": true,
+      "test_log": "/mnt/data/yutang_browser_bridge/cdp-no-deps/combined-32-tests.log"
     }
   },
   "site_and_browser_access": {
@@ -386,5 +403,5 @@
     "use_existing_dedicated_edge_only": true,
     "no_claim_of_real_success_without_raw_browser_receipt": true
   },
-  "next_acceptance": "A portable Windows CMD+Node package now exists for one-off, no-npm direct CDP DOM reading of the already-running, upstream-owned Edge public video tab; source and test file exact hashes verified with 16/16 isolated local tests. First user-host Windows read is still NOT VERIFIED because the shared browser in this chat has no Douyin tab and no connection to the dedicated local Edge. Do not start paid CI, install upstream broad Tampermonkey userscript, merge main or alter accepted EXE."
+  "next_acceptance": "Portable ZIP (two core Node scripts, safe interactive input, root CMD launcher, README and SHA256SUMS) now supports a one-off owner-validated CDP read of up to 12 currently visible comments in an existing project-owned Windows Edge tab. 32/32 combined local tests pass and all GitHub file hashes match; no chat-accessible Douyin browser tab and no Windows local CDP capability in this chat. Only a real host-side run and returned receipt can prove live Douyin reading. No paid Windows Actions, main merge, EXE change or upstream broad userscript installation."
 }
