@@ -364,6 +364,7 @@ async def fetch_browser_api_detail(upstream, video_id: str) -> tuple[dict | None
     from playwright.async_api import async_playwright
 
     diagnostics: list[dict] = []
+    request_diagnostics: list[dict] = []
     captured_payloads: list[dict] = []
     captured_bytes = 0
     tasks: set[asyncio.Task] = set()
@@ -382,7 +383,15 @@ async def fetch_browser_api_detail(upstream, video_id: str) -> tuple[dict | None
             if not any(token in path.lower() for token in ("/aweme/", "/api/", "/video/", "/feed/", "/detail/")):
                 return
             content_type = response.headers.get("content-type", "")
-            if "json" not in content_type.lower():
+            if int(response.status) != 200 or "json" not in content_type.lower():
+                if len(diagnostics) < 40:
+                    diagnostics.append({
+                        "host": host,
+                        "path": path[:220],
+                        "status": int(response.status),
+                        "content_type": content_type.split(";", 1)[0][:80],
+                        "reason": "NON_200_OR_NON_JSON",
+                    })
                 return
             body = await response.body()
             inspected = inspect_first_party_api_json(host, path, int(response.status), content_type, body, video_id)
@@ -424,6 +433,24 @@ async def fetch_browser_api_detail(upstream, video_id: str) -> tuple[dict | None
                 raise ProbeError("BROWSER_CONTEXT_NOT_ANONYMOUS")
             page = await context.new_page()
 
+            def on_request(request):
+                try:
+                    parsed = urllib.parse.urlsplit(request.url)
+                    host = (parsed.hostname or "").lower()
+                    path = parsed.path
+                    if host in {"www.douyin.com", "www.iesdouyin.com", "iesdouyin.com"} and any(
+                        token in path.lower() for token in ("/aweme/", "/api/", "/video/", "/feed/", "/detail/")
+                    ):
+                        if len(request_diagnostics) < 40:
+                            request_diagnostics.append({
+                                "host": host,
+                                "path": path[:220],
+                                "method": request.method,
+                                "resource_type": request.resource_type,
+                            })
+                except Exception:
+                    return
+
             def on_response(response):
                 if detail_future.done() and len(captured_payloads) >= 12:
                     return
@@ -431,6 +458,7 @@ async def fetch_browser_api_detail(upstream, video_id: str) -> tuple[dict | None
                 tasks.add(task)
                 task.add_done_callback(tasks.discard)
 
+            page.on("request", on_request)
             page.on("response", on_response)
             try:
                 await page.goto(TARGET_URL, wait_until="domcontentloaded", timeout=25_000)
@@ -443,15 +471,16 @@ async def fetch_browser_api_detail(upstream, video_id: str) -> tuple[dict | None
                 "target_page_matched": is_target_page_url(page.url, video_id),
                 "host": (parsed_final.hostname or "")[:120],
                 "path": parsed_final.path[:220],
+                "first_party_api_requests": request_diagnostics,
             }
             if not page_state["target_page_matched"]:
                 return None, None, diagnostics, captured_payloads, page_state
             try:
-                detail, response_status = await asyncio.wait_for(detail_future, timeout=14)
+                detail, response_status = await asyncio.wait_for(asyncio.shield(detail_future), timeout=14)
                 return detail, response_status, diagnostics, captured_payloads, page_state
             except asyncio.TimeoutError:
                 await page.wait_for_timeout(2500)
-                if detail_future.done():
+                if not detail_future.cancelled() and detail_future.done():
                     detail, response_status = detail_future.result()
                     return detail, response_status, diagnostics, captured_payloads, page_state
                 return None, None, diagnostics, captured_payloads, page_state
