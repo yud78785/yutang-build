@@ -1,4 +1,4 @@
-name: YuTang anonymous Douyin media probe v3.6 (Ubuntu only)
+name: YuTang anonymous Douyin media probe v3.7 (Ubuntu only)
 
 on:
   push:
@@ -99,7 +99,7 @@ jobs:
       - name: Upload only encrypted result bundle for private retrieval
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: yutang-douyin-media-probe-encrypted-v3-6
+          name: yutang-douyin-media-probe-encrypted-v3-7
           path: media-probe-output/*
           if-no-files-found: error
           retention-days: 1
