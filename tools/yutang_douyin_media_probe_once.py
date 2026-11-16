@@ -227,8 +227,13 @@ def find_exact_aweme_detail(value: object, expected_id: str, depth: int = 0, bud
     if budget[0] < 0 or depth > 40:
         return None
     if isinstance(value, dict):
-        if str(value.get("aweme_id", "")) == expected_id and isinstance(value.get("video"), dict):
-            return value
+        id_keys = ("aweme_id", "item_id", "group_id", "awemeId", "itemId")
+        matched = any(str(value.get(key, "")) == expected_id for key in id_keys)
+        if matched:
+            for video_key in ("video", "video_info", "videoInfo"):
+                candidate = value.get(video_key)
+                if isinstance(candidate, dict) and ("play_addr" in candidate or "bit_rate" in candidate):
+                    return {"aweme_id": expected_id, "video": candidate}
         for child in value.values():
             found = find_exact_aweme_detail(child, expected_id, depth + 1, budget)
             if found is not None:
@@ -241,19 +246,86 @@ def find_exact_aweme_detail(value: object, expected_id: str, depth: int = 0, bud
     return None
 
 
-def fetch_share_page_detail(upstream, video_id: str) -> tuple[dict, int]:
+def extract_router_data_objects(html: str, upstream, max_objects: int = 5) -> list[dict]:
+    marker = "window._ROUTER_DATA"
+    results = []
+    offset = 0
+    while len(results) < max_objects:
+        position = html.find(marker, offset)
+        if position < 0:
+            break
+        try:
+            parsed = upstream._extract_json_object_after_marker(html[position:], marker)
+            if isinstance(parsed, dict):
+                results.append(parsed)
+        except Exception:
+            pass
+        offset = position + len(marker)
+    return results
+
+
+def summarize_router_data(router_data: list[dict], expected_id: str) -> dict:
+    counts = {"aweme_id": 0, "item_id": 0, "group_id": 0, "awemeId": 0, "itemId": 0}
+    target_matches = 0
+    video_candidates = []
+    visited = 0
+
+    def walk(value, path="", depth=0):
+        nonlocal target_matches, visited
+        if depth > 40 or visited >= 100000:
+            return
+        visited += 1
+        if isinstance(value, dict):
+            for key in counts:
+                if key in value:
+                    counts[key] += 1
+                    if str(value.get(key, "")) == expected_id:
+                        target_matches += 1
+            for key, child in value.items():
+                if isinstance(child, dict) and ("play_addr" in child or "bit_rate" in child) and any(k in child for k in ("duration", "cover", "play_addr")):
+                    play_addr = child.get("play_addr") if isinstance(child.get("play_addr"), dict) else {}
+                    bit_rates = child.get("bit_rate") if isinstance(child.get("bit_rate"), list) else []
+                    video_candidates.append({
+                        "path": (path + "." + str(key))[:180],
+                        "keys": sorted(str(k) for k in child.keys())[:40],
+                        "duration_ms": child.get("duration") if isinstance(child.get("duration"), (int, float)) else None,
+                        "width": child.get("width") if isinstance(child.get("width"), int) else None,
+                        "height": child.get("height") if isinstance(child.get("height"), int) else None,
+                        "bit_rate_count": len(bit_rates),
+                        "play_addr_url_count": len(play_addr.get("url_list", [])) if isinstance(play_addr.get("url_list"), list) else 0,
+                    })
+                walk(child, path + "." + str(key), depth + 1)
+        elif isinstance(value, list):
+            for index, child in enumerate(value[:10000]):
+                walk(child, path + "[" + str(index) + "]", depth + 1)
+
+    for index, obj in enumerate(router_data):
+        walk(obj, "router_data[" + str(index) + "]")
+    return {
+        "router_data_object_count": len(router_data),
+        "visited_nodes_capped": visited >= 100000,
+        "visited_node_count": visited,
+        "id_key_counts": counts,
+        "exact_target_id_match_count": target_matches,
+        "video_candidate_count": len(video_candidates),
+        "video_candidates": video_candidates[:12],
+        "top_level_keys": [sorted(str(k) for k in obj.keys())[:80] for obj in router_data],
+    }
+
+
+def fetch_share_page_detail(upstream, video_id: str) -> tuple[dict | None, int, list[dict]]:
     if video_id != TARGET_ID:
         raise ProbeError("TARGET_VIDEO_ID_NOT_PINNED")
     share_url = f"https://www.iesdouyin.com/share/video/{video_id}/"
     html, _final_url, status = safe_fetch_text(share_url, 4 * 1024 * 1024, upstream._MOBILE_UA)
-    try:
-        router_data = upstream._extract_json_object_after_marker(html, "window._ROUTER_DATA")
-    except Exception:
-        raise ProbeError("SHARE_PAGE_ROUTER_DATA_NOT_FOUND") from None
-    detail = find_exact_aweme_detail(router_data, video_id)
-    if detail is None or not upstream._looks_like_douyin_video(detail.get("video")):
-        raise ProbeError("SHARE_PAGE_EXACT_VIDEO_ID_NOT_FOUND")
-    return detail, status
+    router_data = extract_router_data_objects(html, upstream)
+    if not router_data:
+        raise ProbeError("SHARE_PAGE_ROUTER_DATA_NOT_FOUND")
+    for obj in router_data:
+        detail = find_exact_aweme_detail(obj, video_id)
+        if detail is not None and upstream._looks_like_douyin_video(detail.get("video")):
+            return detail, status, router_data
+    return None, status, router_data
 
 
 def ffprobe(path: Path) -> dict:
@@ -402,11 +474,24 @@ def main() -> int:
         "frames": [],
     }
     try:
-        detail, detail_status = fetch_share_page_detail(upstream, TARGET_ID)
+        detail, detail_status, router_data_objects = fetch_share_page_detail(upstream, TARGET_ID)
         result["detail_id_verified"] = str(detail.get("aweme_id")) == TARGET_ID
         result["detail_http_status"] = detail_status
         if not result["detail_id_verified"]:
-            raise ProbeError("VIDEO_ID_MISMATCH")
+            result["status"] = "SHARE_PAGE_CAPTURED_ID_UNVERIFIED"
+            result["router_data_diagnostic"] = summarize_router_data(router_data_objects, TARGET_ID)
+            (work_dir / "router_data.json").write_text(json.dumps(router_data_objects, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+            (work_dir / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+            encrypted = encrypt_bundle(work_dir, output_dir, public_key)
+            print("MEDIA_PROBE_RESULT " + json.dumps({
+                "status": result["status"],
+                "target_video_id": TARGET_ID,
+                "detail_id_verified": False,
+                "detail_http_status": detail_status,
+                "router_data_diagnostic": result["router_data_diagnostic"],
+                "encrypted_artifact": encrypted,
+            }, ensure_ascii=False))
+            return 0
         video = detail["video"]
         audio_url = upstream._pick_url_for_transcription(video)
         audio_path = media_dir / "audio.bin"
