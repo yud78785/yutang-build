@@ -54,6 +54,14 @@ def exact_aweme_detail(payload: object, expected_id: str) -> dict | None:
     return detail
 
 
+def is_verified_detail(detail: object, expected_id: str) -> bool:
+    return (
+        isinstance(detail, dict)
+        and str(detail.get("aweme_id", "")) == expected_id
+        and isinstance(detail.get("video"), dict)
+    )
+
+
 def is_target_page_url(url: str, video_id: str) -> bool:
     try:
         parsed = urllib.parse.urlsplit(url)
@@ -475,7 +483,7 @@ def main() -> int:
     }
     try:
         detail, detail_status, router_data_objects = fetch_share_page_detail(upstream, TARGET_ID)
-        result["detail_id_verified"] = str(detail.get("aweme_id")) == TARGET_ID
+        result["detail_id_verified"] = is_verified_detail(detail, TARGET_ID)
         result["detail_http_status"] = detail_status
         if not result["detail_id_verified"]:
             result["status"] = "SHARE_PAGE_CAPTURED_ID_UNVERIFIED"
