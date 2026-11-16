@@ -1,0 +1,138 @@
+name: YuTang pinned upstream desktop OpenRouter compatibility patch
+
+on:
+  push:
+    branches:
+      - experiment/video-component-pilot-20261113
+    paths:
+      - .github/workflows/upstream-openrouter-desktop-compat.yml
+      - tools/apply_openrouter_desktop_patch.mjs
+      - tests/openrouter-production-compat.test.mjs
+      - tests/openrouter-ui-preset.test.mjs
+      - docs/openrouter-desktop-compat.md
+
+permissions:
+  contents: read
+
+concurrency:
+  group: yutang-openrouter-desktop-compat
+  cancel-in-progress: true
+
+jobs:
+  patch-and-test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout experiment source without persisted credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+
+      - name: Set up pinned Node runtime
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 24.17.0
+
+      - name: Fetch exact upstream 1.4.7 source commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          git init upstream
+          git -C upstream remote add origin https://github.com/LockyBee/dsh-douyin-agent.git
+          git -C upstream fetch --depth=1 origin 9c49833078f4b4d18b9211ef86d024e7f2e15739
+          git -C upstream checkout --detach FETCH_HEAD
+          test "$(git -C upstream rev-parse HEAD)" = "9c49833078f4b4d18b9211ef86d024e7f2e15739"
+          echo "PINNED_UPSTREAM_1_4_7_SOURCE_VERIFIED"
+
+      - name: Apply exact-source patch and verify desktop runtime includes every patched module
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tools/apply_openrouter_desktop_patch.mjs upstream
+          node --check upstream/api-agent.mjs
+          node --check upstream/chat-agent.mjs
+          node --check upstream/spark-agent.mjs
+          node --check upstream/public-comment-agent.mjs
+          node --check upstream/desktop/src/model-settings-guard.mjs
+          node --check upstream/desktop/src/main.mjs
+          node --check upstream/desktop/scripts/verify-packaged-api.mjs
+          node --check upstream/desktop/scripts/acquire-upstream.mjs
+          cp tests/openrouter-production-compat.test.mjs upstream/tests/openrouter-production-compat.test.mjs
+          cp tests/openrouter-ui-preset.test.mjs upstream/desktop/ui-api/tests/openrouter-preset.test.mjs
+          test -s upstream/openrouter-desktop-patch-receipt.json
+
+      - name: Install pinned root and UI dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd upstream
+          npx --yes pnpm@10.6.5 install --no-frozen-lockfile --ignore-scripts
+          cd desktop/ui-api
+          npx --yes pnpm@10.6.5 install --frozen-lockfile
+          cd ..
+          npx --yes pnpm@10.6.5 install --frozen-lockfile --ignore-scripts
+
+      - name: Run production-agent and desktop-worker regression tests
+        shell: bash
+        working-directory: upstream
+        run: |
+          set -euo pipefail
+          node --test \
+            tests/openrouter-production-compat.test.mjs \
+            tests/api-agent.test.mjs \
+            tests/chat.test.mjs \
+            tests/spark-agent.test.mjs \
+            tests/public-comment-agent.test.mjs \
+            desktop/tests/api-worker.test.mjs \
+            desktop/tests/api-process.test.mjs \
+            desktop/tests/model-settings-guard.test.mjs \
+            desktop/ui-api/tests/openrouter-preset.test.mjs
+
+      - name: Acquire and verify pinned official DeepSeek UI source with the product's own tree validator
+        shell: bash
+        working-directory: upstream/desktop
+        run: |
+          set -euo pipefail
+          node scripts/acquire-upstream.mjs
+          test -s .cache/upstream/fb2c4b9e698e30edb738bca4cf0618587db7d203/packages/client/ui-primitives/src/index.ts
+
+      - name: Build the actual standalone desktop UI assets
+        shell: bash
+        working-directory: upstream/desktop
+        run: |
+          set -euo pipefail
+          node ui-api/build.mjs
+          test -s ui-api/dist/app.js
+          test -s ui-api/dist/licenses/manifest.json
+
+      - name: Run the complete desktop UI regression suite
+        shell: bash
+        working-directory: upstream/desktop/ui-api
+        run: |
+          set -euo pipefail
+          npx --yes pnpm@10.6.5 test
+
+      - name: Parse the desktop JSX with esbuild
+        shell: bash
+        working-directory: upstream/desktop
+        run: |
+          set -euo pipefail
+          npx --yes esbuild@0.28.1 ui-api/src/main.jsx --outfile=/tmp/yutang-openrouter-settings.js --format=esm --loader:.jsx=jsx
+          test -s /tmp/yutang-openrouter-settings.js
+
+      - name: Upload redacted source patch receipt
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: YuTang-OpenRouter-Desktop-Patch-Receipt-NOT-EXE
+          path: upstream/openrouter-desktop-patch-receipt.json
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Strict non-release boundary
+        if: always()
+        shell: bash
+        run: |
+          echo "NO LIVE API KEYS OR MODEL CALLS."
+          echo "NO USER PC, NO BROWSER LOGIN, NO WINDOWS EXE BUILD."
+          echo "SOURCE PATCH AND MOCK-REQUEST TESTS ONLY; NO RELEASE."
