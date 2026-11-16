@@ -1,4 +1,4 @@
-name: YuTang anonymous Douyin media probe v3.4 (Ubuntu only)
+name: YuTang anonymous Douyin media probe v3.5 (Ubuntu only)
 
 on:
   push:
@@ -93,12 +93,12 @@ jobs:
             --video-id 7445301722639060233 \
             --upstream-root "$RUNNER_TEMP/shared-video-transcriber" \
             --public-key tools/keys/yutang-media-probe-public.pem \
-            --output-dir ./.media-probe-output
+            --output-dir ./media-probe-output
 
       - name: Upload only encrypted result bundle for private retrieval
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: yutang-douyin-media-probe-encrypted-v3-4
-          path: .media-probe-output/*
+          name: yutang-douyin-media-probe-encrypted-v3-5
+          path: media-probe-output/*
           if-no-files-found: error
           retention-days: 1
