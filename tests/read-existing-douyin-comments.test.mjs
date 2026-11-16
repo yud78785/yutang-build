@@ -88,7 +88,7 @@ test('one owned target results in read-only evidence, never login or website net
  assert.equal(v.status,'read_only_evidence');assert.deepEqual(v.comments,[{commentId:'101',text:'hello public'}]);
  assert.equal(v.networkRequestsToDouyinByProbe,false);assert.equal(v.browserStartedByProbe,false);
  assert.equal(calls.filter(x=>x[1]===ownershipExpression()).length,2);
- assert.equal(calls.length,3);
+ assert.equal(calls.length,3); // ownership, comments, final ownership
 });
 test('private site metadata is skipped without evaluating that tab',async()=>{
  const t=[target(), {type:'page',id:'DEADBEEF12345678',url:'https://private.example/account?secret=123',webSocketDebuggerUrl:'ws://127.0.0.1:9227/devtools/page/DEADBEEF12345678'}];
