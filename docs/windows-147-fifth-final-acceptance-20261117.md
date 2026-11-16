@@ -58,3 +58,25 @@
 - 正式签名、私钥、公钥配置、真实在线更新和发布，在外部条件及单独授权明确之前保持关闭。
 - 只有具备合法安全的用户本机隔离验收环境时，才按同一候选哈希核实用户电脑现场；不代替用户下载安装，不擅自操作本机。
 - 本记录只新增在第五轮隔离实验分支的 `docs/` 路径，不修改 `main`、工作流或 EXE，不触发新的 Windows 2022/2025 运行。
+
+
+## 9. 2026-11-17 Windows 2022 same-binary live-page result (supersedes section 5 item 1)
+
+The Windows 2022 live public-homepage check was subsequently authorized and completed successfully. The earlier `UNVERIFIED` entry above accurately described the state at the time this report was first written; it is now superseded by the following evidence:
+
+- Windows 2022 Run: [43927596418](https://github.com/yud78785/yutang-build/actions/runs/43927596418)
+- Job: `133511097653`
+- Run / Job: completed / success
+- Test source: `d523b38f8eee385fce7587b6fd0a7c639da3c721`
+- Exact original EXE SHA-256: `3201d433df727a5d5fddf8e68a0f69ea1654057e04cfad7833fd3ed7dc241a34` (unchanged)
+- Artifact source, artifact ID, ZIP digest, EXE byte count and EXE SHA-256 all verified before execution.
+- Node.js: `22.23.4`; negative-path suite: `68 pass, 0 fail, 0 skipped`.
+- Actual page gate: HTTP 200 and rendered.
+- Sandbox: Renderer verified; Network Service AppContainer and Low Integrity verified.
+- Cleanup: 24 candidate processes tracked, 0 remaining; CDP listeners 0; isolated directories removed.
+- Final receipt: `PASS_WINDOWS_EXE_PUBLIC_WEB_ONLY`.
+- No account or model key; no video playback claim; no personal-computer acceptance; no release authorization.
+
+**Updated cross-platform conclusion:** the same immutable unsigned EXE SHA has now passed one real public-homepage load, sandbox check and complete candidate cleanup on both Windows Server 2025 (Run `43643545361`) and Windows Server 2022 (Run `43927596418`). This does not establish personal-PC acceptance, Authenticode trust, real video/model comprehension, online update or release readiness.
+
+Full combined record: [Windows 2022 / 2025 same-EXE acceptance](https://github.com/yud78785/yutang-build/blob/experiment/windows-147-public-web-2022-one-shot-20261117/docs/windows-147-same-exe-public-web-cross-platform-acceptance-20261117.md).
