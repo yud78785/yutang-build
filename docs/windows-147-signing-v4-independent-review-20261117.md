@@ -111,8 +111,8 @@ README 本身也承认：当前 1.4.7 updater 的 `UPDATE_MANIFEST_PUBLIC_KEY` �
 ### 邮件证据
 - SSLmentor 2026-11-14 回复：塞尔维亚居住原则上可申请；若身份证件没有地址，供应商表示租赁合同可用，银行流水也可考虑；供应商明确说自己不是 CA validation team。
 - 供应商同一邮件对 Serbia case 回复 `no vat`，但尚未确认最终 payable total 是否准确为 EUR 117 或有无额外 mandatory fee。
-- 2026-11-16/17 已向同一邮件线程发送 follow-up，要求书面确认：commercial Standard（非 Open Source-only）产品类型、EUR 117 全包金额、退款扣费、459 vs 460 天、reissue 身份复核、外国国籍塞尔维亚居民证件、SimplySign/SignTool 和 CI/CD 限制。
-- 截至本记录复核时，Gmail 未检索到 2026-11-16 之后来自 `info@sslmentor.rs` 的新回复。状态为 `WAITING_FOR_VENDOR_REPLY`，不是已确认。
+- Gmail 只读复核显示：该线程最后一封用户发出的邮件为 2026-11-14 15:11:34 +01，最后一封供应商回复为 2026-11-14 15:15:04 +01。针对 2026-11-16/17 的 `to:info@sslmentor.rs` 与 `in:sent` 检索均未发现后续邮件；因此此前“已发送 11/16/17 follow-up”的记录没有 Gmail 证据支持，应更正为 **FOLLOW_UP_NOT_SENT**。
+- 已有供应商回复仅确认其所称 Serbia case 当前 no VAT、塞尔维亚居住者原则上可申请，并称若证件无地址可考虑租赁合同或银行流水；供应商同时明确表示自己不是 CA validation team。最终 CA 资格、EUR 117 是否为全部应付金额、退款扣费、459/460 天、reissue 身份复核、SimplySign/SignTool 与 CI/CD 限制仍未得到书面确认。当前状态：`PARTIAL_VENDOR_REPLY / CA_CONFIRMATION_PENDING / FOLLOW_UP_NOT_SENT`。本轮没有发送邮件或提交任何身份材料。
 
 ### 官方/供应商网页
 - SSLmentor Individual 页面：列明个人身份照片/人脸验证、utility bill；在没有账单时租赁合同或银行流水可能由 CA 个案裁量接受；证书公开字段含个人姓名、城市、地区和国家，不含完整街道地址。
