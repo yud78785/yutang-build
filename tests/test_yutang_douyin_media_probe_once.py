@@ -151,13 +151,45 @@ class NetworkBoundaryTests(unittest.TestCase):
             "_looks_like_douyin_video": staticmethod(lambda video: isinstance(video, dict) and "play_addr" in video and "duration" in video),
         })()
         with patch.object(media_probe, "safe_fetch_text", return_value=("html", "https://www.iesdouyin.com/share/video/7445301722639060233/", 200)):
-            with self.assertRaisesRegex(media_probe.ProbeError, "SHARE_PAGE_EXACT_VIDEO_ID_NOT_FOUND"):
-                media_probe.fetch_share_page_detail(fake_wrong, "7445301722639060233")
+            detail, status, router_data = media_probe.fetch_share_page_detail(fake_wrong, "7445301722639060233")
+            self.assertIsNone(detail)
+            self.assertEqual(status, 200)
+            self.assertEqual(len(router_data), 1)
 
     def test_share_page_redirect_only_allows_official_hosts(self):
         handler = media_probe.DouyinPageRedirectHandler()
         with self.assertRaises(media_probe.ProbeError):
             handler.redirect_request(None, None, 302, "Found", {}, "https://evil.example/video/7445301722639060233")
+
+
+    def test_supported_aweme_item_id_alias_still_requires_video_object(self):
+        payload = {"aweme_detail": {"item_id": "7445301722639060233", "video_info": {"play_addr": {"url_list": ["https://secret.invalid/video"]}}}}
+        found = media_probe.find_exact_aweme_detail(payload, "7445301722639060233")
+        self.assertEqual(found["aweme_id"], "7445301722639060233")
+        self.assertIn("play_addr", found["video"])
+
+    def test_router_structure_summary_redacts_urls_and_author_values(self):
+        payload = [{"aweme_detail": {
+            "item_id": "7445301722639060233",
+            "author": {"nickname": "private-nickname"},
+            "video": {"play_addr": {"url_list": ["https://cdn.example.test/signed-secret"]},
+                      "duration": 355000, "bit_rate": [{"bit_rate": 300000}]},
+        }}]
+        summary = media_probe.summarize_router_data(payload, "7445301722639060233")
+        encoded = json.dumps(summary)
+        self.assertEqual(summary["exact_target_id_match_count"], 1)
+        self.assertEqual(summary["video_candidate_count"], 1)
+        self.assertNotIn("signed-secret", encoded)
+        self.assertNotIn("private-nickname", encoded)
+
+    def test_multiple_router_data_markers_are_bounded(self):
+        class FakeUpstream:
+            @staticmethod
+            def _extract_json_object_after_marker(text, marker):
+                return {"keys": [text.count(marker)]}
+        html = "window._ROUTER_DATA = {}; window._ROUTER_DATA = {};"
+        values = media_probe.extract_router_data_objects(html, FakeUpstream, max_objects=2)
+        self.assertEqual(len(values), 2)
 
 
 class EncryptionTests(unittest.TestCase):
