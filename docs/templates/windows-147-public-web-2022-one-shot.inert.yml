@@ -1,0 +1,93 @@
+# INERT REFERENCE ONLY: docs/templates path is NOT an Actions workflow.
+# No Windows 2022 run has been authorized in this continuation.
+# Activate ONLY on separate explicit approval, in the single named fresh branch
+# created from exactly d523b38f8eee385fce7587b6fd0a7c639da3c721.
+# Never edit main, rebuild/sign/merge/publish or run Windows 2025 again.
+# The original candidate Artifact expires 2026-11-21T01:50:44Z.
+name: YuTang 1.4.7 exact unsigned EXE public-web Windows 2022 one-shot - NOT RELEASE
+on:
+  push:
+    branches:
+      - experiment/windows-147-public-web-2022-one-shot-20261117
+    paths:
+      - .github/workflows/windows-147-public-web-2022-one-shot.yml
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: yutang-147-public-web-2022-once
+  cancel-in-progress: false
+
+jobs:
+  public-homepage-2022:
+    # Source pin and one nonforced, nonbranch-creation push only.
+    # Subsequent pushes MUST be SKIPPED, not interpreted as PASS.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/experiment/windows-147-public-web-2022-one-shot-20261117' && github.event.before == 'd523b38f8eee385fce7587b6fd0a7c639da3c721' && github.event.created == false && github.event.forced == false && github.event.deleted == false
+    name: Windows 2022 identical EXE public homepage and strict cleanup
+    runs-on: windows-2022
+    timeout-minutes: 35
+    steps:
+      - name: Checkout exact previously reviewed probe code without persisted credentials
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: d523b38f8eee385fce7587b6fd0a7c639da3c721
+          persist-credentials: false
+
+      - name: Fail if source checkout changed
+        shell: pwsh
+        run: |
+          if ((& git rev-parse HEAD).Trim() -cne 'd523b38f8eee385fce7587b6fd0a7c639da3c721') {
+            throw 'PUBLIC_WEB_PROBE_SOURCE_SHA_MISMATCH'
+          }
+
+      - name: Download EXACT same already accepted Windows 2025 EXE
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          repository: yud78785/yutang-build
+          run-id: 43541915930
+          name: YuTang-OpenRouter-Desktop-1.4.7-SecurityHardening-windows-2025-CANDIDATE-NOT-RELEASE
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/yutang-147-accepted-exe
+
+      - name: Verify exact EXE pathname, bytes and SHA-256
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = Join-Path '${{ runner.temp }}' 'yutang-147-accepted-exe\desktop\release-api\Dafeiyu-Douyin-API-1.4.7-win-x64.exe'
+          if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { throw 'ACCEPTED_EXE_NOT_FOUND' }
+          if ((Get-Item -LiteralPath $exe).Length -ne 125446071) { throw 'ACCEPTED_EXE_SIZE_MISMATCH' }
+          $sha = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($sha -cne '3201d433df727a5d5fddf8e68a0f69ea1654057e04cfad7833fd3ed7dc241a34') {
+            throw 'ACCEPTED_EXE_SHA256_MISMATCH'
+          }
+          ('YUTANG_ACCEPTED_EXE=' + $exe) | Out-File -LiteralPath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host ('ACCEPTED_EXE_SHA256=' + $sha)
+
+      - name: Run exact fixed source probe-negative unit tests
+        shell: pwsh
+        run: |
+          node --version
+          node --test tests/windows147-online-public-probe.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'PUBLIC_WEB_PROBE_NEGATIVE_TESTS_FAILED' }
+
+      - name: Single authorized Windows 2022 real public-homepage probe, with fail-closed cleanup
+        shell: pwsh
+        timeout-minutes: 18
+        env:
+          YUTANG_PUBLIC_WEB_TEST_AUTHORIZED: 'yes'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (Get-NetFirewallRule -DisplayName 'YuTang147EphemeralEdgeEgressBlock' -ErrorAction SilentlyContinue) {
+            throw 'OFFLINE_FIREWALL_RULE_NOT_ALLOWED_DURING_ONLINE_PROBE'
+          }
+          node tools/windows147-online-public-probe.mjs "$env:YUTANG_ACCEPTED_EXE"
+          if ($LASTEXITCODE -ne 0) { throw 'PUBLIC_WEB_EXE_ACCEPTANCE_NOT_PROVEN' }
+
+# Required PASS on this run's raw logs:
+#   WINDOWS_PUBLIC_PAGE_GATE_OK (HTTP 200 + rendered true)
+#   WINDOWS_PUBLIC_WEB_CLEANUP_OK (0 owned processes/CDP + directories removed)
+#   WINDOWS_PUBLIC_WEB_EXE_RECEIPT status=PASS_WINDOWS_EXE_PUBLIC_WEB_ONLY
+#   exact exeSha256=3201d433df727a5d5fddf8e68a0f69ea1654057e04cfad7833fd3ed7dc241a34
+# If any is absent, result is FAIL/UNVERIFIED; no second attempt automatically.
