@@ -7,6 +7,8 @@ Only the encrypted result bundle leaves the ephemeral runner.
 from __future__ import annotations
 
 import argparse
+import asyncio
+import base64
 import hashlib
 import hmac
 import ipaddress
@@ -336,6 +338,139 @@ def fetch_share_page_detail(upstream, video_id: str) -> tuple[dict | None, int, 
     return None, status, router_data
 
 
+def inspect_first_party_api_json(host: str, path: str, status: int, content_type: str, body: bytes, expected_id: str) -> dict | None:
+    allowed_hosts = {"www.douyin.com", "www.iesdouyin.com", "iesdouyin.com"}
+    if host not in allowed_hosts or status != 200 or "json" not in (content_type or "").lower():
+        return None
+    if not any(token in path.lower() for token in ("/aweme/", "/api/", "/video/", "/feed/", "/detail/")):
+        return None
+    if len(body) > 2 * 1024 * 1024:
+        return {"detail": None, "reason": "JSON_BODY_LIMIT", "diagnostic": {"body_bytes": len(body)}}
+    try:
+        payload = json.loads(body)
+    except Exception:
+        return {"detail": None, "reason": "INVALID_JSON", "diagnostic": {"body_bytes": len(body)}}
+    detail = find_exact_aweme_detail(payload, expected_id)
+    return {
+        "detail": detail,
+        "reason": None,
+        "diagnostic": summarize_router_data([payload], expected_id),
+    }
+
+
+async def fetch_browser_api_detail(upstream, video_id: str) -> tuple[dict | None, int | None, list[dict], list[dict], dict]:
+    if video_id != TARGET_ID:
+        raise ProbeError("TARGET_VIDEO_ID_NOT_PINNED")
+    from playwright.async_api import async_playwright
+
+    diagnostics: list[dict] = []
+    captured_payloads: list[dict] = []
+    captured_bytes = 0
+    tasks: set[asyncio.Task] = set()
+    browser = None
+    detail_future = asyncio.get_running_loop().create_future()
+    page_state = {"status": "not_started", "target_page_matched": False}
+
+    async def inspect_response(response):
+        nonlocal captured_bytes
+        try:
+            parsed = urllib.parse.urlsplit(response.url)
+            host = (parsed.hostname or "").lower()
+            path = parsed.path
+            if host not in {"www.douyin.com", "www.iesdouyin.com", "iesdouyin.com"}:
+                return
+            if not any(token in path.lower() for token in ("/aweme/", "/api/", "/video/", "/feed/", "/detail/")):
+                return
+            content_type = response.headers.get("content-type", "")
+            if "json" not in content_type.lower():
+                return
+            body = await response.body()
+            inspected = inspect_first_party_api_json(host, path, int(response.status), content_type, body, video_id)
+            if inspected is None:
+                return
+            diagnostics.append({
+                "host": host,
+                "path": path[:220],
+                "status": int(response.status),
+                "content_type": content_type.split(";", 1)[0][:80],
+                "body_bytes": len(body),
+                "reason": inspected.get("reason"),
+                "diagnostic": inspected.get("diagnostic"),
+            })
+            if len(captured_payloads) < 12 and captured_bytes + len(body) <= 6 * 1024 * 1024:
+                captured_payloads.append({
+                    "host": host,
+                    "path": path[:220],
+                    "status": int(response.status),
+                    "body_base64": base64.b64encode(body).decode("ascii"),
+                })
+                captured_bytes += len(body)
+            detail = inspected.get("detail")
+            if detail is not None and not detail_future.done():
+                detail_future.set_result((detail, int(response.status)))
+        except Exception:
+            return
+
+    try:
+        async with async_playwright() as playwright:
+            browser = await playwright.chromium.launch(headless=True)
+            context = await browser.new_context(
+                user_agent=upstream._UA,
+                locale="zh-CN",
+                viewport={"width": 1280, "height": 720},
+                extra_http_headers={"Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8"},
+            )
+            if await context.cookies():
+                raise ProbeError("BROWSER_CONTEXT_NOT_ANONYMOUS")
+            page = await context.new_page()
+
+            def on_response(response):
+                if detail_future.done() and len(captured_payloads) >= 12:
+                    return
+                task = asyncio.create_task(inspect_response(response))
+                tasks.add(task)
+                task.add_done_callback(tasks.discard)
+
+            page.on("response", on_response)
+            try:
+                await page.goto(TARGET_URL, wait_until="domcontentloaded", timeout=25_000)
+            except Exception:
+                # A navigation timeout is not treated as a successful page load.
+                pass
+            parsed_final = urllib.parse.urlsplit(page.url)
+            page_state = {
+                "status": "target_page" if is_target_page_url(page.url, video_id) else "page_identity_mismatch",
+                "target_page_matched": is_target_page_url(page.url, video_id),
+                "host": (parsed_final.hostname or "")[:120],
+                "path": parsed_final.path[:220],
+            }
+            if not page_state["target_page_matched"]:
+                return None, None, diagnostics, captured_payloads, page_state
+            try:
+                detail, response_status = await asyncio.wait_for(detail_future, timeout=14)
+                return detail, response_status, diagnostics, captured_payloads, page_state
+            except asyncio.TimeoutError:
+                await page.wait_for_timeout(2500)
+                if detail_future.done():
+                    detail, response_status = detail_future.result()
+                    return detail, response_status, diagnostics, captured_payloads, page_state
+                return None, None, diagnostics, captured_payloads, page_state
+    except ProbeError:
+        raise
+    except Exception as exc:
+        page_state = {"status": "browser_capture_failed", "error_type": type(exc).__name__[:80], "target_page_matched": False}
+        return None, None, diagnostics, captured_payloads, page_state
+    finally:
+        for task in list(tasks):
+            if not task.done():
+                task.cancel()
+        if browser is not None:
+            try:
+                await browser.close()
+            except Exception:
+                pass
+
+
 def ffprobe(path: Path) -> dict:
     try:
         proc = subprocess.run([
@@ -483,12 +618,25 @@ def main() -> int:
     }
     try:
         detail, detail_status, router_data_objects = fetch_share_page_detail(upstream, TARGET_ID)
+        browser_api_diagnostic = []
+        browser_api_payloads = []
+        browser_page_state = {"status": "not_attempted", "target_page_matched": False}
+        if detail is None:
+            detail, browser_api_status, browser_api_diagnostic, browser_api_payloads, browser_page_state = asyncio.run(
+                fetch_browser_api_detail(upstream, TARGET_ID)
+            )
+            if detail is not None:
+                detail_status = browser_api_status
+                result["source_method"] = "anonymous_first_party_browser_api_exact_id"
         result["detail_id_verified"] = is_verified_detail(detail, TARGET_ID)
         result["detail_http_status"] = detail_status
         if not result["detail_id_verified"]:
-            result["status"] = "SHARE_PAGE_CAPTURED_ID_UNVERIFIED"
+            result["status"] = "FIRST_PARTY_API_VIDEO_OBJECT_NOT_FOUND"
             result["router_data_diagnostic"] = summarize_router_data(router_data_objects, TARGET_ID)
+            result["browser_api_diagnostic"] = browser_api_diagnostic
+            result["browser_page_state"] = browser_page_state
             (work_dir / "router_data.json").write_text(json.dumps(router_data_objects, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+            (work_dir / "browser_api_responses.json").write_text(json.dumps(browser_api_payloads, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
             (work_dir / "result.json").write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
             encrypted = encrypt_bundle(work_dir, output_dir, public_key)
             print("MEDIA_PROBE_RESULT " + json.dumps({
@@ -497,6 +645,8 @@ def main() -> int:
                 "detail_id_verified": False,
                 "detail_http_status": detail_status,
                 "router_data_diagnostic": result["router_data_diagnostic"],
+                "browser_api_diagnostic": browser_api_diagnostic,
+                "browser_page_state": browser_page_state,
                 "encrypted_artifact": encrypted,
             }, ensure_ascii=False))
             return 0
