@@ -85,7 +85,7 @@ jobs:
           set -euo pipefail
           python -m unittest discover -s tests -p 'test_yutang_douyin_media_probe_once.py' -v
 
-      - name: Read one official share-page response; download only after exact video ID proof
+      - name: Read exact target media once, transcribe audio, and extract frames
         shell: bash
         run: |
           set -euo pipefail
@@ -98,7 +98,7 @@ jobs:
       - name: Upload only encrypted result bundle for private retrieval
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: yutang-douyin-media-probe-encrypted-v3-2
+          name: yutang-douyin-media-probe-encrypted-v3-1
           path: .media-probe-output/*
           if-no-files-found: error
           retention-days: 1
