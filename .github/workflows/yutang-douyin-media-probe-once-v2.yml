@@ -1,0 +1,103 @@
+name: YuTang anonymous Douyin media probe v2 (Ubuntu only)
+
+on:
+  push:
+    branches:
+      - experiment/yutang-first-task-20261115
+    paths:
+      - .github/workflows/yutang-douyin-media-probe-once-v2.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: yutang-douyin-media-probe-v2
+  cancel-in-progress: false
+
+jobs:
+  media-probe:
+    name: One bounded public media extraction
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PYTHONUNBUFFERED: "1"
+      PIP_DISABLE_PIP_VERSION_CHECK: "1"
+      HF_HOME: ${{ runner.temp }}/hf-home
+      HF_HUB_DISABLE_TELEMETRY: "1"
+      TOKENIZERS_PARALLELISM: "false"
+      HTTP_PROXY: ""
+      HTTPS_PROXY: ""
+      ALL_PROXY: ""
+      http_proxy: ""
+      https_proxy: ""
+      all_proxy: ""
+    steps:
+      - name: Verify this is the authorized experiment branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF" = "refs/heads/experiment/yutang-first-task-20261115"
+          printf 'SOURCE_COMMIT=%s\n' "$GITHUB_SHA"
+
+      - name: Checkout experiment source without persisted credentials
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: "3.12"
+
+      - name: Fetch exact MIT upstream revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          UPSTREAM_SHA="97920577ef5ae718af5de2561ed3aa5b00d36f64"
+          UPSTREAM_ROOT="$RUNNER_TEMP/shared-video-transcriber"
+          git init "$UPSTREAM_ROOT"
+          git -C "$UPSTREAM_ROOT" remote add origin https://github.com/ZY-ZhichaoYu/shared-video-transcriber.git
+          git -C "$UPSTREAM_ROOT" fetch --depth=1 origin "$UPSTREAM_SHA"
+          git -C "$UPSTREAM_ROOT" checkout --detach FETCH_HEAD
+          test "$(git -C "$UPSTREAM_ROOT" rev-parse HEAD)" = "$UPSTREAM_SHA"
+          printf 'UPSTREAM_COMMIT=%s\n' "$UPSTREAM_SHA"
+          head -n 1 "$UPSTREAM_ROOT/LICENSE"
+
+      - name: Install dependencies and isolated Chromium
+        shell: bash
+        run: |
+          set -euo pipefail
+          UPSTREAM_ROOT="$RUNNER_TEMP/shared-video-transcriber"
+          python -m pip install --no-input -r "$UPSTREAM_ROOT/requirements.txt" -c "$UPSTREAM_ROOT/constraints.txt"
+          python -m playwright install --with-deps chromium
+          if ! command -v ffmpeg >/dev/null 2>&1 || ! command -v ffprobe >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y ffmpeg
+          fi
+          ffmpeg -version | head -n 1
+          ffprobe -version | head -n 1
+
+      - name: Run negative-path and encryption tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m unittest discover -s tests -p 'test_yutang_douyin_media_probe_once.py' -v
+
+      - name: Read exact target media once, transcribe audio, and extract frames
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tools/yutang_douyin_media_probe_once.py \
+            --video-id 7445301722639060233 \
+            --upstream-root "$RUNNER_TEMP/shared-video-transcriber" \
+            --public-key tools/keys/yutang-media-probe-public.pem \
+            --output-dir "$RUNNER_TEMP/yutang-encrypted-media-result"
+
+      - name: Upload only encrypted result bundle for private retrieval
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: yutang-douyin-media-probe-encrypted-v2
+          path: ${{ runner.temp }}/yutang-encrypted-media-result/*
+          if-no-files-found: error
+          retention-days: 1
