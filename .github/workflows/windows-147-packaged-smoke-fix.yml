@@ -171,6 +171,27 @@ jobs:
           Pop-Location
           Write-Host 'PASS_FRIEND_INTERACTIONS_DEFAULT_OFF_AND_PREPARE_PAGE_HANDOFF_DISCLOSURE'
 
+      - name: Apply YuTang safe defaults and prepare-page handoff disclosure
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          node --check tools/apply_windows147_safe_defaults.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'SAFE_DEFAULTS_PATCH_TOOL_SYNTAX_FAILED' }
+          node --test tests/windows147-safe-defaults.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'SAFE_DEFAULTS_PATCH_TOOL_TESTS_FAILED' }
+          node tools/apply_windows147_safe_defaults.mjs upstream
+          if ($LASTEXITCODE -ne 0) { throw 'SAFE_DEFAULTS_PATCH_APPLICATION_FAILED' }
+          foreach ($file in @('friend-interactions.mjs','tests/friend-interactions.test.mjs','tests/friend-auto-prepare.test.mjs','tests/friend-chat-share-isolation.test.mjs','desktop/ui-api/src/main.jsx','desktop/scripts/verify-packaged-api.mjs')) {
+            node --check (Join-Path 'upstream' $file)
+            if ($LASTEXITCODE -ne 0) { throw ('SAFE_DEFAULTS_PATCHED_SOURCE_SYNTAX_FAILED: ' + $file) }
+          }
+          Copy-Item tests/windows147-safe-defaults.test.mjs upstream/tests/windows147-safe-defaults.test.mjs
+          Push-Location upstream
+          node --test tests/friend-interactions.test.mjs tests/friend-auto-prepare.test.mjs tests/friend-chat-share-isolation.test.mjs tests/windows147-safe-defaults.test.mjs
+          if ($LASTEXITCODE -ne 0) { throw 'FRIEND_INTERACTION_DEFAULT_OFF_REGRESSION_FAILED' }
+          Pop-Location
+          Write-Host 'PASS_FRIEND_INTERACTIONS_DEFAULT_OFF_AND_PREPARE_PAGE_HANDOFF_DISCLOSURE'
+
       - name: Build and test Windows Job Object helper
         shell: pwsh
         run: |
@@ -511,7 +532,8 @@ jobs:
           $allowedRefs = @(
             'refs/heads/experiment/windows-147-update-recovery-20261114',
             'refs/heads/experiment/windows-147-shortcut-handle-integration-20261114',
-            'refs/heads/experiment/windows-147-shortcut-pin-20261114'
+            'refs/heads/experiment/windows-147-shortcut-pin-20261114',
+            'refs/heads/experiment/windows-147-safe-defaults-final-20261117'
           )
           if ($allowedRefs -cnotcontains $env:GITHUB_REF) { throw 'WRONG_FIX_BRANCH' }
           if ($env:RUNNER_OS -cne 'Windows') { throw 'WINDOWS_RUNNER_REQUIRED' }

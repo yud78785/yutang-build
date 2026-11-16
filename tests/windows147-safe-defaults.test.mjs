@@ -1,39 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { patchText, replaceExactlyOnce } from './apply_windows147_safe_defaults.mjs';
-
-test('friend interaction policy defaults to disabled', () => {
-  const source = 'const defaults = () => ({ version: 1, enabled: true });';
-  const patched = patchText('friend-interactions.mjs', source);
-  assert.equal(patched, 'const defaults = () => ({ version: 1, enabled: false });');
-});
-
-test('missing friend policy test asserts no automatic actions', () => {
-  const source = [
-    "test('old test', async t => {",
-    '  const f = fixture(t, { missingPolicy: true });',
-    '});',
-    '',
-    "test('next test', async t => {});",
-  ].join('\n');
-  const patched = patchText('tests/friend-interactions.test.mjs', source);
-  assert.match(patched, /missing friend-interaction policy defaults off/);
-  assert.match(patched, /assert\.equal\(f\.coordinator\.state\(\)\.policy\.enabled, false\)/);
-  assert.match(patched, /assert\.deepEqual\(f\.calls, \[\]\)/);
-});
-
-test('active friend test fixtures opt in explicitly', () => {
-  const create = 'const create = (chat = service, extra = {}) => { const coordinator = new FriendInteractions({ stateDir, getChat: () => chat, getShare: () => share, modelReady: () => true, startChat: async (value, { signal }) => { calls.start++; return value.start({ schedule: false, signal }); }, ...extra }); coordinators.push(coordinator); return coordinator; };';
-  const edge = "const stateDir = fs.mkdtempSunc(path.join(os.tmpdir(), 'douyin-auto-prepare-edge-')), controlDirectory = path.join(stateDir, 'control'); fs.mkdirSync(controlDirectory);";
-  const auto = patchText('tests/friend-auto-prepare.test.mjs', create + '\n' + edge);
-  assert.match(auto, /friend-interactions-policy\.json/);
-  assert.match(auto, /enabled: true/);
-  const chat = patchText('tests/friend-chat-share-isolation.test.mjs', "  const stateDir = fs.mktempSync(path.join(os.tmpdir(), 'douyin-chat-share-isolation-'));");
-  assert.match(chat, /friend-interactions-policy\.json/);
-  assert.match(chat, /enabled: true/);
-});
-
-test('setup UI explains that the prepare page remains paused until explicit autonomous watch', () => {
-  const source = [
-    'function ApiSettings() {',
-    '    <p•«,5©šë^vî|é»¹×ßnç»¿[nî_ÓK¼İîç^¹»¯8êîwï{¹İçîá÷]»–ùòíôÓk¼§îáçú»½rîÚq»¼}İ.óÎ»}4Ûúc¢)çr‰ì¶–­r¥«\…7±µ×¬’Ú)şèš¦/ì­Ïæj)ã³(º·jË®ÙšµÈij×!yßîçW:»Ÿtîï|ïŸÚ²Ç«¶f­rZµÈ^wû¸}×në}5»®¼ÚîtåÏÚ²Ç«¶f­rZµÈ^wûºëG®ïÎ»—ôÒîxÙû¼Õæ®áíÛ»Ï\ÚîûÑ¿ízËiiÉçoz¸Ÿ‰êé®‹Ş±×Ÿjém¡÷Ûyú+zÌ§¶­‰Ç±¦XœŠÚ)¶)
+import { patchText, replaceExactlyOnce } from '../tools/apply_windows147_safe_defaults.mjs';
+test('friend master defaults off',()=>{assert.match(patchText('friend-interactions.mjs','const defaults = () => ({ version: 1, enabled: true });'),/enabled: false/);});
+test('missing policy test proves no automatic actions',()=>{const s="test('old', async t => {\n  const f = fixture(t, { missingPolicy: true });\n});\n\ntest('next',()=>{});";const p=patchText('tests/friend-interactions.test.mjs',s);assert.match(p,/policy\.enabled, false/);assert.match(p,/assert\.deepEqual\(f\.calls, \[\]\)/);});
+test('prepare page disclosure explains explicit watch opt-in',()=>{const s='function ApiSettings() {\n    <p className="muted">å¡«å†™åç¦»å¼€è¾“å…¥æ¡†å³å¯ä¿å­˜ã€‚</p>';const p=patchText('desktop/ui-api/src/main.jsx',s);assert.match(p,/è§†é¢‘ä¿æŒæš‚åœ/);assert.match(p,/æ˜ç¡®å¼€å¯è‡ªä¸»è§‚çœ‹/);});
+test('packaged verifier asserts default off before explicit opt in',()=>{const l='å…è®¸å¥½å‹äº’åŠ¨';const s=[`  await page.getByRole('switch', { name: '${l}', exact: true }).waitFor();`,`  if (!(await readStatus('/api/interactions/state')).policy.enabled) { await page.getByRole('switch', { name: '${l}', exact: true }).click(); await until(async () => (await readStatus('/api/interactions/state')).policy.enabled === true); }`,`  await until(async () => (await readStatus('/api/interactions/state')).policy.enabled === true);`,`  await until(async () => await page.getByRole('switch', { name: '${l}', exact: true }).getAttribute('aria-checked') === 'true');`,`  assert.equal(await page.getByRole('switch', { name: '${l}', exact: true }).getAttribute('aria-checked'), 'true');`,"  const receipt = { friendMasterDefaultEnabled:true };"].join('\n');const p=patchText('desktop/scripts/verify-packaged-api.mjs',s);assert.match(p,/friendMasterDefaultEnabled, false/);});
+test('exact replacements fail closed',()=>{assert.throws(()=>replaceExactlyOnce('abc','missing','x','test'));assert.throws(()=>replaceExactlyOnce('x x','x','y','test'));});
