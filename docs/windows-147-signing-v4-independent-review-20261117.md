@@ -146,3 +146,58 @@ README 本身也承认：当前 1.4.7 updater 的 `UPDATE_MANIFEST_PUBLIC_KEY` �
 - 未购买证书、提交身份材料或签名。
 - 未启用自动更新。
 - 正式 Release 仍未创建。
+
+## 9. 2026-11-17 public research: code-signing routes that avoid sending identity documents to ChatGPT
+
+This section checks alternatives against the user's standing constraint: do not submit personal identity material unless separately and knowingly chosen. Public product availability is not proof that a Serbian applicant will pass CA validation.
+
+### A. SignPath Foundation — no personal ID, but strict open-source eligibility
+
+Official SignPath Foundation material says its free OSS signing path does not require personal identification; the Foundation verifies the binary-to-repository relationship and signs under its own name, with private keys held in its HSM. The signing publisher would therefore be **SignPath Foundation**, not the user's personal name. Services for qualifying OSS projects are free.
+
+Eligibility requires, among other things:
+- an OSI-approved open-source licence covering all components, without commercial dual licensing;
+- no proprietary code;
+- active maintenance, an existing release in the form to be signed, and public documentation;
+- the signing team to own and maintain the source repository and sign only binaries built from its own source;
+- compliance with additional privacy, security, contributor and approval requirements.
+
+The policy also excludes hacking tools and software designed to identify or exploit security vulnerabilities or circumvent execution-environment security measures.
+
+**Current YuTang evidence is insufficient for this route:** the checked public \`main\` tree contains only \`.github\`; the exact candidate source snapshot at \`9cc16d7e64d59dc141e9c6687b8dd461934fcc35\` contains \`.github\`, \`docs\`, \`tests\` and \`tools\`, but no root OSI licence or complete product source. This does not establish that every component and build script is publicly licensed and maintained. Do not apply or claim eligibility yet.
+
+Official sources:
+- https://signpath.org/
+- https://signpath.org/terms.html
+
+### B. Certum Open Source Code Signing — low advertised price, but not an identity-free route
+
+Certum's public product page currently lists its Open Source Code Signing product from **€25**, with a one-year validity period and a certificate identity of \`Developer Open Source\`. This is an advertised starting price, not a confirmed Serbia-specific total.
+
+Certum's official required-documents page says Open Source Code Signing is issued only to individuals and requires identity documentation, a utility bill issued in the applicant's name, and the public website of an ongoing open-source project showing the applicant's relationship to it. The certificate uses \`Developer Open Source\` / \`Open Source Developer\` identity fields; Certum warns that commercial software distribution can lead to revocation.
+
+Therefore this option still requires personal documents to be submitted directly to Certum and is not compatible with a no-identity-submission decision. Its open-source-only conditions also need to match YuTang's actual distribution model.
+
+Official sources:
+- https://www.certum.eu/en/code-signing-certificates/
+- https://support.certum.eu/en/code-signing-required-documents/
+
+### C. SSL.com IV Code Signing — standard individual route, identity required
+
+The current SSL.com product page lists IV Code Signing at **USD 129/year** for one year. It does not require a registered company, supports Windows Authenticode, and advertises eSigner cloud signing for CI/CD, but the signing subscription is additional. SSL.com explicitly requires government-issued ID for individual validation; its manual validation guide asks for ID/passport images and a live photograph holding the ID.
+
+The public pages do not establish final eligibility for this specific Serbian resident/applicant combination. The prior SSLmentor correspondence is not a CA approval and must not be treated as one.
+
+Official sources:
+- https://www.ssl.com/products/software-integrity/code-signing/iv/
+- https://www.ssl.com/faqs/ssl-ov-validation-requirements/
+
+### Decision
+
+No currently evidenced route simultaneously proves public Windows Authenticode trust, Serbian applicant eligibility, and **no personal identity submission**:
+
+1. SignPath is the only identified route that says it does not require personal identification, but YuTang's current public source/licence/release evidence does not demonstrate its OSS eligibility.
+2. Certum Open Source starts at €25, but still requires identity and address evidence and is restricted to qualifying open-source software.
+3. SSL.com IV is USD 129/year before optional cloud-signing costs and requires government-issued identity evidence; Serbian eligibility remains unconfirmed.
+
+**No application, purchase, identity upload, signing, or Windows Actions are authorized by this research.** Keep the existing candidate unsigned, keep Authenticode and Ed25519 trust pins unconfigured, and keep automatic updates fail-closed. Continue waiting for the already-sent SSLmentor follow-up; do not resend or submit documents. If the user continues to reject identity submission to any CA, do not try to work around that requirement: the public-signing gate remains blocked.
