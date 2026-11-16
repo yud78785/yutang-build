@@ -153,7 +153,7 @@
         "new_upstream_tests_included": false
       }
     },
-    "total_scope_note": "44 current read-only abort tests were run together on exact subsequently committed Git blobs, covering existing-browser (33), comment reader (5), and AI iframe reader (6) only. Prior historical 94 mocked page suite, v3 18 and old-vendor 14 are NOT included in this run. No real Windows or Douyin service connected.",
+    "total_scope_note": "This turn created and executed a new standalone, no-npm Edge owner/CDP diagnostic (16/16 isolated Node tests using real loopback HTTP and TCP fixtures). Previous existing-browser 44/44, v3 GET 18/18, old vendor 14/14 and historical 94 mixed tests are different independent runs; no all-suite combined count or live Windows acceptance is asserted.",
     "latest_source_snapshot": {
       "repository": "Yht20927/douyin-cli",
       "pinned_commit": "f9b73666ed1b24fcbbf208ed81b24acc3ff47688",
@@ -250,6 +250,41 @@
       "same_git_blobs_verified_after_push": true,
       "full_historical_94_tests_rerun": false,
       "full_historical_v3_get_tests_rerun": false
+    },
+    "existing_edge_diagnostic": {
+      "source_path": "tools/diagnose-existing-douyin-edge.mjs",
+      "source_git_blob": "003c0950bd66930feb60f886116f2306e7fceadc",
+      "test_path": "tests/diagnose-existing-douyin-edge.test.mjs",
+      "test_git_blob": "8de065fde6dc12dc7687f83ad7b99772dfd83a90",
+      "docs": "docs/yutang-edge-cdp-readonly-diagnostics-20261116.md",
+      "tests": {
+        "passed": 16,
+        "failed": 0,
+        "skipped": 0,
+        "platform": "isolated Linux Node.js v22.16.0",
+        "method": "real loopback HTTP/TCP test fixtures plus injected Windows process/host records",
+        "exact_committed_blobs_compared": true
+      },
+      "path_source": "LockyBee/dsh-douyin-agent@9c49833078f4b4d18b9211ef86d024e7f2e15739 runtime-paths.mjs,core.mjs,browser-host.mjs",
+      "cdp_port": 9227,
+      "reads_only": [
+        "local owner record browser.json",
+        "Windows process start time",
+        "loopback /json/version",
+        "loopback /json/list for an explicitly requested video ID after owner-record and PID checks"
+      ],
+      "does_not": [
+        "start Edge",
+        "navigate",
+        "click",
+        "read page DOM",
+        "read live comments",
+        "generate AI summary",
+        "modify state"
+      ],
+      "live_windows_tested": false,
+      "actual_target_video_metadata_seen": false,
+      "important_boundary": "A ready CDP endpoint and matching video tab metadata cannot prove page window.name ownership, comment visibility, or that the CDP listener belongs to the host PID's child process. Do not claim live browser acceptance."
     }
   },
   "site_and_browser_access": {
@@ -306,7 +341,10 @@
     "pinned_upstream_browser_lock_signature_audited": true,
     "page_state_upstream_schema_verified": true,
     "abort_propagation_in_three_layers_source_only": true,
-    "playwright_hard_cancel_verified": false
+    "playwright_hard_cancel_verified": false,
+    "standalone_edge_diagnostic_added": true,
+    "standalone_edge_diagnostic_windows_executed": false,
+    "standalone_edge_diagnostic_live_target_seen": false
   },
   "safety_policy_for_next_step": {
     "do_not_modify_main": true,
@@ -318,5 +356,5 @@
     "use_existing_dedicated_edge_only": true,
     "no_claim_of_real_success_without_raw_browser_receipt": true
   },
-  "next_acceptance": "The source-only dedicated Edge/CDP read-only path now propagates a cooperative timeout signal across controller, DOM comments and AI-entry inspection, and reports whether in-flight browser read actually settled independently of temporary lock release. Current three-suite offline run passed 44/44; pinned core.mjs readPageState schema is compatible. Actual Windows Edge/CDP attachment and live public Douyin comment/official AI-summary text remain UNVERIFIED. Do not install the unsafe upstream userscript or start paid Windows CI, merge main, or modify the accepted EXE."
+  "next_acceptance": "User's dedicated Windows Edge browser remains inaccessible from this chat; Browser connected tabs currently contain no Douyin page. A new no-dependency source-only CLI can report owner-record/process/CDP status and one target video tab's metadata when executed on that Windows host, but only local mocked host records and real loopback test server were exercised here (16/16). Next real acceptance is a read-only Windows execution followed by upstream-owned window.name and public comment/AI-entry observation, not additional synthetic tests. No paid CI/main/EXE work."
 }
