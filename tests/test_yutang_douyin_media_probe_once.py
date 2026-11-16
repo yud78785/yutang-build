@@ -244,6 +244,27 @@ class NetworkBoundaryTests(unittest.TestCase):
         self.assertEqual(limited["reason"], "JSON_BODY_LIMIT")
 
 
+    def test_aweme_detail_text_plain_json_is_parsed_only_for_exact_endpoint(self):
+        payload = {"aweme_detail": {
+            "aweme_id": "7445301722639060233",
+            "video": {"play_addr": {"url_list": ["https://cdn.example.test/private-signed"]}, "duration": 355000},
+        }}
+        body = json.dumps(payload).encode()
+        accepted = media_probe.inspect_first_party_api_json(
+            "www.douyin.com", "/aweme/v1/web/aweme/detail/", 200,
+            "text/plain; charset=utf-8", body, "7445301722639060233")
+        self.assertIsNotNone(accepted)
+        self.assertTrue(media_probe.is_verified_detail(accepted["detail"], "7445301722639060233"))
+        rejected = media_probe.inspect_first_party_api_json(
+            "www.douyin.com", "/aweme/v1/web/seo/inner/link/", 200,
+            "text/plain; charset=utf-8", body, "7445301722639060233")
+        self.assertIsNone(rejected)
+        invalid = media_probe.inspect_first_party_api_json(
+            "www.douyin.com", "/aweme/v1/web/aweme/detail/", 200,
+            "text/plain; charset=utf-8", b"not-json", "7445301722639060233")
+        self.assertEqual(invalid["reason"], "INVALID_JSON")
+
+
 class EncryptionTests(unittest.TestCase):
     def test_bundle_is_encrypted_authenticated_and_roundtrips(self):
         with tempfile.TemporaryDirectory() as root:
