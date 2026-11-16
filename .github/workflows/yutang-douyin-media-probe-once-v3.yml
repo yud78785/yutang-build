@@ -35,12 +35,11 @@ jobs:
           test "$GITHUB_REF" = "refs/heads/experiment/yutang-first-task-20261115"
           printf 'SOURCE_COMMIT=%s\n' "$GITHUB_SHA"
 
-      - name: Set ephemeral model and output directories
+      - name: Set ephemeral model cache
         shell: bash
         run: |
           set -euo pipefail
           echo "HF_HOME=$RUNNER_TEMP/hf-home" >> "$GITHUB_ENV"
-          echo "MEDIA_OUTPUT=$RUNNER_TEMP/yutang-encrypted-media-result" >> "$GITHUB_ENV"
 
       - name: Checkout experiment source without persisted credentials
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
@@ -95,12 +94,12 @@ jobs:
             --video-id 7445301722639060233 \
             --upstream-root "$RUNNER_TEMP/shared-video-transcriber" \
             --public-key tools/keys/yutang-media-probe-public.pem \
-            --output-dir "$MEDIA_OUTPUT"
+            --output-dir ./.media-probe-output
 
       - name: Upload only encrypted result bundle for private retrieval
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: yutang-douyin-media-probe-encrypted-v3
-          path: ${{ env.MEDIA_OUTPUT }}/*
+          path: .media-probe-output/*
           if-no-files-found: error
           retention-days: 1
