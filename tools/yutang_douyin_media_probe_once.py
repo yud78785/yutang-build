@@ -201,9 +201,12 @@ def safe_fetch_text(url: str, max_bytes: int, user_agent: str) -> tuple[str, str
             parsed = urllib.parse.urlsplit(final_url)
             if parsed.hostname not in DouyinPageRedirectHandler.ALLOWED_HOSTS:
                 raise ProbeError("SHARE_PAGE_FINAL_HOST_REJECTED")
-            expected_path = f"/share/video/{TARGET_ID}/"
-            alternate_path = f"/video/{TARGET_ID}"
-            if parsed.path not in {expected_path, alternate_path}:
+            expected_paths = {
+                f"/share/video/{TARGET_ID}/",
+                f"/share/video/{TARGET_ID}",
+                f"/video/{TARGET_ID}",
+            }
+            if parsed.path not in expected_paths:
                 raise ProbeError("SHARE_PAGE_FINAL_IDENTITY_MISMATCH")
             total = int(response.headers.get("Content-Length") or 0) or None
             if total is not None and total > max_bytes:
@@ -323,19 +326,60 @@ def summarize_router_data(router_data: list[dict], expected_id: str) -> dict:
     }
 
 
+def find_video_from_router_data(router_data: list[dict], expected_id: str, upstream) -> dict | None:
+    """Accept only a video object tied to the exact ID in the same public page payload."""
+    for obj in router_data:
+        detail = find_exact_aweme_detail(obj, expected_id)
+        if detail is not None and upstream._looks_like_douyin_video(detail.get("video")):
+            return detail
+        loader_data = obj.get("loaderData") if isinstance(obj, dict) else None
+        if not isinstance(loader_data, dict):
+            continue
+        page = loader_data.get("video_(id)/page")
+        if not isinstance(page, dict) or str(page.get("itemId", "")) != expected_id:
+            continue
+        video_info = page.get("videoInfoRes")
+        if not isinstance(video_info, dict):
+            continue
+        item_list = video_info.get("item_list")
+        if not isinstance(item_list, list):
+            continue
+        for item in item_list:
+            if not isinstance(item, dict):
+                continue
+            video = item.get("video")
+            if upstream._looks_like_douyin_video(video):
+                return {
+                    "aweme_id": expected_id,
+                    "video": video,
+                    "_metadata": {
+                        "title": item.get("desc"),
+                        "author": (item.get("author") or {}).get("nickname") if isinstance(item.get("author"), dict) else None,
+                    },
+                }
+    return None
+
+
 def fetch_share_page_detail(upstream, video_id: str) -> tuple[dict | None, int, list[dict]]:
     if video_id != TARGET_ID:
         raise ProbeError("TARGET_VIDEO_ID_NOT_PINNED")
-    share_url = f"https://www.iesdouyin.com/share/video/{video_id}/"
-    html, _final_url, status = safe_fetch_text(share_url, 4 * 1024 * 1024, upstream._MOBILE_UA)
-    router_data = extract_router_data_objects(html, upstream)
-    if not router_data:
+    candidates = [
+        f"https://www.douyin.com/video/{video_id}",
+        f"https://www.iesdouyin.com/share/video/{video_id}",
+    ]
+    all_router_data: list[dict] = []
+    last_status = 0
+    for candidate in candidates:
+        html, _final_url, status = safe_fetch_text(candidate, 4 * 1024 * 1024, upstream._MOBILE_UA)
+        last_status = status
+        router_data = extract_router_data_objects(html, upstream)
+        all_router_data.extend(router_data)
+        detail = find_video_from_router_data(router_data, video_id, upstream)
+        if detail is not None:
+            return detail, status, all_router_data
+    if not all_router_data:
         raise ProbeError("SHARE_PAGE_ROUTER_DATA_NOT_FOUND")
-    for obj in router_data:
-        detail = find_exact_aweme_detail(obj, video_id)
-        if detail is not None and upstream._looks_like_douyin_video(detail.get("video")):
-            return detail, status, router_data
-    return None, status, router_data
+    return None, last_status, all_router_data
 
 
 def inspect_first_party_api_json(host: str, path: str, status: int, content_type: str, body: bytes, expected_id: str) -> dict | None:
