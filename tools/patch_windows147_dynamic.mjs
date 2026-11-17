@@ -30,7 +30,7 @@ export function patchDesktopMain(source){
       "  await fs.access(smokeRuntimeEnv.DOUYIN_RUNTIME_LOCATION_FILE);",
       "}",
       "const shared = await ensureSharedLocation({ resolve: pathsModule.resolveRuntimePaths, env: smokeRuntimeEnv });"
-    ].join('\\n'),
+    ].join('\n'),
     'ignore inherited legacy runtime path overrides except verified packaged smoke');
   if(source.includes("'DafeiyuDouyinAPI'"))throw new Error('Legacy Electron userData root remains');
   return source;
