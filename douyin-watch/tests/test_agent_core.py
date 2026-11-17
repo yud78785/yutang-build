@@ -174,7 +174,7 @@ class CoreTest(unittest.TestCase):
    self.assertEqual(len(p.calls),2)
    disabled=BrowserWatcher(WatchConfig(capture_frames=False),threading.Event(),lambda *_:None,output_dir=Path(tmp))
    disabled._capture_frame(p,2,10,p.evaluate(None))
-   self.assertEqual(len(p.calls),1)
+   self.assertEqual(len(p.calls),2)
 
  def test_sessions_keep_separate_csv_and_frames_and_escape_formulas(self):
   class FakePage:
