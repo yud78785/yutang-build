@@ -79,6 +79,7 @@ PROBE_JS = r"""() => {
   return {found:true,title:title || document.title || '',url:String(link).split('?')[0],
     page_title:document.title,src_key:hash(source),duration:Number.isFinite(d)?d:null,
     current_time:Number.isFinite(t)?t:0,paused:!!v.paused,ended:!!v.ended,
+    muted:!!v.muted,volume:Number(v.volume),
     ready_state:v.readyState,area_active:!!v.closest('[data-e2e="feed-active-video"]')};
 }"""
 
@@ -136,6 +137,7 @@ class WatchConfig:
     count: int = 8
     max_seconds_per_video: int = 180
     read_comments: bool = True
+    capture_frames: bool = True
 
     def __post_init__(self) -> None:
         u = urlsplit(self.url)
@@ -181,13 +183,27 @@ def watching_complete(last: dict[str, Any], previous: dict[str, Any],
             (max_observed_time >= dur * 0.85 and before - current >= dur * 0.6))
 
 
+def verified_full_watch(last: dict[str, Any], previous: dict[str, Any],
+                        max_observed_time: float, saw_start: bool,
+                        observed_seconds: float) -> bool:
+    """Require observed playback from near start, not merely a player near its end."""
+    duration=last.get('duration')
+    if not isinstance(duration,(int,float)) or not math.isfinite(duration) or duration < 1.5:
+        return False
+    if not saw_start or max_observed_time < duration*0.85:
+        return False
+    if observed_seconds < min(duration*0.35,3):
+        return False
+    return watching_complete(last,previous,max_observed_time)
+
+
 def is_live_or_unknown(probe: dict[str, Any]) -> bool:
     duration = probe.get('duration')
     return duration is None or not isinstance(duration, (int,float)) or duration <= 0 or not math.isfinite(duration)
 
 
 class RecordStore:
-    COLUMNS = ['time','index','status','title','url','duration_s','watched_s','comments','ai_summary','note']
+    COLUMNS = ['time','index','status','title','url','duration_s','watched_s','comments','ai_summary','frame_samples','audio_status','note']
 
     def __init__(self, output_dir: Path):
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -212,6 +228,7 @@ class BrowserWatcher:
         self.publish=publish
         self.output_dir=output_dir or data_dir()
         self.launch_kwargs=launch_kwargs or {}
+        self._last_frames: list[str] = []
 
     def emit(self, kind: str, **fields: Any) -> None:
         self.publish(kind,fields)
@@ -239,7 +256,30 @@ class BrowserWatcher:
             self._sleep(2)
         return None
 
-    def _play_to_end(self,page:Any,original:dict[str,Any]) -> tuple[str,float,dict[str,Any]]:
+    def _capture_frame(self,page:Any,index:int,mark:int,expected:dict[str,Any]) -> None:
+        """At most three local images per video. Never upload, inspect other tabs or capture login pages."""
+        if not self.config.capture_frames or self.stop.is_set() or mark not in (10,50,85):
+            return
+        try:
+            current=self._probe(page)
+            if not current.get('found') or video_identity(current)!=video_identity(expected):
+                return
+            selector='[data-e2e="feed-active-video"] video' if current.get('area_active') else 'video'
+            elems=page.locator(selector)
+            for n in range(min(elems.count(),8)):
+                elem=elems.nth(n)
+                if not elem.is_visible(): continue
+                directory=self.output_dir/'frames'
+                directory.mkdir(parents=True,exist_ok=True)
+                filename=f'video-{index:03d}-progress-{mark:02d}.png'
+                elem.screenshot(path=str(directory/filename),timeout=3000)
+                self._last_frames.append(filename)
+                self.emit('frame',index=index,mark=mark,filename=filename)
+                return
+        except Exception as e:
+            self.emit('status',message='画面取样未成功：'+clip(str(e),100))
+
+    def _play_to_end(self,page:Any,original:dict[str,Any],index:int) -> tuple[str,float,dict[str,Any]]:
         try:
             play_result=page.evaluate(PLAY_JS)
         except Exception:
@@ -247,7 +287,10 @@ class BrowserWatcher:
         if play_result=='GESTURE_REQUIRED':
             self.emit('status',message='浏览器禁止自动播放，尝试手动点视频画面一次。')
         previous=original
-        max_progress=float(original.get('current_time') or 0)
+        self._last_frames=[]
+        frame_marks=set()
+        saw_start=False
+        max_progress=0.0
         start=time.monotonic()
         stalled_at=start
         stalled_value=max_progress
@@ -268,7 +311,18 @@ class BrowserWatcher:
             t=float(current.get('current_time') or 0)
             dur=current.get('duration')
             max_progress=max(max_progress,t)
-            if watching_complete(current,previous,max_progress):
+            if isinstance(dur,(int,float)) and math.isfinite(dur) and dur>=1.5:
+                if t <= max(2.0,dur*0.15):
+                    saw_start=True
+                if self.config.capture_frames and not current.get('paused') and saw_start:
+                    fraction=t/dur
+                    for mark in (10,50,85):
+                        threshold=mark/100.0
+                        if mark not in frame_marks and threshold<=fraction<threshold+0.2:
+                            frame_marks.add(mark)
+                            self._capture_frame(page,index,mark,original)
+                            break
+            if verified_full_watch(current,previous,max_progress,saw_start,elapsed):
                 return 'COMPLETE',elapsed,current
             if is_live_or_unknown(current) and elapsed >= 15:
                 return 'UNKNOWN_DURATION',elapsed,current
@@ -347,12 +401,26 @@ class BrowserWatcher:
                         current=self._probe(page)
                         if not current.get('found'): break
                     self.emit('video',index=i,title=clip(current.get('title',''),100),url=safe_url(current.get('url','')))
-                    status,elapsed,final=self._play_to_end(page,current)
+                    status,elapsed,final=self._play_to_end(page,current,i)
                     if self.stop.is_set():break
-                    # Do not interpret video visuals/audio. Read only DOM content.
-                    comments=self._comments(page)
-                    try: summary=clip(page.evaluate(SUMMARY_JS),1200)
-                    except Exception: summary=''
+                    # Never associate comments with an unverified or changed video.
+                    comments=[];summary=''
+                    if status=='COMPLETE':
+                        try:
+                            before_content=self._probe(page)
+                            if video_identity(before_content)!=video_identity(final):
+                                status='VIDEO_CHANGED_BEFORE_COMMENTS'
+                            else:
+                                comments=self._comments(page)
+                                after_content=self._probe(page)
+                                if video_identity(after_content)!=video_identity(final):
+                                    comments=[];status='VIDEO_CHANGED_DURING_COMMENTS'
+                                else:
+                                    summary=clip(page.evaluate(SUMMARY_JS),1200)
+                        except Exception:
+                            status='CONTENT_READ_FAILED'
+                    player_audio=('PLAYER_MUTED_OR_VOLUME_ZERO' if final.get('muted') or
+                        final.get('volume') == 0 else 'PLAYER_UNMUTED_AUDIO_NOT_VERIFIED')
                     title=clip(final.get('title') or current.get('title') or '',300)
                     record={'time':datetime.now(timezone.utc).astimezone().isoformat(timespec='seconds'),
                             'index':i,'status':status,'title':title,
@@ -361,12 +429,14 @@ class BrowserWatcher:
                             'watched_s':str(round(elapsed,1)),
                             'comments':' | '.join(comments),
                             'ai_summary':summary,
-                            'note':'页面无现成AI总结' if not summary else '读取页面已显示的AI总结'}
+                            'frame_samples':' | '.join(self._last_frames),
+                            'audio_status':player_audio,
+                            'note':('页面无现成AI总结' if not summary else '读取页面已显示的AI总结') if status=='COMPLETE' else '未确认完整播放；内容未归属'}
                     records.append(record)
                     self.emit('record',index=i,status=status,title=title,
                               comments=len(comments),ai_summary=bool(summary))
-                    if status=='PLAYBACK_STALLED':
-                        self.emit('error',message='视频未能播放，已安全停止。请在 Edge 手动确认播放/登录后重新开始。')
+                    if status!='COMPLETE':
+                        self.emit('error',message='没有确认完整播放或内容归属（'+status+'），已停止，不自动跳过该视频。')
                         break
                     if i < self.config.count:
                         if not self._next_video(page,final):
