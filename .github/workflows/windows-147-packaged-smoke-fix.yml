@@ -459,7 +459,10 @@ jobs:
               $updateTrust.rollbackFailurePreservesBackupPath -ne $true -or
               $updateTrust.readmeUpdatedForUnsignedCandidate -ne $true -or
               $updateTrust.updateChannelFailClosedExplained -ne $true -or
-              $updateTrust.packagedReadmeVerified -ne $true) { throw 'WINDOWS_UPDATE_TRUST_PATCH_RECEIPT_INVALID' }
+              $updateTrust.packagedReadmeVerified -ne $true -or
+              $updateTrust.packagedSmokePreservesNativeWindowsProfile -ne $true -or
+              $updateTrust.packagedSmokeIsolatesDesktopUserData -ne $true -or
+              $updateTrust.packagedSmokeIsolatesBrowserProfileAndControl -ne $true) { throw 'WINDOWS_UPDATE_TRUST_PATCH_RECEIPT_INVALID' }
           if ($safeDefaults.status -cne 'PASS_EXACT_SOURCE_SAFE_DEFAULTS_AND_PREPARE_DISCLOSURE' -or
               $safeDefaults.upstreamCommit -cne $env:UPSTREAM_COMMIT -or
               $safeDefaults.friendInteractionsDefaultEnabled -ne $false -or

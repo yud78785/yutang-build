@@ -25,6 +25,18 @@ function replaceExactlyOnce(source, needle, replacement, label) {
   return source.slice(0, first) + replacement + source.slice(first + needle.length);
 }
 
+export function patchPackagedSmokeEnvironment(source) {
+  const anchor = [
+    "const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => /^(?:path|systemroot|windir|comspec|pathext|programfiles|programfiles\\(x86\\)|programdata)$/i.test(key)));",
+    "Object.assign(env, { HOME: home, USERPROFILE: home, APPDATA: path.join(directory, 'app-data'), LOCALAPPDATA: path.join(directory, 'local-app-data'), TEMP: path.join(directory, 'temp'), TMP: path.join(directory, 'temp'), DSH_HOME: path.join(home, '.dsh'), DOUYIN_DESKTOP_USER_DATA: userData, DOUYIN_RUNTIME_LOCATION_FILE: locationFile, DOUYIN_DESKTOP_SMOKE: '1' });"
+  ].join('\\n');
+  const replacement = [
+    "const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => /^(?:path|systemroot|windir|comspec|pathext|programfiles|programfiles\\(x86\\)|programdata|userprofile|homedrive|homepath|appdata|localappdata|temp|tmp|home|public|allusersprofile|os|systemdrive|processor_architecture|processor_level|processor_revision|number_of_processors|username|userdomain|sessionname)$/i.test(key)));",
+    "Object.assign(env, { DSH_HOME: path.join(home, '.dsh'), DOUYIN_DESKTOP_USER_DATA: userData, DOUYIN_RUNTIME_LOCATION_FILE: locationFile, DOUYIN_BROWSER_PROFILE_DIR: path.join(directory, 'browser-profile'), DOUYIN_BROWSER_CONTROL_DIR: path.join(directory, 'browser-control'), DOUYIN_DESKTOP_SMOKE: '1' });"
+  ].join('\\n');
+  return replaceExactlyOnce(source, anchor, replacement, 'packaged-smoke-native-windows-profile');
+}
+
 async function read(file) {
   return fs.readFile(file, 'utf8');
 }
@@ -129,6 +141,7 @@ export async function applyUpdateTrustPatch(upstream, repositoryRoot = REPOSITOR
     "assert.ok(packagedReadme.includes('自动更新处于安全关闭状态'), '打包 README 必须说明未配置发布信任时自动更新保持关闭。');"
   ].join('\n');
   verifier = replaceExactlyOnce(verifier, packagedReadmeAnchor, packagedReadmeCheck, 'packaged-readme-trust-disclosure');
+  verifier = patchPackagedSmokeEnvironment(verifier);
   verifier = replaceExactlyOnce(verifier,
     "'update-launcher.mjs']) {",
     "'update-launcher.mjs', 'update-transaction.mjs']) {",
@@ -254,6 +267,9 @@ export async function applyUpdateTrustPatch(upstream, repositoryRoot = REPOSITOR
     readmeUpdatedForUnsignedCandidate: true,
     updateChannelFailClosedExplained: true,
     packagedReadmeVerified: true,
+    packagedSmokePreservesNativeWindowsProfile: true,
+    packagedSmokeIsolatesDesktopUserData: true,
+    packagedSmokeIsolatesBrowserProfileAndControl: true,
     updateRepository: 'yud78785/yutang-build',
     signedManifestRequired: true,
     manifestPublicKeyConfigured: false,

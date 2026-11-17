@@ -14,6 +14,7 @@ import {
   parseVersion
 } from '../tools/windows147-update-patched/update-service.mjs';
 import { runUpdateLauncher } from '../tools/windows147-update-patched/update-launcher.mjs';
+import { patchPackagedSmokeEnvironment } from '../tools/apply_windows147_update_trust_patch.mjs';
 
 const THUMBPRINT = 'A'.repeat(40);
 const bytes = Buffer.concat([Buffer.from('MZ'), Buffer.alloc(2046, 27)]);
@@ -35,6 +36,20 @@ async function readRepositorySource(relativePath) {
   throw new Error('REPOSITORY_SOURCE_NOT_FOUND: ' + relativePath);
 }
 
+
+test('packaged smoke keeps native Windows identity while isolating YuTang app and browser directories', () => {
+  const source = [
+    "const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => /^(?:path|systemroot|windir|comspec|pathext|programfiles|programfiles\\(x86\\)|programdata)$/i.test(key)));",
+    "Object.assign(env, { HOME: home, USERPROFILE: home, APPDATA: path.join(directory, 'app-data'), LOCALAPPDATA: path.join(directory, 'local-app-data'), TEMP: path.join(directory, 'temp'), TMP: path.join(directory, 'temp'), DSH_HOME: path.join(home, '.dsh'), DOUYIN_DESKTOP_USER_DATA: userData, DOUYIN_RUNTIME_LOCATION_FILE: locationFile, DOUYIN_DESKTOP_SMOKE: '1' });"
+  ].join('\\n');
+  const patched = patchPackagedSmokeEnvironment(source);
+  assert.match(patched, /userprofile|homedrive|homepath|appdata|localappdata|temp|tmp/i);
+  assert.doesNotMatch(patched, /USERPROFILE: home|APPDATA: path\\.join\\(directory/);
+  assert.match(patched, /DOUYIN_DESKTOP_USER_DATA: userData/);
+  assert.match(patched, /DOUYIN_RUNTIME_LOCATION_FILE: locationFile/);
+  assert.match(patched, /DOUYIN_BROWSER_PROFILE_DIR: path\\.join\\(directory, 'browser-profile'\\)/);
+  assert.match(patched, /DOUYIN_BROWSER_CONTROL_DIR: path\\.join\\(directory, 'browser-control'\\)/);
+});
 
 test('Electron 主进程在创建暂存快捷方式后固定 SHA-256 并传给更新启动器', async () => {
   const patcher = await readRepositorySource('tools/apply_windows147_update_trust_patch.mjs');
