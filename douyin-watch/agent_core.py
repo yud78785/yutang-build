@@ -442,124 +442,20 @@ class BrowserWatcher:
 
     def _comments(self,page:Any) -> list[str]:
         if not self.config.read_comments: return []
-        # First-party visible Douyin UI may expose a "Comments" ROLE=TAB.
-        # Use only an explicitly named tab or known open-panel affordance.
-        # Never click generic "评论"/"Comments" buttons: they can SUBMIT a comment.
-        tab_name=re.compile(r'^\\s*(?:Comments|评论(?:区)?|全部评论(?:\\s*\\([\\d,]+\\))?)\\s*
-
-    def _next_video(self,page:Any,old:dict[str,Any]) -> bool:
-        try: page.keyboard.press('Escape')
-        except Exception: pass
-        for action in ('ArrowDown','wheel','PageDown'):
-            if self.stop.is_set():return False
-            try:
-                if action=='wheel': page.mouse.wheel(0,650)
-                else: page.keyboard.press(action)
-            except Exception as e:
-                self.emit('status',message='切换尝试失败：'+clip(str(e),100))
-            for _ in range(5):
-                if self._sleep(0.75): return False
-                try:
-                    p=self._probe(page)
-                    if p.get('found') and confirmed_video_change(old,p,after_navigation=True):
-                        return True
-                except Exception: pass
-        return False
-
-    def run(self) -> None:
-        from playwright.sync_api import sync_playwright
-        records=RecordStore(self.output_dir)
-        self._frame_dir_name=records.path.stem+'-frames'
-        self.emit('started',csv=str(records.path))
-        context=None
-        try:
-            with sync_playwright() as playwright:
-                profile=self.output_dir / 'edge-profile'
-                profile.mkdir(parents=True,exist_ok=True)
-                self.emit('status',message='打开独立 Edge 浏览器（不会使用你的日常浏览器资料）。')
-                options=dict(channel='msedge',headless=False,accept_downloads=False,
-                             viewport={'width':1280,'height':850},timeout=30000)
-                options.update(self.launch_kwargs)
-                context=playwright.chromium.launch_persistent_context(str(profile),**options)
-                page=context.pages[0] if context.pages else context.new_page()
-                page.set_default_timeout(4000)
-                try: page.goto(self.config.url,wait_until='domcontentloaded',timeout=45000)
-                except Exception as e: self.emit('status',message='网页加载可能受限：'+clip(str(e),150))
-                current=self._wait_first_video(page)
-                if not current:
-                    self.emit('error',message='未找到可见视频。请检查抖音访问/登录或在 Edge 打开视频后重试。')
-                    return
-                for i in range(1,self.config.count+1):
-                    if self.stop.is_set(): break
-                    if i>1:
-                        current=self._probe(page)
-                        if not current.get('found'): break
-                    self.emit('video',index=i,title=clip(current.get('title',''),100),url=safe_url(current.get('url','')))
-                    status,elapsed,final=self._play_to_end(page,current,i)
-                    if self.stop.is_set():break
-                    # Never associate comments with an unverified or changed video.
-                    comments=[];summary=''
-                    if status=='COMPLETE':
-                        try:
-                            before_content=self._probe(page)
-                            if confirmed_video_change(final,before_content):
-                                status='VIDEO_CHANGED_BEFORE_COMMENTS'
-                            else:
-                                comments=self._comments(page)
-                                after_content=self._probe(page)
-                                if confirmed_video_change(before_content,after_content):
-                                    comments=[];status='VIDEO_CHANGED_DURING_COMMENTS'
-                                else:
-                                    summary=clip(page.evaluate(SUMMARY_JS),1200)
-                        except Exception:
-                            status='CONTENT_READ_FAILED'
-                    player_audio=('PLAYER_AUDIO_STATE_UNKNOWN' if 'muted' not in final else
-                        ('PLAYER_MUTED_OR_VOLUME_ZERO' if final.get('muted') or
-                         final.get('volume') == 0 else 'PLAYER_UNMUTED_AUDIO_NOT_VERIFIED'))
-                    title=clip(final.get('title') or current.get('title') or '',300)
-                    record={'time':datetime.now(timezone.utc).astimezone().isoformat(timespec='seconds'),
-                            'index':i,'status':status,'title':title,
-                            'url':safe_url(final.get('url') or current.get('url') or page.url),
-                            'duration_s':str(round(final.get('duration') or 0,1)),
-                            'watched_s':str(round(elapsed,1)),
-                            'comments':' | '.join(comments),
-                            'ai_summary':summary,
-                            'frame_samples':' | '.join(self._frame_dir_name+'/'+name for name in self._last_frames),
-                            'audio_status':player_audio,
-                            'note':('页面无现成AI总结' if not summary else '读取页面已显示的AI总结') if status=='COMPLETE' else '未确认完整播放；内容未归属'}
-                    records.append(record)
-                    self.emit('record',index=i,status=status,title=title,
-                              comments=len(comments),ai_summary=bool(summary))
-                    if status!='COMPLETE':
-                        self.emit('error',message='没有确认完整播放或内容归属（'+status+'），已停止，不自动跳过该视频。')
-                        break
-                    if i < self.config.count:
-                        if not self._next_video(page,final):
-                            self.emit('error',message='无法确认切换到新视频，停止以避免重复播放和误记。')
-                            break
-                self.emit('done',message='本次观看结束。记录：'+str(records.path))
-        except Exception as e:
-            self.emit('error',message='浏览器启动或运行失败：'+clip(str(e),330))
-            self.emit('done',message='可查看日志目录：'+str(records.path))
-        finally:
-            if context:
-                try: context.close()
-                except Exception: pass
-            self.emit('finished')
-,re.I)
+        # First try the explicitly named "Comments" tab seen on real Douyin.
+        # Never click generic "评论" buttons, which can submit a comment.
+        tab_name=re.compile(r'^\s*(?:Comments|评论(?:区)?|全部评论(?:\s*\([\d,]+\))?)\s*$',re.I)
         try:
             tab=page.get_by_role('tab',name=tab_name).first
             if tab.count() and tab.is_visible() and tab.is_enabled():
                 if tab.get_attribute('aria-selected')!='true':
                     tab.click(timeout=1800)
                 self._sleep(0.6)
-        except Exception as e:
-            self.emit('status',message='评论标签页暂不可用：'+clip(str(e),90))
-        else:
-            try:
                 found=[clip(x,280) for x in page.evaluate(COMMENTS_JS,5)]
                 if found: return found
-            except Exception: pass
+        except Exception as e:
+            self.emit('status',message='评论标签页未取得：'+clip(str(e),100))
+        # Only explicit open-comment affordances, never a generic submit button.
         selectors=['[data-e2e="feed-comment-icon"]','[data-e2e="comment-icon"]',
                    'button[aria-label="打开评论"]','button[aria-label="查看评论"]']
         for sel in selectors:
