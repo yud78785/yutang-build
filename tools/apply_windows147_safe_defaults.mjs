@@ -123,7 +123,7 @@ export async function apply(root) {
   const verifier = await fs.readFile(verifierPath, 'utf8');
   if (!friend.includes('const defaults = () => ({ version: 1, enabled: false });')) throw new Error('FRIEND_INTERACTIONS_DEFAULT_OFF_NOT_PROVEN');
   if (!ui.includes('视频保持暂停') || !ui.includes('明确开启自主观看')) throw new Error('PREPARE_PAGE_DISCLOSURE_NOT_PROVEN');
-  if (!verifier.includes('friendMasterDefaultEnabled, false')) throw new Error('PACKAGED_DEFAULT_OFF_ASSERTION_MISSING');
+  if (!verifier.includes("assert.equal(checks.status['/api/interactions/state'].policy.enabled, false);") || !verifier.includes("friendMasterDefaultEnabled: checks.status['/api/interactions/state'].policy.enabled")) throw new Error('PACKAGED_DEFAULT_OFF_ASSERTION_MISSING');
   const receipt = {
     schema: 'yutang.windows147-safe-defaults.v1',
     status: 'PASS_EXACT_SOURCE_SAFE_DEFAULTS_AND_PREPARE_DISCLOSURE',
