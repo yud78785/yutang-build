@@ -349,21 +349,12 @@ jobs:
           $nativeProfile = $env:USERPROFILE
           $nativeCommon = Join-Path $nativeProfile '.yutang-observer-isolated'
           if (Test-Path -LiteralPath $nativeCommon) { throw 'PREEXISTING_NATIVE_PROFILE_STATE_BEFORE_PACKAGED_SMOKE' }
-          $smokeProfile = Join-Path $env:RUNNER_TEMP 'yutang-packaged-smoke-profile'
           $smokeCache = Join-Path $env:RUNNER_TEMP 'yutang-packaged-smoke-cache'
-          foreach ($directory in @($smokeProfile,$smokeCache,(Join-Path $smokeProfile 'app-data'),(Join-Path $smokeProfile 'local-app-data'),(Join-Path $smokeProfile 'temp'))) {
-            New-Item -ItemType Directory -Path $directory -Force | Out-Null
-          }
-          $env:USERPROFILE = $smokeProfile
-          $env:HOME = $smokeProfile
-          $env:APPDATA = Join-Path $smokeProfile 'app-data'
-          $env:LOCALAPPDATA = Join-Path $smokeProfile 'local-app-data'
-          $env:TEMP = Join-Path $smokeProfile 'temp'
-          $env:TMP = Join-Path $smokeProfile 'temp'
-          $env:DOUYIN_PACKAGED_SMOKE_ROOT = $smokeCache
+          New-Item -ItemType Directory -Path $smokeCache -Force | Out-Null
           $nodeHome = node -p "require('node:os').homedir()"
-          if ([IO.Path]::GetFullPath($nodeHome) -ne [IO.Path]::GetFullPath($smokeProfile)) { throw 'PACKAGED_SMOKE_PROFILE_OVERRIDE_NOT_ACTIVE' }
-          Write-Host 'PACKAGED_SMOKE_USERPROFILE=RUNNER_TEMP; native runner profile remains untouched'
+          if ([IO.Path]::GetFullPath($nodeHome) -ne [IO.Path]::GetFullPath($nativeProfile)) { throw 'NATIVE_WINDOWS_PROFILE_MUST_REMAIN_ACTIVE_FOR_EDGE' }
+          $env:DOUYIN_PACKAGED_SMOKE_ROOT = $smokeCache
+          Write-Host 'PACKAGED_SMOKE_PROFILE_ISOLATION=verifier-owned child userData under RUNNER_TEMP; native Edge token environment preserved'
           node scripts/verify-packaged-api.mjs
           $smokeExitCode = $LASTEXITCODE
           if (Test-Path -LiteralPath $nativeCommon) { throw 'PACKAGED_SMOKE_POLLUTED_NATIVE_PROFILE' }
