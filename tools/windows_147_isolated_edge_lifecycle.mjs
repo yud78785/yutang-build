@@ -26,6 +26,9 @@ export function createCandidateEnvironment(sourceEnv, userData, locationFile) {
   if (typeof userData !== 'string' || !path.isAbsolute(userData) || typeof locationFile !== 'string' || !path.isAbsolute(locationFile)) {
     throw new Error('Candidate-only data paths must be absolute.');
   }
+  const smokeRoot=path.dirname(userData);
+  const expectedLocationFile=path.join(smokeRoot,'home','.yutang-observer-isolated','runtime-location.json');
+  if(path.basename(userData)!=='user-data'||path.resolve(locationFile).toLowerCase()!==path.resolve(expectedLocationFile).toLowerCase()) throw new Error('Candidate smoke location must stay inside its temporary root.');
   const env = Object.fromEntries(Object.entries(sourceEnv).filter(([key]) => allowedEnv.test(key)));
   for (const key of ['USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'HOME']) {
     if (sourceEnv[key] !== undefined && env[key] !== sourceEnv[key]) throw new Error('Native Windows profile environment was not preserved: ' + key);
@@ -33,7 +36,9 @@ export function createCandidateEnvironment(sourceEnv, userData, locationFile) {
   Object.assign(env, {
     DOUYIN_DESKTOP_USER_DATA: userData,
     DOUYIN_DESKTOP_SMOKE: '1',
-    DOUYIN_RUNTIME_LOCATION_FILE: locationFile
+    DOUYIN_RUNTIME_LOCATION_FILE: locationFile,
+    DOUYIN_BROWSER_PROFILE_DIR: path.join(smokeRoot,'browser-profile'),
+    DOUYIN_BROWSER_CONTROL_DIR: path.join(smokeRoot,'browser-control')
   });
   return env;
 }
@@ -85,12 +90,17 @@ export function selfTest() {
   ];
   const good={processes:list,hostPid:100,profile,listenerPids:[200],portAddresses:['127.0.0.1']};
   const nativeEnv={PATH:'C:\\Windows\\System32',USERPROFILE:'C:\\Users\\runneradmin',APPDATA:'C:\\Users\\runneradmin\\AppData\\Roaming',LOCALAPPDATA:'C:\\Users\\runneradmin\\AppData\\Local',HOME:'C:\\Users\\runneradmin'};
-  const isolatedEnv=createCandidateEnvironment(nativeEnv,'D:\\a\\_temp\\candidate\\user-data','C:\\Users\\runneradmin\\.yutang-observer-isolated\\runtime-location.json');
+  const isolatedUserData='D:\\a\\_temp\\candidate\\user-data';
+  const isolatedLocation='D:\\a\\_temp\\candidate\\home\\.yutang-observer-isolated\\runtime-location.json';
+  const isolatedEnv=createCandidateEnvironment(nativeEnv,isolatedUserData,isolatedLocation);
   for(const key of ['USERPROFILE','APPDATA','LOCALAPPDATA','HOME']) assert.equal(isolatedEnv[key],nativeEnv[key],key+' must remain the native Windows profile path');
-  assert.equal(isolatedEnv.DOUYIN_DESKTOP_USER_DATA,'D:\\a\\_temp\\candidate\\user-data');
-  assert.equal(isolatedEnv.DOUYIN_RUNTIME_LOCATION_FILE,'C:\\Users\\runneradmin\\.yutang-observer-isolated\\runtime-location.json');
-  assert.throws(()=>createCandidateEnvironment({...nativeEnv,USERPROFILE:undefined},'D:\\a\\user-data','C:\\Users\\runneradmin\\.yutang-observer-isolated\\runtime-location.json'),/USERPROFILE/);
-  assert.throws(()=>createCandidateEnvironment(nativeEnv,'relative','C:\\Users\\runneradmin\\.yutang-observer-isolated\\runtime-location.json'),/absolute/);
+  assert.equal(isolatedEnv.DOUYIN_DESKTOP_USER_DATA,isolatedUserData);
+  assert.equal(isolatedEnv.DOUYIN_RUNTIME_LOCATION_FILE,isolatedLocation);
+  assert.equal(isolatedEnv.DOUYIN_BROWSER_PROFILE_DIR,'D:\\a\\_temp\\candidate\\browser-profile');
+  assert.equal(isolatedEnv.DOUYIN_BROWSER_CONTROL_DIR,'D:\\a\\_temp\\candidate\\browser-control');
+  assert.throws(()=>createCandidateEnvironment(nativeEnv,isolatedUserData,'C:\\Users\\runneradmin\\.yutang-observer-isolated\\runtime-location.json'),/temporary root/);
+  assert.throws(()=>createCandidateEnvironment({...nativeEnv,USERPROFILE:undefined},isolatedUserData,isolatedLocation),/USERPROFILE/);
+  assert.throws(()=>createCandidateEnvironment(nativeEnv,'relative',isolatedLocation),/absolute/);
   assert.equal(verifyProcessSnapshot(good).listenerMatchesEdge,true);
   assert.equal(hasHostAncestor(201,100,list),true);
   const summary=summarizeHostProcesses(list,100,9,profile,'C:\\sandbox\\control');
@@ -766,11 +776,17 @@ async function run(exeFile, { forceMode = null, stressRestarts = 2, desktopOnly 
   const originalHome=process.env.USERPROFILE;
   if(typeof originalHome!=='string'||!path.isAbsolute(originalHome))throw new Error('Native Windows USERPROFILE is unavailable; refusing to launch candidate.');
   const home=path.resolve(originalHome);
-  const common=path.join(home,'.yutang-observer-isolated');
-  if(await fs.access(common).then(()=>true,()=>false)) { await fs.rm(base,{recursive:true,force:true}); throw new Error('Pre-existing candidate state found in native runner profile; refusing to overwrite it.'); }
+  const nativeCommon=path.join(home,'.yutang-observer-isolated');
+  if(await fs.access(nativeCommon).then(()=>true,()=>false)) { await fs.rm(base,{recursive:true,force:true}); throw new Error('Pre-existing candidate state found in native runner profile; refusing to overwrite it.'); }
+  const common=path.join(base,'home','.yutang-observer-isolated');
   const userData=path.join(base,'user-data'),memory=path.join(common,'memory');
   const locationFile=path.join(common,'runtime-location.json');
-  await fs.mkdir(userData,{recursive:true});
+  const mediaRoot=path.join(base,'media');
+  for(const directory of [userData,memory,path.join(base,'state'),mediaRoot,path.join(mediaRoot,'.models'),path.join(base,'browser-profile'),path.join(base,'browser-control')]) await fs.mkdir(directory,{recursive:true});
+  const locationRecord={version:1,stateDir:path.join(base,'state'),memoryDir:memory,memoryDbPath:path.join(memory,'shared.sqlite'),mediaEnvFile:path.join(mediaRoot,'.env'),mediaSettingsFile:path.join(mediaRoot,'settings.local.json'),mediaRuntimeRoot:mediaRoot,mediaModelsDir:path.join(mediaRoot,'.models')};
+  await fs.writeFile(locationFile,JSON.stringify(locationRecord,null,2),{flag:'wx'});
+  await fs.writeFile(locationRecord.mediaEnvFile,'',{flag:'wx'});
+  await fs.writeFile(locationRecord.mediaSettingsFile,JSON.stringify({enabled:false,backend:'local-whisper'}),{flag:'wx'});
   const env=createCandidateEnvironment(process.env,userData,locationFile);
   // Preserve the real Windows account profile and its AppData roots. Only YuTang state and Electron userData are isolated.
   // In ephemeral offline Windows CI only, capture bounded Playwright startup traces
@@ -792,9 +808,9 @@ async function run(exeFile, { forceMode = null, stressRestarts = 2, desktopOnly 
   const candidateExit={error:null,exit:null};
   child.once('error',error=>{candidateExit.error=safeText(error?.message||error);});
   child.once('exit',(code,signal)=>{candidateExit.exit={code,signal};});
-  const controlDir=path.join(common,'control');
+  const controlDir=path.join(base,'browser-control');
   const control=path.join(controlDir,'browser.json');
-  const profile=path.join(common,'cli-profile');
+  const profile=path.join(base,'browser-profile');
   const envKeys=['USERPROFILE','APPDATA','LOCALAPPDATA','HOME','HOMEDRIVE','HOMEPATH','USERNAME','USERDOMAIN','SystemDrive','ProgramFiles','ProgramFiles(x86)','ProgramData','SystemRoot','TEMP','TMP'];
   const report={type:'WINDOWS_EDGE_LAUNCH_IN_EPHEMERAL_CI_ONLY',candidateSha256:EXPECTED_EXE,realAccount:false,modelKey:false,externalEdgeNetworkBlocked:true,environmentProfile:'native-user-profile-with-isolated-yutang-state',safeEnvPresence:Object.fromEntries(envKeys.map(key=>[key,Boolean(env[key])]))};
   let backendPid=null;
@@ -1081,7 +1097,6 @@ async function run(exeFile, { forceMode = null, stressRestarts = 2, desktopOnly 
         console.error('CANDIDATE_PROCESS_CLEANUP_FAILED '+JSON.stringify(survivors.map(p=>({pid:p.ProcessId,name:p.Name}))));
         process.exitCode=1;
       } else {
-        await fs.rm(common,{recursive:true,force:true});
         console.log('CANDIDATE_PROCESS_CLEANUP_VERIFIED: no host or Edge process remains');
       }
     } catch(error) {
@@ -1105,6 +1120,12 @@ async function run(exeFile, { forceMode = null, stressRestarts = 2, desktopOnly 
     } catch(error) {
       console.error('UNRELATED_EDGE_CLEANUP_UNVERIFIED '+safeText(error.message,[base,home,userData,memory,profile,controlDir,unrelatedProfile]));
       process.exitCode=1;
+    }
+    if(await fs.access(nativeCommon).then(()=>true,()=>false)) {
+      console.error('CANDIDATE_NATIVE_PROFILE_POLLUTION_DETECTED: native YuTang state was created during lifecycle test');
+      process.exitCode=1;
+    } else {
+      console.log('PASS_NATIVE_PROFILE_UNPOLLUTED_AFTER_LIFECYCLE');
     }
     await fs.rm(base,{recursive:true,force:true}).catch(()=>{});
   }
