@@ -22,8 +22,16 @@ export function patchDesktopMain(source){
     'isolated Electron userData');
   source=once(source,
     "const shared = await ensureSharedLocation({ resolve: pathsModule.resolveRuntimePaths });",
-    "const shared = await ensureSharedLocation({ resolve: pathsModule.resolveRuntimePaths, env: {} });",
-    'ignore inherited legacy runtime path overrides');
+    [
+      "const smokeRoot = process.env.DOUYIN_DESKTOP_SMOKE === '1' ? path.dirname(userData) : null;",
+      "const smokeRuntimeEnv = smokeRoot ? { DOUYIN_RUNTIME_LOCATION_FILE: path.join(smokeRoot, 'home', '.yutang-observer-isolated', 'runtime-location.json'), DOUYIN_BROWSER_PROFILE_DIR: path.join(smokeRoot, 'browser-profile'), DOUYIN_BROWSER_CONTROL_DIR: path.join(smokeRoot, 'browser-control') } : {};",
+      "if (smokeRoot) {",
+      "  for (const [key, value] of Object.entries(smokeRuntimeEnv)) if (path.normalize(process.env[key] || '') !== value) throw new Error('PACKAGED_SMOKE_ENV_PATH_MISMATCH: ' + key);",
+      "  await fs.access(smokeRuntimeEnv.DOUYIN_RUNTIME_LOCATION_FILE);",
+      "}",
+      "const shared = await ensureSharedLocation({ resolve: pathsModule.resolveRuntimePaths, env: smokeRuntimeEnv });"
+    ].join('\\n'),
+    'ignore inherited legacy runtime path overrides except verified packaged smoke');
   if(source.includes("'DafeiyuDouyinAPI'"))throw new Error('Legacy Electron userData root remains');
   return source;
 }
@@ -114,6 +122,7 @@ export async function applyDynamicPatches(root){
     dynamicPatchedSourceSha256:plan.patchedSha256,
     isolatedElectronUserData:true,
     noLegacyRuntimeEnvironmentImport:true,
+    packagedSmokeUsesVerifiedTempRuntimeLocation:true,
     packagedJobGuardHashVerified:true,
     preparedRuntimeJobGuardHashVerified:true,
     liveModelCalled:false,
