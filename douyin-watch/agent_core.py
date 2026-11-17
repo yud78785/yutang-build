@@ -425,6 +425,11 @@ class BrowserWatcher:
                 return 'UNKNOWN_DURATION',elapsed,current
             if t > stalled_value+0.3:
                 stalled_value=t;stalled_at=now
+            elif (isinstance(dur,(int,float)) and math.isfinite(dur) and dur>1.5
+                  and stalled_value-t > dur*0.5 and t <= max(2.0,dur*0.2)):
+                # Normal video-loop resets the clock. Never call it stalled merely
+                # because the NEW loop has not yet exceeded the old maximum time.
+                stalled_value=t;stalled_at=now
             if now-stalled_at>12:
                 return 'PLAYBACK_STALLED',elapsed,current
             if int(elapsed)%5==0:
