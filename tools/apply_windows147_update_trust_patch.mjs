@@ -26,14 +26,10 @@ function replaceExactlyOnce(source, needle, replacement, label) {
 }
 
 export function patchPackagedSmokeEnvironment(source) {
-  const anchor = [
-    "const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => /^(?:path|systemroot|windir|comspec|pathext|programfiles|programfiles\\(x86\\)|programdata)$/i.test(key)));",
-    "Object.assign(env, { HOME: home, USERPROFILE: home, APPDATA: path.join(directory, 'app-data'), LOCALAPPDATA: path.join(directory, 'local-app-data'), TEMP: path.join(directory, 'temp'), TMP: path.join(directory, 'temp'), DSH_HOME: path.join(home, '.dsh'), DOUYIN_DESKTOP_USER_DATA: userData, DOUYIN_RUNTIME_LOCATION_FILE: locationFile, DOUYIN_DESKTOP_SMOKE: '1' });"
-  ].join('\\n');
-  const replacement = [
-    "const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => /^(?:path|systemroot|windir|comspec|pathext|programfiles|programfiles\\(x86\\)|programdata|userprofile|homedrive|homepath|appdata|localappdata|temp|tmp|home|public|allusersprofile|os|systemdrive|processor_architecture|processor_level|processor_revision|number_of_processors|username|userdomain|sessionname)$/i.test(key)));",
-    "Object.assign(env, { DSH_HOME: path.join(home, '.dsh'), DOUYIN_DESKTOP_USER_DATA: userData, DOUYIN_RUNTIME_LOCATION_FILE: locationFile, DOUYIN_BROWSER_PROFILE_DIR: path.join(directory, 'browser-profile'), DOUYIN_BROWSER_CONTROL_DIR: path.join(directory, 'browser-control'), DOUYIN_DESKTOP_SMOKE: '1' });"
-  ].join('\\n');
+  const anchor = String.raw`const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => /^(?:path|systemroot|windir|comspec|pathext|programfiles|programfiles\(x86\)|programdata)$/i.test(key)));
+Object.assign(env, { HOME: home, USERPROFILE: home, APPDATA: path.join(directory, 'app-data'), LOCALAPPDATA: path.join(directory, 'local-app-data'), TEMP: path.join(directory, 'temp'), TMP: path.join(directory, 'temp'), DSH_HOME: path.join(home, '.dsh'), DOUYIN_DESKTOP_USER_DATA: userData, DOUYIN_RUNTIME_LOCATION_FILE: locationFile, DOUYIN_DESKTOP_SMOKE: '1' });`;
+  const replacement = String.raw`const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => /^(?:path|systemroot|windir|comspec|pathext|programfiles|programfiles\(x86\)|programdata|userprofile|homedrive|homepath|appdata|localappdata|temp|tmp|home|public|allusersprofile|os|systemdrive|processor_architecture|processor_level|processor_revision|number_of_processors|username|userdomain|sessionname)$/i.test(key)));
+Object.assign(env, { DSH_HOME: path.join(home, '.dsh'), DOUYIN_DESKTOP_USER_DATA: userData, DOUYIN_RUNTIME_LOCATION_FILE: locationFile, DOUYIN_BROWSER_PROFILE_DIR: path.join(directory, 'browser-profile'), DOUYIN_BROWSER_CONTROL_DIR: path.join(directory, 'browser-control'), DOUYIN_DESKTOP_SMOKE: '1' });`;
   return replaceExactlyOnce(source, anchor, replacement, 'packaged-smoke-native-windows-profile');
 }
 
