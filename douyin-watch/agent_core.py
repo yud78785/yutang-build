@@ -298,6 +298,8 @@ class BrowserWatcher:
         saw_start=False
         max_progress=0.0
         start=time.monotonic()
+        last_checked=start
+        last_media_time=0.0
         stalled_at=start
         stalled_value=max_progress
         while not self.stop.is_set():
@@ -316,10 +318,33 @@ class BrowserWatcher:
                 return 'VIDEO_CHANGED',elapsed,current
             t=float(current.get('current_time') or 0)
             dur=current.get('duration')
-            max_progress=max(max_progress,t)
             if isinstance(dur,(int,float)) and math.isfinite(dur) and dur>=1.5:
-                if t <= max(2.0,dur*0.15):
-                    saw_start=True
+                # Never credit progress observed BEFORE the first real near-start sample.
+                # A player opened near its end may loop back to zero; that is the start
+                # of OUR observation, not proof that we watched the earlier loop.
+                if not saw_start:
+                    if not current.get('paused') and t <= min(1.5,dur*0.15):
+                        saw_start=True
+                        last_media_time=t
+                        max_progress=t
+                        last_checked=now
+                else:
+                    if t >= last_media_time:
+                        max_plausible_step=max(1.25,(now-last_checked)*2.5+0.8)
+                        if t-last_media_time > max_plausible_step:
+                            return 'SEEK_DETECTED',elapsed,current
+                    elif last_media_time-t >= 0.6:
+                        # Accept a natural loop but never borrow progress from the
+                        # previous loop unless the observed near-end threshold is met.
+                        if last_media_time < dur*0.85 or max_progress < dur*0.85:
+                            max_progress=t
+                            frame_marks.clear()
+                        else:
+                            # Completion is checked below via watched progress.
+                            pass
+                    last_media_time=t
+                    last_checked=now
+                    max_progress=max(max_progress,t)
                 if self.config.capture_frames and not current.get('paused') and saw_start:
                     fraction=t/dur
                     for mark in (10,50,85):
@@ -328,7 +353,7 @@ class BrowserWatcher:
                             frame_marks.add(mark)
                             self._capture_frame(page,index,mark,original)
                             break
-            if verified_full_watch(current,previous,max_progress,saw_start,elapsed):
+            if verified_full_watch(current,previous,max_progress,saw_start,elapsed) and not current.get('paused'):
                 return 'COMPLETE',elapsed,current
             if is_live_or_unknown(current) and elapsed >= 15:
                 return 'UNKNOWN_DURATION',elapsed,current
@@ -426,8 +451,9 @@ class BrowserWatcher:
                                     summary=clip(page.evaluate(SUMMARY_JS),1200)
                         except Exception:
                             status='CONTENT_READ_FAILED'
-                    player_audio=('PLAYER_MUTED_OR_VOLUME_ZERO' if final.get('muted') or
-                        final.get('volume') == 0 else 'PLAYER_UNMUTED_AUDIO_NOT_VERIFIED')
+                    player_audio=('PLAYER_AUDIO_STATE_UNKNOWN' if 'muted' not in final else
+                        ('PLAYER_MUTED_OR_VOLUME_ZERO' if final.get('muted') or
+                         final.get('volume') == 0 else 'PLAYER_UNMUTED_AUDIO_NOT_VERIFIED'))
                     title=clip(final.get('title') or current.get('title') or '',300)
                     record={'time':datetime.now(timezone.utc).astimezone().isoformat(timespec='seconds'),
                             'index':i,'status':status,'title':title,
