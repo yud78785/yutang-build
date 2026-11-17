@@ -28,6 +28,7 @@ on:
       - tools/apply_windows147_safe_defaults.mjs
       - tests/windows147-safe-defaults.test.mjs
       - tests/chat-starting-recovery.test.mjs
+      - tests/windows147-prepare-handoff-playback.test.mjs
   workflow_dispatch:
 
 permissions:
@@ -233,9 +234,12 @@ jobs:
           node tests/test_windows147_test_fixtures.mjs
           if ($LASTEXITCODE -ne 0) { throw 'WINDOWS_TEST_FIXTURE_PATCH_REGRESSION_FAILED' }
           Push-Location upstream
-          node --test tests/openrouter-production-compat.test.mjs tests/api-agent.test.mjs tests/chat.test.mjs tests/spark-agent.test.mjs tests/public-comment-agent.test.mjs tests/friend-interactions.test.mjs tests/friend-auto-prepare.test.mjs tests/friend-chat-share-isolation.test.mjs tests/chat-starting-recovery.test.mjs tests/browser-launcher-adopt.test.mjs tests/shared-browser-pages.test.mjs tests/scheduled-watch.test.mjs tests/autonomous-watch.test.mjs desktop/tests/*.test.mjs desktop/ui-api/tests/openrouter-preset.test.mjs
-          if ($LASTEXITCODE -ne 0) { throw 'Windows source regression suite failed' }
+          $env:YUTANG_PREPARE_HANDOFF_RECEIPT = Join-Path $PWD 'prepare-handoff-playback.json'
+          node --test tests/openrouter-production-compat.test.mjs tests/api-agent.test.mjs tests/chat.test.mjs tests/spark-agent.test.mjs tests/public-comment-agent.test.mjs tests/friend-interactions.test.mjs tests/friend-auto-prepare.test.mjs tests/friend-chat-share-isolation.test.mjs tests/chat-starting-recovery.test.mjs tests/browser-launcher-adopt.test.mjs tests/shared-browser-pages.test.mjs tests/scheduled-watch.test.mjs tests/autonomous-watch.test.mjs ../tests/windows147-prepare-handoff-playback.test.mjs desktop/tests/*.test.mjs desktop/ui-api/tests/openrouter-preset.test.mjs
+          $testExitCode = $LASTEXITCODE
+          Remove-Item Env:YUTANG_PREPARE_HANDOFF_RECEIPT -ErrorAction SilentlyContinue
           Pop-Location
+          if ($testExitCode -ne 0) { throw 'Windows source regression suite failed' }
 
       - name: Acquire pinned official UI source and prepare the bundled Node runtime
         shell: pwsh
@@ -381,6 +385,8 @@ jobs:
           $dynamicSecurity = Get-Content '../windows-security-147-dynamic-patch-receipt.json' -Raw | ConvertFrom-Json
           $testFixtures = Get-Content '../windows-security-147-test-fixture-receipt.json' -Raw | ConvertFrom-Json
           $updateTrust = Get-Content '../windows-update-trust-patch-receipt.json' -Raw | ConvertFrom-Json
+          $safeDefaults = Get-Content '../windows147-safe-defaults-patch-receipt.json' -Raw | ConvertFrom-Json
+          $playback = Get-Content '../prepare-handoff-playback.json' -Raw | ConvertFrom-Json
           if ($staticSecurity.status -cne 'PASS_PINNED_STATIC_PATCH_BLOBS' -or $staticSecurity.release -ne $false -or $staticSecurity.upstreamCommit -cne $env:UPSTREAM_COMMIT) { throw 'WINDOWS_STATIC_SECURITY_PATCH_RECEIPT_INVALID' }
           if ($dynamicSecurity.status -cne 'PASS_EXACT_SOURCE_SECURITY_PATCH' -or $dynamicSecurity.release -ne $false) { throw 'WINDOWS_DYNAMIC_SECURITY_PATCH_RECEIPT_INVALID' }
           if ($testFixtures.status -cne 'PASS_PATCHED_WINDOWS_TEST_FIXTURES' -or $testFixtures.release -ne $false -or $testFixtures.jobGuardSha256 -cne $env:YUTANG_JOBGUARD_SHA256) { throw 'WINDOWS_TEST_FIXTURE_RECEIPT_INVALID' }
@@ -398,6 +404,29 @@ jobs:
               $updateTrust.readmeUpdatedForUnsignedCandidate -ne $true -or
               $updateTrust.updateChannelFailClosedExplained -ne $true -or
               $updateTrust.packagedReadmeVerified -ne $true) { throw 'WINDOWS_UPDATE_TRUST_PATCH_RECEIPT_INVALID' }
+          if ($safeDefaults.status -cne 'PASS_EXACT_SOURCE_SAFE_DEFAULTS_AND_PREPARE_DISCLOSURE' -or
+              $safeDefaults.upstreamCommit -cne $env:UPSTREAM_COMMIT -or
+              $safeDefaults.friendInteractionsDefaultEnabled -ne $false -or
+              $safeDefaults.scheduledAutonomousWatchDefaultEnabled -ne $false -or
+              $safeDefaults.preparePageStartsPaused -ne $true -or
+              $safeDefaults.prepareAdoptionPathVerified -ne $true -or
+              $safeDefaults.uiExplainsExplicitWatchOptIn -ne $true -or
+              $safeDefaults.realModelCalled -ne $false -or
+              $safeDefaults.realMessageSent -ne $false -or
+              $safeDefaults.release -ne $false) { throw 'WINDOWS_SAFE_DEFAULTS_RECEIPT_INVALID' }
+          if ($verification.renderer.friendMasterDefaultEnabled -ne $false -or
+              $verification.renderer.friendMasterToggledWithoutRecipients -ne $true) { throw 'PACKAGED_FRIEND_DEFAULT_OFF_NOT_VERIFIED' }
+          if ($playback.status -cne 'PASS_REAL_EDGE_PREPARE_ADOPTION_PLAYBACK_AND_SYNTHETIC_VISUAL_INPUT' -or
+              $playback.upstreamCommit -cne $env:UPSTREAM_COMMIT -or
+              $playback.preparePageStartsPaused -ne $true -or
+              $playback.preparePageAdopted -ne $true -or
+              $playback.playbackResumed -ne $true -or
+              $playback.sampledFrames -lt 2 -or
+              $playback.modelImageParts -lt 1 -or
+              $playback.imageDataValid -ne $true -or
+              $playback.realModelCalled -ne $false -or
+              $playback.realMessageSent -ne $false -or
+              $playback.release -ne $false) { throw 'PREPARE_HANDOFF_PLAYBACK_RECEIPT_INVALID' }
           $edgeNormal = Get-Content 'release-api/windows-edge-lifecycle-normal.json' -Raw | ConvertFrom-Json
           $edgeHost = Get-Content 'release-api/windows-edge-lifecycle-force-host.json' -Raw | ConvertFrom-Json
           $edgeGuard = Get-Content 'release-api/windows-edge-lifecycle-force-guard.json' -Raw | ConvertFrom-Json
@@ -449,7 +478,9 @@ jobs:
             staticSecurityPatch = $staticSecurity
             dynamicSecurityPatch = $dynamicSecurity
             testFixturePatch = $testFixtures
-             updateTrustPatch = $updateTrust
+            updateTrustPatch = $updateTrust
+            safeDefaultsPatch = $safeDefaults
+            prepareHandoffPlayback = $playback
             jobGuardSha256 = $env:YUTANG_JOBGUARD_SHA256
             edgeLifecycle = $edgeLifecycle
             readOnlyEndpoints = $verification.readOnlyEndpoints
@@ -477,6 +508,8 @@ jobs:
             upstream/windows-security-147-dynamic-patch-receipt.json
             upstream/windows-security-147-test-fixture-receipt.json
             upstream/windows-update-trust-patch-receipt.json
+            upstream/windows147-safe-defaults-patch-receipt.json
+            upstream/prepare-handoff-playback.json
             upstream/desktop/release-api/windows-edge-lifecycle-*.json
           if-no-files-found: warn
           retention-days: 7
