@@ -38,7 +38,7 @@ jobs:
           $paths = @(git diff-tree --no-commit-id --name-only -r HEAD | Where-Object { $_ -ne '' })
           if ($paths.Count -ne 1 -or $paths[0] -ne 'douyin-watch/BUILD_ONCE.approved') { throw 'Unexpected marker commit changes' }
           $actual = [System.IO.File]::ReadAllText((Join-Path $PWD 'BUILD_ONCE.approved'))
-          if ($actual -ne "BUILD_YUTANG_DOUYIN_MVP_ONCE`n") { throw 'Marker content mismatch' }
+          if ($actual.Replace("`r`n","`n") -ne "BUILD_YUTANG_DOUYIN_MVP_ONCE`n") { throw 'Marker content mismatch' }
           $parents = (git rev-list --parents -n 1 HEAD).Trim().Split(' ')
           if ($parents.Count -ne 2) { throw 'Marker commit must have one parent' }
       - name: Setup Python 3.12
