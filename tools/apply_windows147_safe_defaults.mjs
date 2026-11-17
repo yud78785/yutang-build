@@ -117,10 +117,7 @@ export async function apply(root) {
   const launcher = await fs.readFile(path.join(root, 'browser-launcher.mjs'), 'utf8');
   if (!launcher.includes('entry.adopted') || !launcher.includes('entry.release =') || !launcher.includes('pauseAll')) throw new Error('PREPARE_PAGE_PAUSE_GUARD_MISSING');
   const core = await fs.readFile(path.join(root, 'core.mjs'), 'utf8');
-  const autonomousWatch = await fs.readFile(path.join(root, 'autonomous-watch.mjs'), 'utf8');
   if (!core.includes('this.page=await adoptSharedPreparePage')) throw new Error('CORE_PREPARE_PAGE_ADOPTION_MISSING');
-  if (!autonomousWatch.includes('state.video?.id && state.video.readyState < 2 && state.video.paused === true') ||
-      !autonomousWatch.includes("current = await this.execute('douyin_play')")) throw new Error('PREPARE_PAGE_UNREADY_VIDEO_PRIMING_NOT_PROVEN');
   const openrouter = JSON.parse(await fs.readFile(path.join(root, 'openrouter-desktop-patch-receipt.json'), 'utf8'));
   const update = JSON.parse(await fs.readFile(path.join(root, 'windows-update-trust-patch-receipt.json'), 'utf8'));
   if (openrouter.upstreamCommit !== BASE || update.upstreamCommit !== BASE) throw new Error('PRIOR_SOURCE_RECEIPT_MISMATCH');
@@ -143,6 +140,9 @@ export async function apply(root) {
     await fs.writeFile(target, patched);
     changed.push({ file, originalSourceSha256: sha256(original), patchedSha256: sha256(patched) });
   }
+  const autonomousWatch = await fs.readFile(path.join(root, 'autonomous-watch.mjs'), 'utf8');
+  if (!autonomousWatch.includes('state.video?.id && state.video.readyState < 2 && state.video.paused === true') ||
+      !autonomousWatch.includes("current = await this.execute('douyin_play')")) throw new Error('PREPARE_PAGE_UNREADY_VIDEO_PRIMING_NOT_PROVEN');
   const friend = await fs.readFile(path.join(root, 'friend-interactions.mjs'), 'utf8');
   const ui = await fs.readFile(uiPath, 'utf8');
   const verifier = await fs.readFile(verifierPath, 'utf8');
