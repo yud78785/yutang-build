@@ -229,6 +229,42 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          $nativeProfile = $env:USERPROFILE
+          $nativeCommon = Join-Path $nativeProfile '.yutang-observer-isolated'
+          if (Test-Path -LiteralPath $nativeCommon) { throw 'PREEXISTING_NATIVE_PROFILE_STATE_BEFORE_SOURCE_TESTS' }
+          $testProfile = Join-Path $env:RUNNER_TEMP 'yutang-source-test-profile'
+          $testRuntime = Join-Path $testProfile '.yutang-observer-isolated'
+          $testMemory = Join-Path $testRuntime 'memory'
+          $testMedia = Join-Path $testRuntime 'media'
+          $testTemp = Join-Path $testProfile 'temp'
+          foreach ($directory in @($testRuntime,$testMemory,$testMedia,$testTemp,(Join-Path $testRuntime 'state'),(Join-Path $testMedia '.models'),(Join-Path $testProfile 'app-data'),(Join-Path $testProfile 'local-app-data'))) {
+            New-Item -ItemType Directory -Path $directory -Force | Out-Null
+          }
+          $runtimeLocation = Join-Path $testRuntime 'runtime-location.json'
+          $record = [ordered]@{
+            version = 1
+            stateDir = Join-Path $testRuntime 'state'
+            memoryDir = $testMemory
+            memoryDbPath = Join-Path $testMemory 'shared.sqlite'
+            mediaEnvFile = Join-Path $testMedia '.env'
+            mediaSettingsFile = Join-Path $testMedia 'settings.local.json'
+            mediaRuntimeRoot = $testMedia
+            mediaModelsDir = Join-Path $testMedia '.models'
+          }
+          $record | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $runtimeLocation -Encoding utf8
+          Set-Content -LiteralPath $record.mediaEnvFile -Value '' -Encoding utf8
+          '{"enabled":false,"backend":"local-whisper"}' | Set-Content -LiteralPath $record.mediaSettingsFile -Encoding utf8
+          $env:USERPROFILE = $testProfile
+          $env:HOME = $testProfile
+          $env:APPDATA = Join-Path $testProfile 'app-data'
+          $env:LOCALAPPDATA = Join-Path $testProfile 'local-app-data'
+          $env:TEMP = $testTemp
+          $env:TMP = $testTemp
+          $env:DSH_HOME = Join-Path $testProfile '.dsh'
+          $env:DOUYIN_RUNTIME_LOCATION_FILE = $runtimeLocation
+          $nodeHome = node -p "require('node:os').homedir()"
+          if ([IO.Path]::GetFullPath($nodeHome) -ne [IO.Path]::GetFullPath($testProfile)) { throw 'SOURCE_TEST_PROFILE_OVERRIDE_NOT_ACTIVE' }
+          Write-Host 'SOURCE_TEST_USERPROFILE=RUNNER_TEMP; native runner profile remains reserved for the subsequent packaged lifecycle test'
           node tools/patch_windows147_test_fixtures.mjs upstream
           if ($LASTEXITCODE -ne 0) { throw 'WINDOWS_TEST_FIXTURE_PATCH_FAILED' }
           node tests/test_windows147_test_fixtures.mjs
@@ -239,6 +275,7 @@ jobs:
           $testExitCode = $LASTEXITCODE
           Remove-Item Env:YUTANG_PREPARE_HANDOFF_RECEIPT -ErrorAction SilentlyContinue
           Pop-Location
+          if (Test-Path -LiteralPath $nativeCommon) { throw 'SOURCE_TESTS_POLLUTED_NATIVE_PROFILE' }
           if ($testExitCode -ne 0) { throw 'Windows source regression suite failed' }
 
       - name: Acquire pinned official UI source and prepare the bundled Node runtime
@@ -312,8 +349,39 @@ jobs:
         working-directory: upstream/desktop
         run: |
           $ErrorActionPreference = 'Stop'
+          $nativeProfile = $env:USERPROFILE
+          $nativeCommon = Join-Path $nativeProfile '.yutang-observer-isolated'
+          if (Test-Path -LiteralPath $nativeCommon) { throw 'PREEXISTING_NATIVE_PROFILE_STATE_BEFORE_PACKAGED_SMOKE' }
+          $smokeProfile = Join-Path $env:RUNNER_TEMP 'yutang-packaged-smoke-profile'
+          $smokeCache = Join-Path $env:RUNNER_TEMP 'yutang-packaged-smoke-cache'
+          foreach ($directory in @($smokeProfile,$smokeCache,(Join-Path $smokeProfile 'app-data'),(Join-Path $smokeProfile 'local-app-data'),(Join-Path $smokeProfile 'temp'))) {
+            New-Item -ItemType Directory -Path $directory -Force | Out-Null
+          }
+          $env:USERPROFILE = $smokeProfile
+          $env:HOME = $smokeProfile
+          $env:APPDATA = Join-Path $smokeProfile 'app-data'
+          $env:LOCALAPPDATA = Join-Path $smokeProfile 'local-app-data'
+          $env:TEMP = Join-Path $smokeProfile 'temp'
+          $env:TMP = Join-Path $smokeProfile 'temp'
+          $env:DOUYIN_PACKAGED_SMOKE_ROOT = $smokeCache
+          $nodeHome = node -p "require('node:os').homedir()"
+          if ([IO.Path]::GetFullPath($nodeHome) -ne [IO.Path]::GetFullPath($smokeProfile)) { throw 'PACKAGED_SMOKE_PROFILE_OVERRIDE_NOT_ACTIVE' }
+          Write-Host 'PACKAGED_SMOKE_USERPROFILE=RUNNER_TEMP; native runner profile remains untouched'
           node scripts/verify-packaged-api.mjs
-          if ($LASTEXITCODE -ne 0) { throw 'packaged EXE isolated startup and renderer smoke failed' }
+          $smokeExitCode = $LASTEXITCODE
+          if (Test-Path -LiteralPath $nativeCommon) { throw 'PACKAGED_SMOKE_POLLUTED_NATIVE_PROFILE' }
+          if ($smokeExitCode -ne 0) { throw 'packaged EXE isolated startup and renderer smoke failed' }
+
+      - name: Verify native profile remains clean before real Edge lifecycle
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $nativeCommon = Join-Path $env:USERPROFILE '.yutang-observer-isolated'
+          if (Test-Path -LiteralPath $nativeCommon) {
+            Get-ChildItem -LiteralPath $nativeCommon -Force | Select-Object Name,Mode,Length | Format-Table -AutoSize | Out-String | Write-Host
+            throw 'NATIVE_PROFILE_STATE_POLLUTED_BEFORE_LIFECYCLE'
+          }
+          Write-Host 'PASS_NATIVE_PROFILE_CLEAN_BEFORE_LIFECYCLE'
 
       - name: Pin new EXE SHA-256 and block Edge outbound network
         shell: pwsh
