@@ -108,6 +108,39 @@ class CoreTest(unittest.TestCase):
   self.assertEqual(simulate([0,0.2,9.5]),'SEEK_DETECTED')
   self.assertNotEqual(simulate([0,1,2,3,4,5,6,7,8,9.7],paused=True),'COMPLETE')
 
+ def test_watcher_keeps_playing_when_douyin_metadata_changes(self):
+  class FakeClock:
+   def __init__(self):self.t=0.0
+   def monotonic(self):return self.t
+   def wait(self,seconds):self.t+=seconds;return False
+  class FakePage:
+   def __init__(self,sequence):self.sequence=sequence;self.i=0
+   def evaluate(self,expr):
+    if expr==PLAY_JS:return 'ALREADY_PLAYING'
+    k=min(self.i,len(self.sequence)-1)
+    self.i+=1
+    return self.sequence[k]
+  def scene(t,src='video-a',title='加载中'):
+   return {'found':True,'duration':10,'current_time':t,'paused':False,'ended':False,
+    'src_key':src,'player_key':'player-1','title':title,'url':'https://www.douyin.com/'}
+  def run(samples):
+   clock=FakeClock()
+   watcher=BrowserWatcher(WatchConfig(count=1,max_seconds_per_video=15,capture_frames=False),
+    threading.Event(),lambda *_:None)
+   watcher._sleep=clock.wait
+   with patch('agent_core.time.monotonic',clock.monotonic):
+    return watcher._play_to_end(FakePage(samples),samples[0],1)[0]
+  # Loading titles, URLs and an adaptive CDN source change do not mean Next.
+  normal=[scene(t) for t in [0,1,2,3,4,5,6,7,8,9,9.7]]
+  normal[2]=dict(normal[2],title='已加载的标题',url='https://www.douyin.com/discover')
+  normal[3:]=[dict(x,title='已加载的标题',src_key='adaptive-cdn-b') for x in normal[3:]]
+  self.assertEqual(run(normal),'COMPLETE')
+  # If the actual source, title AND media clock reset, stop rather than
+  # mistakenly attach the following video's comments to the previous one.
+  changed=[scene(t) for t in [0,1,2,3,4,5,6]]
+  changed.append(scene(0.1,src='video-b',title='下一条视频'))
+  self.assertEqual(run(changed),'VIDEO_CHANGED')
+
  def test_local_active_frame_sample_is_bounded_and_scoped(self):
   class FakePage:
    def __init__(self,identity):
