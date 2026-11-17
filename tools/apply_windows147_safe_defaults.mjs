@@ -10,6 +10,7 @@ const ORIGINAL = {
   'tests/friend-interactions.test.mjs': 'c19a00077aa866a61d460280ab7d5d7513db05ba',
   'tests/friend-auto-prepare.test.mjs': 'b3947d922993120361d507b5b2afcc7bd3390c5b',
   'tests/friend-chat-share-isolation.test.mjs': '58deaee9f8a1e00cc9fb49cdb6229bf1b4cf4f3b',
+  'tests/chat-starting-recovery.test.mjs': 'b38ad6c0ab98ff830672c3ae16770d247e0d67eb',
 };
 const blobSha = value => createHash('sha1').update('blob ' + Buffer.byteLength(value) + '\0').update(value).digest('hex');
 const sha256 = value => createHash('sha256').update(value).digest('hex');
@@ -67,6 +68,11 @@ export function patchText(file, source) {
       "const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'douyin-auto-prepare-edge-')), controlDirectory = path.join(stateDir, 'control'); fs.mkdirSync(controlDirectory); fs.writeFileSync(path.join(stateDir, 'friend-interactions-policy.json'), JSON.stringify({ version: 1, enabled: true }));",
       'Edge prepare explicit opt in');
   }
+  if (file === 'tests/chat-starting-recovery.test.mjs') return replaceOnce(
+    source,
+    '  let starts=0;const friend=new FriendInteractions({stateDir,getChat:()=>service,getShare:()=>({state:()=>({enabled:true}),configure:async()=>{}}),modelReady:()=>true,startChat:async chat=>{starts++;return chat.start({schedule:false});}});',
+    "  fs.writeFileSync(path.join(stateDir, 'friend-interactions-policy.json'), JSON.stringify({ version: 1, enabled: true }));\n  let starts=0;const friend=new FriendInteractions({stateDir,getChat:()=>service,getShare:()=>({state:()=>({enabled:true}),configure:async()=>{}}),modelReady:()=>true,startChat:async chat=>{starts++;return chat.start({schedule:false});}});",
+    'chat starting recovery explicit opt in');
   if (file === 'tests/friend-chat-share-isolation.test.mjs') return replaceOnce(source,
     "  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'douyin-chat-share-isolation-'));",
     "  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'douyin-chat-share-isolation-'));\n  write(path.join(stateDir, 'friend-interactions-policy.json'), { version: 1, enabled: true });",

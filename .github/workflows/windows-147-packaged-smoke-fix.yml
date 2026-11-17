@@ -27,6 +27,7 @@ on:
       - tools/apply_windows147_static_patches.mjs
       - tools/apply_windows147_safe_defaults.mjs
       - tests/windows147-safe-defaults.test.mjs
+      - tests/chat-starting-recovery.test.mjs
   workflow_dispatch:
 
 permissions:
@@ -160,7 +161,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'SAFE_DEFAULTS_PATCH_TOOL_TESTS_FAILED' }
           node tools/apply_windows147_safe_defaults.mjs upstream
           if ($LASTEXITCODE -ne 0) { throw 'SAFE_DEFAULTS_PATCH_APPLICATION_FAILED' }
-          foreach ($file in @('friend-interactions.mjs','tests/friend-interactions.test.mjs','tests/friend-auto-prepare.test.mjs','tests/friend-chat-share-isolation.test.mjs','desktop/ui-api/src/main.jsx','desktop/scripts/verify-packaged-api.mjs')) {
+          foreach ($file in @('friend-interactions.mjs','tests/friend-interactions.test.mjs','tests/friend-auto-prepare.test.mjs','tests/friend-chat-share-isolation.test.mjs','tests/chat-starting-recovery.test.mjs','desktop/ui-api/src/main.jsx','desktop/scripts/verify-packaged-api.mjs')) {
             node --check (Join-Path 'upstream' $file)
             if ($LASTEXITCODE -ne 0) { throw ('SAFE_DEFAULTS_PATCHED_SOURCE_SYNTAX_FAILED: ' + $file) }
           }

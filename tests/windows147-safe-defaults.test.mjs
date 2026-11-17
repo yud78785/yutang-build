@@ -31,6 +31,13 @@ test('auto-prepare unit and Edge test fixtures explicitly opt in', () => {
   assert.ok(patched.includes('fs.writeFileSync(path.join(stateDir'));
 });
 
+test('chat starting recovery fixture explicitly opts in', () => {
+  const source = "  let starts=0;const friend=new FriendInteractions({stateDir,getChat:()=>service,getShare:()=>({state:()=>({enabled:true}),configure:async()=>{}}),modelReady:()=>true,startChat:async chat=>{starts++;return chat.start({schedule:false});}});";
+  const patched = patchText('tests/chat-starting-recovery.test.mjs', source);
+  assert.ok(patched.includes('friend-interactions-policy.json'));
+  assert.ok(patched.includes('enabled: true'));
+});
+
 test('chat and share isolation fixture explicitly opts in', () => {
   const source = "  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'douyin-chat-share-isolation-'));";
   const patched = patchText('tests/friend-chat-share-isolation.test.mjs', source);
