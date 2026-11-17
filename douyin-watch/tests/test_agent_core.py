@@ -4,7 +4,7 @@ import unittest
 import threading
 from unittest.mock import patch
 from pathlib import Path
-from agent_core import WatchConfig,RecordStore,watching_complete,verified_full_watch,is_live_or_unknown,video_identity,safe_url,clip,BrowserWatcher,PLAY_JS
+from agent_core import WatchConfig,RecordStore,watching_complete,verified_full_watch,is_live_or_unknown,video_identity,confirmed_video_change,safe_url,clip,BrowserWatcher,PLAY_JS
 
 class CoreTest(unittest.TestCase):
  def test_configuration_whitelist(self):
@@ -34,6 +34,39 @@ class CoreTest(unittest.TestCase):
   self.assertFalse(verified_full_watch(near,before,9.6,True,0.25))
   self.assertFalse(verified_full_watch(near,before,8.1,True,9))
   self.assertFalse(verified_full_watch({'duration':None,'current_time':5},before,5,True,5))
+
+ def test_metadata_and_source_loading_are_not_video_changes(self):
+  old={'found':True,'src_key':'source-a','player_key':'player-1',
+       'title':'抖音加载中','url':'https://www.douyin.com/',
+       'current_time':2.0,'ready_state':4}
+  title_update=dict(old,title='视频正文标题',url='https://www.douyin.com/discover')
+  self.assertFalse(confirmed_video_change(old,title_update))
+  loading=dict(title_update,src_key='source-b',current_time=2.9)
+  self.assertFalse(confirmed_video_change(old,loading))
+  blank=dict(old,src_key='',current_time=0.1)
+  settled=dict(blank,src_key='source-a',title='视频正文标题',current_time=0.5)
+  self.assertFalse(confirmed_video_change(blank,settled))
+  self.assertFalse(confirmed_video_change(blank,settled,after_navigation=True))
+  self.assertFalse(confirmed_video_change(old,title_update,after_navigation=True))
+  self.assertFalse(confirmed_video_change(old,old))
+
+ def test_real_change_requires_multiple_media_signals(self):
+  old={'found':True,'src_key':'source-a','player_key':'player-1',
+       'title':'视频一','current_time':8.6,'duration':10,
+       'url':'https://www.douyin.com/'}
+  another=dict(old,src_key='source-b',title='视频二',current_time=0.1)
+  self.assertTrue(confirmed_video_change(old,another))
+  self.assertTrue(confirmed_video_change(old,another,after_navigation=True))
+  altered=dict(old,src_key='source-b',current_time=8.7)
+  self.assertFalse(confirmed_video_change(old,altered))
+  player_replaced=dict(old,player_key='player-2',title='视频二',current_time=0)
+  self.assertFalse(confirmed_video_change(old,player_replaced))
+  self.assertTrue(confirmed_video_change(old,player_replaced,after_navigation=True))
+  explicit_a=dict(old,video_id='1234567890')
+  explicit_b=dict(another,video_id='9999999999')
+  self.assertTrue(confirmed_video_change(explicit_a,explicit_b))
+  same_explicit=dict(another,video_id='1234567890')
+  self.assertFalse(confirmed_video_change(explicit_a,same_explicit))
 
  def test_full_playback_sequence_and_fail_closed_seeks(self):
   class FakeClock:
