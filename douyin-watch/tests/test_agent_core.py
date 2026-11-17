@@ -4,7 +4,7 @@ import threading
 import time
 import unittest
 from pathlib import Path
-from agent_core import WatchConfig,RecordStore,watching_complete,is_live_or_unknown,video_identity,video_transition_confirmed,BrowserWatcher,safe_url,clip
+from agent_core import WatchConfig,RecordStore,watching_complete,is_live_or_unknown,video_identity,video_transition_confirmed,observed_playback_delta,BrowserWatcher,safe_url,clip
 
 class CoreTest(unittest.TestCase):
  def test_configuration_whitelist(self):
@@ -49,6 +49,25 @@ class CoreTest(unittest.TestCase):
   stop.set()
   runner.join(1)
   self.assertFalse(runner.is_alive())
+
+ def test_numeric_video_ids_distinguish_same_title_and_media(self):
+  a={'src_key':'same','title':'重复标题','url':'https://www.douyin.com/video/7512345678901234567'}
+  b={**a,'url':'https://www.douyin.com/video/7512345678901234568'}
+  self.assertTrue(video_transition_confirmed(a,b))
+  self.assertFalse(video_transition_confirmed(a,{**a,'src_key':'another-cdn'}))
+
+ def test_playback_requires_real_forward_progress(self):
+  paused={'current_time':0,'paused':True,'ready_state':0}
+  self.assertEqual(observed_playback_delta(paused,{**paused,'current_time':1,'ready_state':3}),0)
+  self.assertEqual(observed_playback_delta(paused,{'current_time':1,'paused':False,'ready_state':3}),1)
+  self.assertEqual(observed_playback_delta(paused,{'current_time':2250,'paused':False,'ready_state':4}),0)
+  self.assertEqual(observed_playback_delta({},{}),0)
+
+ def test_source_replacements_do_not_prove_playback(self):
+  paused={'current_time':0,'paused':True,'ready_state':4,'src_key':'old'}
+  replaced={**paused,'src_key':'new'}
+  self.assertFalse(video_transition_confirmed(paused,replaced))
+  self.assertEqual(observed_playback_delta(paused,replaced),0)
 
  def test_clip_and_url(self):
   self.assertEqual(clip(' a  \n b  '),'a b')

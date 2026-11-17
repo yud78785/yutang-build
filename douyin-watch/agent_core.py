@@ -79,7 +79,8 @@ PROBE_JS = r"""() => {
   return {found:true,title:title || document.title || '',url:String(link).split('?')[0],
     page_title:document.title,src_key:hash(source),duration:Number.isFinite(d)?d:null,
     current_time:Number.isFinite(t)?t:0,paused:!!v.paused,ended:!!v.ended,
-    ready_state:v.readyState,area_active:!!v.closest('[data-e2e="feed-active-video"]')};
+    ready_state:v.readyState,network_state:v.networkState,
+    area_active:!!v.closest('[data-e2e="feed-active-video"]')};
 }"""
 
 PLAY_JS = r"""async () => {
@@ -93,7 +94,7 @@ PLAY_JS = r"""async () => {
  })[0];
  if(!v) return 'NO_VIDEO';
  try {
-   if (Number.isFinite(v.duration) && v.currentTime > 2) v.currentTime=0;
+   if (!v.paused && v.readyState >= 2) return 'ALREADY_PLAYING';
    const result=await Promise.race([
      v.play().then(()=> 'PLAYING').catch(()=> 'GESTURE_REQUIRED'),
      new Promise(resolve=>setTimeout(()=>resolve('PLAY_PENDING'),2500))
@@ -173,7 +174,7 @@ def video_transition_confirmed(before: dict[str, Any], after: dict[str, Any]) ->
     """Confirm a different video without treating a changing CDN source as a new video."""
     def video_id(probe: dict[str, Any]) -> str:
         url = safe_url(str(probe.get('url') or ''))
-        match = re.search(r'/video/(\\d{10,30})(?:/|$)', url)
+        match = re.search(r'/video/(\d{10,30})(?:/|$)', url)
         return match.group(1) if match else ''
 
     old_id, new_id = video_id(before), video_id(after)
@@ -187,6 +188,20 @@ def video_transition_confirmed(before: dict[str, Any], after: dict[str, Any]) ->
         return False
     return bool(before.get('src_key') and after.get('src_key') and
                 before['src_key'] != after['src_key'])
+
+
+def observed_playback_delta(previous: dict[str, Any], current: dict[str, Any]) -> float:
+    """Only count actual forward video playback; never treat paused/seek jumps as watching."""
+    try:
+        old = float(previous.get('current_time') or 0)
+        new = float(current.get('current_time') or 0)
+        delta = new - old
+        if (not math.isfinite(delta) or delta < 0.05 or delta > 4.0 or
+                current.get('paused', True) or int(current.get('ready_state') or 0) < 2):
+            return 0.0
+        return delta
+    except (TypeError, ValueError, OverflowError):
+        return 0.0
 
 
 def watching_complete(last: dict[str, Any], previous: dict[str, Any],
@@ -265,46 +280,65 @@ class BrowserWatcher:
         except Exception:
             play_result='UNKNOWN'
         if play_result=='GESTURE_REQUIRED':
-            self.emit('status',message='浏览器禁止自动播放，尝试手动点视频画面一次。')
+            self.emit('status',message='网页阻止自动播放；请在 Edge 手动点一下视频画面。')
         previous=original
         max_progress=float(original.get('current_time') or 0)
+        observed=0.0
         start=time.monotonic()
         stalled_at=start
         stalled_value=max_progress
+        warning_sent=False
+
+        def finish(status: str, elapsed: float, probe: dict[str,Any]) -> tuple[str,float,dict[str,Any]]:
+            return status,elapsed,{**probe,'observed_playback_s':round(observed,2),
+                                   'play_request':play_result}
+
         while not self.stop.is_set():
             now=time.monotonic()
             elapsed=now-start
             if elapsed >= self.config.max_seconds_per_video:
-                return 'TIME_LIMIT',elapsed,previous
+                return finish('TIME_LIMIT',elapsed,previous)
             try:
                 current=self._probe(page)
             except Exception:
                 current={}
             if not current.get('found'):
-                if elapsed>12:return 'VIDEO_LOST',elapsed,previous
-                self._sleep(1); continue
-            # Dynamic pages replace <video> sources and titles during load. Never
-            # count metadata-only changes as a completed or skipped video.
+                if elapsed>12:
+                    return finish('VIDEO_LOST',elapsed,previous)
+                self._sleep(1)
+                continue
+            # A new CDN URL or a changing page title is not evidence of a new
+            # Douyin video. Require a confirmed transition and prior progress.
             if (video_transition_confirmed(original,current) and elapsed >= 3 and
                     max_progress >= 3 and float(previous.get('current_time') or 0) >= 3 and
                     float(current.get('current_time') or 0) <= 1.5):
-                return 'VIDEO_CHANGED',elapsed,current
+                return finish('VIDEO_CHANGED',elapsed,previous)
             t=float(current.get('current_time') or 0)
             dur=current.get('duration')
+            observed+=observed_playback_delta(previous,current)
             max_progress=max(max_progress,t)
-            if watching_complete(current,previous,max_progress):
-                return 'COMPLETE',elapsed,current
+            if observed >= 0.75 and watching_complete(current,previous,max_progress):
+                return finish('COMPLETE',elapsed,current)
             if is_live_or_unknown(current) and elapsed >= 15:
-                return 'UNKNOWN_DURATION',elapsed,current
+                return finish('UNKNOWN_DURATION',elapsed,current)
             if t > stalled_value+0.3:
-                stalled_value=t;stalled_at=now
+                stalled_value=t
+                stalled_at=now
+            if not warning_sent and elapsed>=4 and observed<0.1:
+                hint='暂停' if current.get('paused') else '未检测到时间前进'
+                self.emit('status',message=('视频尚未确认播放（'+hint+'，缓冲状态 '+
+                    str(current.get('ready_state',0))+'）。请检查 Edge 画面，必要时手动点播放。'))
+                warning_sent=True
             if now-stalled_at>12:
-                return 'PLAYBACK_STALLED',elapsed,current
+                return finish('PLAYBACK_STALLED',elapsed,current)
             if int(elapsed)%5==0:
-                self.emit('progress',elapsed=round(elapsed,1),current=round(t,1),duration=dur)
+                self.emit('progress',elapsed=round(elapsed,1),current=round(t,1),
+                          duration=dur,observed=round(observed,1),
+                          paused=bool(current.get('paused')),
+                          ready_state=current.get('ready_state'))
             previous=current
             self._sleep(1)
-        return 'STOPPED',time.monotonic()-start,previous
+        return finish('STOPPED',time.monotonic()-start,previous)
 
     def _comments(self,page:Any) -> list[str]:
         if not self.config.read_comments: return []
@@ -388,19 +422,32 @@ class BrowserWatcher:
                     self.emit('video',index=i,title=clip(current.get('title',''),100),url=safe_url(current.get('url','')))
                     status,elapsed,final=self._play_to_end(page,current)
                     if self.stop.is_set():break
-                    # Do not interpret video visuals/audio. Read only DOM content.
-                    comments=self._comments(page)
-                    try: summary=clip(page.evaluate(SUMMARY_JS),1200)
-                    except Exception: summary=''
+                    # Do not attribute the next video's comments to a lost/changed
+                    # or non-playing video. Capture only with observed playback.
+                    observed=float(final.get('observed_playback_s') or 0)
+                    trustworthy=(observed>=0.75 and status in ('COMPLETE','TIME_LIMIT'))
+                    if trustworthy:
+                        try:
+                            latest=self._probe(page)
+                            trustworthy=bool(latest.get('found')) and not video_transition_confirmed(current,latest)
+                        except Exception:
+                            trustworthy=False
+                    comments=self._comments(page) if trustworthy else []
+                    if trustworthy:
+                        try: summary=clip(page.evaluate(SUMMARY_JS),1200)
+                        except Exception: summary=''
+                    else:
+                        summary=''
                     title=clip(final.get('title') or current.get('title') or '',300)
                     record={'time':datetime.now(timezone.utc).astimezone().isoformat(timespec='seconds'),
                             'index':i,'status':status,'title':title,
                             'url':safe_url(final.get('url') or current.get('url') or page.url),
                             'duration_s':str(round(final.get('duration') or 0,1)),
-                            'watched_s':str(round(elapsed,1)),
+                            'watched_s':str(round(observed,1)),
                             'comments':' | '.join(comments),
                             'ai_summary':summary,
-                            'note':'页面无现成AI总结' if not summary else '读取页面已显示的AI总结'}
+                            'note':('已证实播放 '+str(round(observed,1))+' 秒；'+
+                                    ('页面无现成AI总结' if not summary else '读取页面已显示的AI总结'))}
                     records.append(record)
                     self.emit('record',index=i,status=status,title=title,
                               comments=len(comments),ai_summary=bool(summary))

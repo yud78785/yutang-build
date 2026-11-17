@@ -115,7 +115,8 @@ class App:
                     self._log(f'第 {data["index"]} 条：{data["title"][:120]}')
                 elif kind=='progress':
                     dur=data.get('duration');d='未知' if dur is None else str(round(dur,1))+'s'
-                    self.progress.set(f'视频进度：{data["current"]}s / {d}（程序已等待 {data["elapsed"]}s）')
+                    state='暂停/缓冲' if data.get('paused') else '可能播放中'
+                    self.progress.set(f'视频进度：{data["current"]}s / {d}；实测推进 {data.get("observed",0)}s（{state}）')
                 elif kind=='record':
                     self._log(f'记录 #{data["index"]} {data["status"]} | 可见评论 {data["comments"]} 条 | 页面AI总结 {"有" if data["ai_summary"] else "未取得"}')
                 elif kind=='error':
