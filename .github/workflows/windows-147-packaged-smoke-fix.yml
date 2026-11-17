@@ -29,6 +29,7 @@ on:
       - tests/windows147-safe-defaults.test.mjs
       - tests/chat-starting-recovery.test.mjs
       - tests/windows147-prepare-handoff-playback.test.mjs
+      - tests/windows147-runtime-profile-isolation.test.mjs
   workflow_dispatch:
 
 permissions:
@@ -236,8 +237,9 @@ jobs:
           $testRuntime = Join-Path $testProfile '.yutang-observer-isolated'
           $testMemory = Join-Path $testRuntime 'memory'
           $testMedia = Join-Path $testRuntime 'media'
-          $testTemp = Join-Path $testProfile 'temp'
-          foreach ($directory in @($testRuntime,$testMemory,$testMedia,$testTemp,(Join-Path $testRuntime 'state'),(Join-Path $testMedia '.models'),(Join-Path $testProfile 'app-data'),(Join-Path $testProfile 'local-app-data'))) {
+          $testBrowserProfile = Join-Path $testRuntime 'cli-profile'
+          $testBrowserControl = Join-Path $testRuntime 'control'
+          foreach ($directory in @($testRuntime,$testMemory,$testMedia,$testBrowserProfile,$testBrowserControl,(Join-Path $testRuntime 'state'),(Join-Path $testMedia '.models'))) {
             New-Item -ItemType Directory -Path $directory -Force | Out-Null
           }
           $runtimeLocation = Join-Path $testRuntime 'runtime-location.json'
@@ -254,24 +256,19 @@ jobs:
           $record | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $runtimeLocation -Encoding utf8
           Set-Content -LiteralPath $record.mediaEnvFile -Value '' -Encoding utf8
           '{"enabled":false,"backend":"local-whisper"}' | Set-Content -LiteralPath $record.mediaSettingsFile -Encoding utf8
-          $env:USERPROFILE = $testProfile
-          $env:HOME = $testProfile
-          $env:APPDATA = Join-Path $testProfile 'app-data'
-          $env:LOCALAPPDATA = Join-Path $testProfile 'local-app-data'
-          $env:TEMP = $testTemp
-          $env:TMP = $testTemp
-          $env:DSH_HOME = Join-Path $testProfile '.dsh'
           $env:DOUYIN_RUNTIME_LOCATION_FILE = $runtimeLocation
+          $env:DOUYIN_BROWSER_PROFILE_DIR = $testBrowserProfile
+          $env:DOUYIN_BROWSER_CONTROL_DIR = $testBrowserControl
           $nodeHome = node -p "require('node:os').homedir()"
-          if ([IO.Path]::GetFullPath($nodeHome) -ne [IO.Path]::GetFullPath($testProfile)) { throw 'SOURCE_TEST_PROFILE_OVERRIDE_NOT_ACTIVE' }
-          Write-Host 'SOURCE_TEST_USERPROFILE=RUNNER_TEMP; native runner profile remains reserved for the subsequent packaged lifecycle test'
+          if ([IO.Path]::GetFullPath($nodeHome) -ne [IO.Path]::GetFullPath($nativeProfile)) { throw 'SOURCE_TEST_NATIVE_PROFILE_PRESERVED_NOT_ACTIVE' }
+          Write-Host 'SOURCE_TEST_RUNTIME_ROOT=RUNNER_TEMP; native Windows USERPROFILE, APPDATA and Edge token remain unchanged'
           node tools/patch_windows147_test_fixtures.mjs upstream
           if ($LASTEXITCODE -ne 0) { throw 'WINDOWS_TEST_FIXTURE_PATCH_FAILED' }
           node tests/test_windows147_test_fixtures.mjs
           if ($LASTEXITCODE -ne 0) { throw 'WINDOWS_TEST_FIXTURE_PATCH_REGRESSION_FAILED' }
           Push-Location upstream
           $env:YUTANG_PREPARE_HANDOFF_RECEIPT = Join-Path $PWD 'prepare-handoff-playback.json'
-          node --test tests/openrouter-production-compat.test.mjs tests/api-agent.test.mjs tests/chat.test.mjs tests/spark-agent.test.mjs tests/public-comment-agent.test.mjs tests/friend-interactions.test.mjs tests/friend-auto-prepare.test.mjs tests/friend-chat-share-isolation.test.mjs tests/chat-starting-recovery.test.mjs tests/browser-launcher-adopt.test.mjs tests/shared-browser-pages.test.mjs tests/scheduled-watch.test.mjs tests/autonomous-watch.test.mjs ../tests/windows147-prepare-handoff-playback.test.mjs desktop/tests/*.test.mjs desktop/ui-api/tests/openrouter-preset.test.mjs
+          node --test tests/openrouter-production-compat.test.mjs tests/api-agent.test.mjs tests/chat.test.mjs tests/spark-agent.test.mjs tests/public-comment-agent.test.mjs tests/friend-interactions.test.mjs tests/friend-auto-prepare.test.mjs tests/friend-chat-share-isolation.test.mjs tests/chat-starting-recovery.test.mjs tests/browser-launcher-adopt.test.mjs tests/shared-browser-pages.test.mjs tests/scheduled-watch.test.mjs tests/autonomous-watch.test.mjs ../tests/windows147-runtime-profile-isolation.test.mjs ../tests/windows147-prepare-handoff-playback.test.mjs desktop/tests/*.test.mjs desktop/ui-api/tests/openrouter-preset.test.mjs
           $testExitCode = $LASTEXITCODE
           Remove-Item Env:YUTANG_PREPARE_HANDOFF_RECEIPT -ErrorAction SilentlyContinue
           Pop-Location

@@ -25,7 +25,7 @@
       "path": "runtime-paths.mjs",
       "patchFile": "runtime-paths.mjs",
       "originalGitBlobSha1": "9613e700115e989dee3af6578044ca52eaf51781",
-      "patchedGitBlobSha1": "5163509ec0a9e45e49d306bae0e7fe0977b6008a"
+      "patchedGitBlobSha1": "6a46a0e126c5582457d6fe6fa7e0cd3f7aea25a8"
     },
     {
       "path": "desktop/src/prepare-api-runtime.mjs",

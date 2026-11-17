@@ -12,6 +12,8 @@ const FIELDS = {
   mediaSettingsFile: 'DOUYIN_MEDIA_SETTINGS_FILE',
   mediaRuntimeRoot: 'DOUYIN_MEDIA_RUNTIME_ROOT',
   mediaModelsDir: 'DOUYIN_MEDIA_MODELS_DIR',
+  browserProfileDir: 'DOUYIN_BROWSER_PROFILE_DIR',
+  browserControlDir: 'DOUYIN_BROWSER_CONTROL_DIR',
 };
 
 function absolute(value, label) {
@@ -49,8 +51,8 @@ export function resolveRuntimePaths({ env = process.env, home = homedir(), sourc
     mediaRuntimeRoot,
     mediaModelsDir: selected('mediaModelsDir', path.join(mediaRuntimeRoot, '.models')),
     mediaCaptureDir: path.join(stateDir, 'media-captures'),
-    browserProfileDir: path.join(home, '.yutang-observer-isolated', 'cli-profile'),
-    browserControlDir: path.join(home, '.yutang-observer-isolated', 'control'),
+    browserProfileDir: selected('browserProfileDir', path.join(home, '.yutang-observer-isolated', 'cli-profile')),
+    browserControlDir: selected('browserControlDir', path.join(home, '.yutang-observer-isolated', 'control')),
   };
 }
 
