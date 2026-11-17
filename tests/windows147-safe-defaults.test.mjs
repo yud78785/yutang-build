@@ -61,7 +61,7 @@ test('packaged verifier asserts UI and API default off before explicit opt in', 
     `  assert.equal(await page.getByRole('switch', { name: '${label}', exact: true }).getAttribute('aria-checked'), 'true');`,
     "  assert.equal(checks.status['/api/interactions/state'].policy.enabled, false);",
     '  const receipt = { renderer: { friendMasterDefaultEnabled:true } };'
-  ].join('\\n');
+  ].join('\n');
   const patched = patchText('desktop/scripts/verify-packaged-api.mjs', source);
   assert.ok(patched.includes('assert.equal(friendMasterDefaultEnabled, false'));
   assert.ok(patched.includes("getAttribute('aria-checked'), 'false'"));

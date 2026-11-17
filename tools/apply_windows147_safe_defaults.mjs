@@ -44,7 +44,7 @@ function patchVerifier(source) {
     `  await until(async () => (await readStatus('/api/interactions/state')).policy.enabled === true);`,
     `  await until(async () => await page.getByRole('switch', { name: '${label}', exact: true }).getAttribute('aria-checked') === 'true');`,
     `  assert.equal(await page.getByRole('switch', { name: '${label}', exact: true }).getAttribute('aria-checked'), 'true');`,
-  ].join('\\n');
+  ].join('\n');
   const after = [
     `  await page.getByRole('switch', { name: '${label}', exact: true }).waitFor();`,
     `  const friendMasterDefaultEnabled = (await readStatus('/api/interactions/state')).policy.enabled;`,
@@ -54,7 +54,7 @@ function patchVerifier(source) {
     `  await until(async () => (await readStatus('/api/interactions/state')).policy.enabled === true);`,
     `  await until(async () => await page.getByRole('switch', { name: '${label}', exact: true }).getAttribute('aria-checked') === 'true');`,
     `  assert.equal(await page.getByRole('switch', { name: '${label}', exact: true }).getAttribute('aria-checked'), 'true');`,
-  ].join('\\n');
+  ].join('\n');
   let result = replaceOnce(source, before, after, 'packaged verifier proves default off before explicit opt in');
   return replaceOnce(
     result,
