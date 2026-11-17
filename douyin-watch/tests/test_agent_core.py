@@ -121,7 +121,8 @@ class CoreTest(unittest.TestCase):
    second=RecordStore(out)
    self.assertNotEqual(first.path,second.path)
    self.assertEqual(first.path.read_bytes(),original)
-   row=next(csv.DictReader(first.path.open(encoding='utf-8-sig',newline='')))
+   with first.path.open(encoding='utf-8-sig',newline='') as fp:
+    row=next(csv.DictReader(fp))
    self.assertTrue(row['title'].startswith("'="))
    self.assertTrue(row['comments'].startswith("'+"))
    self.assertTrue(row['ai_summary'].startswith("'@"))
