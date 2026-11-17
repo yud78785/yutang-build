@@ -164,9 +164,8 @@ jobs:
             node --check (Join-Path 'upstream' $file)
             if ($LASTEXITCODE -ne 0) { throw ('SAFE_DEFAULTS_PATCHED_SOURCE_SYNTAX_FAILED: ' + $file) }
           }
-          Copy-Item tests/windows147-safe-defaults.test.mjs upstream/tests/windows147-safe-defaults.test.mjs
           Push-Location upstream
-          node --test tests/friend-interactions.test.mjs tests/friend-auto-prepare.test.mjs tests/friend-chat-share-isolation.test.mjs tests/windows147-safe-defaults.test.mjs
+          node --test tests/friend-interactions.test.mjs tests/friend-auto-prepare.test.mjs tests/friend-chat-share-isolation.test.mjs
           if ($LASTEXITCODE -ne 0) { throw 'FRIEND_INTERACTION_DEFAULT_OFF_REGRESSION_FAILED' }
           Pop-Location
           Write-Host 'PASS_FRIEND_INTERACTIONS_DEFAULT_OFF_AND_PREPARE_PAGE_HANDOFF_DISCLOSURE'

@@ -14,17 +14,15 @@ test('missing policy test proves no automatic actions', () => {
   assert.match(patched, /f\.shared\.enabled, false/);
 });
 
-test('auto-prepare unit fixture explicitly opts in', () => {
-  const source = 'const create = (chat = service, extra = {}) => { const coordinator = new FriendInteractions({ stateDir, getChat: () => chat, getShare: () => share, modelReady: () => true, startChat: async (value, { signal }) => { calls.start++; return value.start({ schedule: false, signal }); }, ...extra }); coordinators.push(coordinator); return coordinator; };';
+test('auto-prepare unit and Edge fixtures explicitly opt in', () => {
+  const source = [
+    'const create = (chat = service, extra = {}) => { const coordinator = new FriendInteractions({ stateDir, getChat: () => chat, getShare: () => share, modelReady: () => true, startChat: async (value, { signal }) => { calls.start++; return value.start({ schedule: false, signal }); }, ...extra }); coordinators.push(coordinator); return coordinator; };',
+    "const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'douyin-auto-prepare-edge-')), controlDirectory = path.join(stateDir, 'control'); fs.mkdirSync(controlDirectory);"
+  ].join('\\n');
   const patched = patchText('tests/friend-auto-prepare.test.mjs', source);
-  assert.match(patched, /friend-interactions-policy\.json/);
+  assert.match(patched, /friend-interactions-policy\\.json/);
   assert.match(patched, /enabled: true/);
-});
-
-test('Edge prepare fixture explicitly opts in', () => {
-  const source = "const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'douyin-auto-prepare-edge-')), controlDirectory = path.join(stateDir, 'control'); fs.mkdirSync(controlDirectory);";
-  const patched = patchText('tests/friend-auto-prepare.test.mjs', source);
-  assert.match(patched, /friend-interactions-policy\.json/);
+  assert.match(patched, /fs\\.writeFileSync\\(path\\.join\\(stateDir/);
 });
 
 test('chat and share isolation fixture explicitly opts in', () => {
