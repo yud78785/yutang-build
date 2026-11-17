@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from playwright.sync_api import sync_playwright
-from agent_core import PROBE_JS, COMMENTS_JS, SUMMARY_JS, BrowserWatcher, WatchConfig
+from agent_core import PROBE_JS, PLAY_JS, COMMENTS_JS, SUMMARY_JS, BrowserWatcher, WatchConfig, confirmed_video_change
 
 HTML = '''<!doctype html><html><head><title>抖音-本地模拟</title></head><body>
 <div id="old" style="display:none"><video id="oldvideo" style="width:400px;height:600px"></video><h1>旧标题</h1></div>
@@ -71,9 +71,30 @@ class BrowserDOMTests(unittest.TestCase):
    image=Path(temp)/'frames'/'video-001-progress-10.png'
    self.assertTrue(image.exists())
    self.assertTrue(image.read_bytes().startswith(b'\x89PNG\r\n\x1a\n'))
-   self.page.evaluate("document.querySelector('[data-e2e=video-desc]').textContent='视频切换了'")
+   # A title update alone must not invalidate the same live player.
+   self.page.evaluate("document.querySelector('[data-e2e=video-desc]').textContent='标题加载完成'")
    w._capture_frame(self.page,1,50,probe)
-   self.assertFalse((Path(temp)/'frames'/'video-001-progress-50.png').exists())
+   self.assertTrue((Path(temp)/'frames'/'video-001-progress-50.png').exists())
+   # A new source and title plus real progress reset IS a change.
+   self.page.evaluate("window.mockTime=6.5")
+   previous=self.page.evaluate(PROBE_JS)
+   self.page.evaluate("""() => {
+     window.mockTime=0;
+     document.getElementById('now').setAttribute('src','https://example.invalid/another.webm');
+     document.querySelector('[data-e2e=video-desc]').textContent='另一条视频';
+   }""")
+   w._capture_frame(self.page,1,85,previous)
+   self.assertFalse((Path(temp)/'frames'/'video-001-progress-85.png').exists())
+
+ def test_playback_does_not_seek_or_restart_an_already_playing_video(self):
+  self.page.evaluate("window.mockTime=4.5")
+  before=self.page.evaluate(PROBE_JS)
+  self.assertTrue(before['found'])
+  result=self.page.evaluate(PLAY_JS)
+  self.assertEqual(result,'ALREADY_PLAYING')
+  self.assertAlmostEqual(self.page.evaluate("window.mockTime"),4.5)
+  after=self.page.evaluate(PROBE_JS)
+  self.assertFalse(confirmed_video_change(before,after))
 
  def test_arrow_down_actually_changes_active_video(self):
   w=BrowserWatcher(WatchConfig(count=2),threading.Event(),lambda *_:None)
