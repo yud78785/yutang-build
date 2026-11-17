@@ -85,10 +85,14 @@ export function patchText(file, source) {
       "  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'douyin-auto-prepare-')), calls = { prepare: 0, start: 0, model: 0, sent: 0 }; let present = true;",
       "  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'douyin-auto-prepare-')), calls = { prepare: 0, start: 0, model: 0, sent: 0 }; let present = true;\n  fs.writeFileSync(path.join(stateDir, 'friend-interactions-policy.json'), JSON.stringify({ version: 1, enabled: true }));",
       'auto prepare unit fixture explicit opt in');
-    return replaceOnce(result,
+    result = replaceOnce(result,
       "const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'douyin-auto-prepare-edge-')), controlDirectory = path.join(stateDir, 'control'); fs.mkdirSync(controlDirectory);",
       "const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'douyin-auto-prepare-edge-')), controlDirectory = path.join(stateDir, 'control'); fs.mkdirSync(controlDirectory); fs.writeFileSync(path.join(stateDir, 'friend-interactions-policy.json'), JSON.stringify({ version: 1, enabled: true }));",
       'Edge prepare explicit opt in');
+    return replaceOnce(result,
+      "DEEPSEEK_SHARED_MEMORY_DB: path.join(directory, 'memory', 'absent.sqlite') } });",
+      "DEEPSEEK_SHARED_MEMORY_DB: path.join(directory, 'memory', 'absent.sqlite'), DOUYIN_BROWSER_PROFILE_DIR: path.join(directory, '.yutang-observer-isolated', 'cli-profile'), DOUYIN_BROWSER_CONTROL_DIR: path.join(directory, '.yutang-observer-isolated', 'control') } });",
+      'child probe uses its own temporary browser profile and control directory');
   }
   if (file === 'tests/chat-starting-recovery.test.mjs') return replaceOnce(
     source,

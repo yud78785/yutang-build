@@ -22,13 +22,16 @@ test('missing friend policy test proves disabled state and zero actions', () => 
   assert.ok(patched.includes('f.shared.enabled, false'));
 });
 
-test('auto-prepare unit and Edge fixtures explicitly opt in', () => {
+test('auto-prepare fixtures explicitly opt in and child probes use their own temporary browser directories', () => {
   const unit = "  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'douyin-auto-prepare-')), calls = { prepare: 0, start: 0, model: 0, sent: 0 }; let present = true;";
   const edge = "const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'douyin-auto-prepare-edge-')), controlDirectory = path.join(stateDir, 'control'); fs.mkdirSync(controlDirectory);";
-  const patched = patchText('tests/friend-auto-prepare.test.mjs', unit + '\\n' + edge);
+  const child = "DEEPSEEK_SHARED_MEMORY_DB: path.join(directory, 'memory', 'absent.sqlite') } });";
+  const patched = patchText('tests/friend-auto-prepare.test.mjs', unit + '\\n' + edge + '\\n' + child);
   assert.ok(patched.includes('friend-interactions-policy.json'));
   assert.ok(patched.includes('enabled: true'));
   assert.ok(patched.includes('douyin-auto-prepare-'));
+  assert.ok(patched.includes("DOUYIN_BROWSER_PROFILE_DIR: path.join(directory, '.yutang-observer-isolated', 'cli-profile')"));
+  assert.ok(patched.includes("DOUYIN_BROWSER_CONTROL_DIR: path.join(directory, '.yutang-observer-isolated', 'control')"));
 });
 test('chat starting recovery fixture explicitly opts in', () => {
   const source = "  let starts=0;const friend=new FriendInteractions({stateDir,getChat:()=>service,getShare:()=>({state:()=>({enabled:true}),configure:async()=>{}}),modelReady:()=>true,startChat:async chat=>{starts++;return chat.start({schedule:false});}});";
