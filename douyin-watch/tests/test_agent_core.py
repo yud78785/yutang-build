@@ -1,8 +1,10 @@
 import csv
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
-from agent_core import WatchConfig,RecordStore,watching_complete,is_live_or_unknown,video_identity,safe_url,clip
+from agent_core import WatchConfig,RecordStore,watching_complete,is_live_or_unknown,video_identity,video_transition_confirmed,BrowserWatcher,safe_url,clip
 
 class CoreTest(unittest.TestCase):
  def test_configuration_whitelist(self):
@@ -24,6 +26,30 @@ class CoreTest(unittest.TestCase):
    self.assertNotIn('SECRET',raw)
    self.assertIn('https://www.douyin.com/video/123',raw)
    self.assertIn('你好 世界',raw)
+ def test_video_source_replacement_is_not_new_video(self):
+  base={'src_key':'placeholder','title':'抖音首页','page_title':'抖音首页','url':'https://www.douyin.com/'}
+  loaded={'src_key':'media1','title':'真实视频','page_title':'抖音首页','url':'https://www.douyin.com/'}
+  self.assertFalse(video_transition_confirmed(base,loaded))
+  self.assertFalse(video_transition_confirmed(loaded,{**loaded,'src_key':'media2'}))
+  self.assertFalse(video_transition_confirmed({**loaded,'url':'https://www.douyin.com/video/7512345678901234567'}, {**loaded,'src_key':'media3','url':'https://www.douyin.com/video/7512345678901234567'}))
+  self.assertTrue(video_transition_confirmed({**loaded,'url':'https://www.douyin.com/video/7512345678901234567'}, {**loaded,'src_key':'other','title':'第二条','url':'https://www.douyin.com/video/7512345678901234568'}))
+  self.assertTrue(video_transition_confirmed(loaded,{**loaded,'src_key':'media3','title':'第二条'}))
+
+ def test_browser_stays_open_until_explicit_stop(self):
+  stop=threading.Event()
+  events=[]
+  watcher=BrowserWatcher(WatchConfig(count=1),stop,lambda kind,payload:events.append((kind,payload)))
+  class FakePage:
+   def is_closed(self): return False
+  runner=threading.Thread(target=watcher._hold_browser_until_user_stops,args=(FakePage(),))
+  runner.start()
+  time.sleep(0.1)
+  self.assertTrue(runner.is_alive())
+  self.assertTrue(any(kind=='status' and 'Edge' in payload.get('message','') for kind,payload in events))
+  stop.set()
+  runner.join(1)
+  self.assertFalse(runner.is_alive())
+
  def test_clip_and_url(self):
   self.assertEqual(clip(' a  \n b  '),'a b')
   self.assertEqual(safe_url('javascript:alert(1)'),'')

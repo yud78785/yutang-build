@@ -130,11 +130,19 @@ class App:
         self.root.after(120,self._poll)
 
     def on_close(self):
-        self.stop_event.set()
         if self.worker and self.worker.is_alive():
-            if not messagebox.askyesno('正在运行','本次自动浏览尚未停止，确定关闭程序？\n建议先点击“停止并关闭本次 Edge”。'):
+            if not messagebox.askyesno('正在运行','关闭鱼塘将停止本次自动浏览并关闭专用 Edge，确认吗？'):
                 return
+            self.stop()
+            self._finish_close()
+            return
         self.root.destroy()
+
+    def _finish_close(self):
+        if self.worker and self.worker.is_alive():
+            self.root.after(150,self._finish_close)
+        else:
+            self.root.destroy()
 
 
 def self_test() -> None:

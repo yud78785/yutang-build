@@ -169,6 +169,26 @@ def video_identity(probe: dict[str, Any]) -> str:
     return '|'.join(str(probe.get(k) or '') for k in ('src_key','title','url'))
 
 
+def video_transition_confirmed(before: dict[str, Any], after: dict[str, Any]) -> bool:
+    """Confirm a different video without treating a changing CDN source as a new video."""
+    def video_id(probe: dict[str, Any]) -> str:
+        url = safe_url(str(probe.get('url') or ''))
+        match = re.search(r'/video/(\\d{10,30})(?:/|$)', url)
+        return match.group(1) if match else ''
+
+    old_id, new_id = video_id(before), video_id(after)
+    if old_id and new_id:
+        return old_id != new_id
+    old_title, new_title = clip(str(before.get('title') or '')), clip(str(after.get('title') or ''))
+    if not old_title or not new_title or old_title == new_title:
+        return False
+    # The generic Douyin tab title becoming a real video title is normal startup, not a transition.
+    if old_title == clip(str(before.get('page_title') or '')) or new_title == clip(str(after.get('page_title') or '')):
+        return False
+    return bool(before.get('src_key') and after.get('src_key') and
+                before['src_key'] != after['src_key'])
+
+
 def watching_complete(last: dict[str, Any], previous: dict[str, Any],
                       max_observed_time: float, min_duration: float = 1.5) -> bool:
     """Recognize end-of-video/near-end or looping player after reaching >85%."""
@@ -263,7 +283,11 @@ class BrowserWatcher:
             if not current.get('found'):
                 if elapsed>12:return 'VIDEO_LOST',elapsed,previous
                 self._sleep(1); continue
-            if video_identity(current)!=video_identity(original):
+            # Dynamic pages replace <video> sources and titles during load. Never
+            # count metadata-only changes as a completed or skipped video.
+            if (video_transition_confirmed(original,current) and elapsed >= 3 and
+                    max_progress >= 3 and float(previous.get('current_time') or 0) >= 3 and
+                    float(current.get('current_time') or 0) <= 1.5):
                 return 'VIDEO_CHANGED',elapsed,current
             t=float(current.get('current_time') or 0)
             dur=current.get('duration')
@@ -303,6 +327,7 @@ class BrowserWatcher:
         before=video_identity(old)
         try: page.keyboard.press('Escape')
         except Exception: pass
+        candidate_identity=None
         for action in ('ArrowDown','wheel','PageDown'):
             if self.stop.is_set():return False
             try:
@@ -314,10 +339,25 @@ class BrowserWatcher:
                 if self._sleep(0.75): return False
                 try:
                     p=self._probe(page)
-                    if p.get('found') and video_identity(p)!=before:
-                        return True
+                    if p.get('found') and video_identity(p)!=before and video_transition_confirmed(old,p):
+                        signature=video_identity(p)
+                        if signature==candidate_identity:
+                            return True
+                        candidate_identity=signature
+                    else:
+                        candidate_identity=None
                 except Exception: pass
         return False
+
+    def _hold_browser_until_user_stops(self,page:Any) -> None:
+        """Keep the Playwright-owned Edge open after a finite watch session."""
+        if self.stop.is_set(): return
+        self.emit('status',message='本轮检测已结束。Edge 会保持打开；点击“停止并关闭本次 Edge”才关闭浏览器。')
+        while not self.stop.wait(0.5):
+            try:
+                if page.is_closed(): break  # A manual browser close is respected.
+            except Exception:
+                break
 
     def run(self) -> None:
         from playwright.sync_api import sync_playwright
@@ -339,9 +379,8 @@ class BrowserWatcher:
                 except Exception as e: self.emit('status',message='网页加载可能受限：'+clip(str(e),150))
                 current=self._wait_first_video(page)
                 if not current:
-                    self.emit('error',message='未找到可见视频。请检查抖音访问/登录或在 Edge 打开视频后重试。')
-                    return
-                for i in range(1,self.config.count+1):
+                    self.emit('error',message='未找到可见视频。Edge 保持打开，方便手动排查；关闭请点停止按钮。')
+                for i in (range(1,self.config.count+1) if current else ()):
                     if self.stop.is_set(): break
                     if i>1:
                         current=self._probe(page)
@@ -365,14 +404,15 @@ class BrowserWatcher:
                     records.append(record)
                     self.emit('record',index=i,status=status,title=title,
                               comments=len(comments),ai_summary=bool(summary))
-                    if status=='PLAYBACK_STALLED':
-                        self.emit('error',message='视频未能播放，已安全停止。请在 Edge 手动确认播放/登录后重新开始。')
+                    if status!='COMPLETE':
+                        self.emit('error',message='未能确认视频完整播放（'+status+'）；停止自动切换，Edge 保持打开供手动检查。')
                         break
                     if i < self.config.count:
                         if not self._next_video(page,final):
                             self.emit('error',message='无法确认切换到新视频，停止以避免重复播放和误记。')
                             break
                 self.emit('done',message='本次观看结束。记录：'+str(records.path))
+                self._hold_browser_until_user_stops(page)
         except Exception as e:
             self.emit('error',message='浏览器启动或运行失败：'+clip(str(e),330))
             self.emit('done',message='可查看日志目录：'+str(records.path))
