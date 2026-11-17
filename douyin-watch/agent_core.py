@@ -12,6 +12,7 @@ import math
 import os
 import queue
 import re
+import secrets
 import threading
 import time
 from dataclasses import dataclass
@@ -212,12 +213,19 @@ class RecordStore:
 
     def __init__(self, output_dir: Path):
         output_dir.mkdir(parents=True, exist_ok=True)
-        self.path = output_dir / ('DouyinWatch-'+datetime.now().strftime('%Y%m%d-%H%M%S')+'.csv')
-        with self.path.open('w',encoding='utf-8-sig',newline='') as f:
+        self.path = output_dir / ('DouyinWatch-'+datetime.now().strftime('%Y%m%d-%H%M%S-%f')+'-'+secrets.token_hex(4)+'.csv')
+        # Exclusive creation: never overwrite a different session's evidence.
+        with self.path.open('x',encoding='utf-8-sig',newline='') as f:
             csv.DictWriter(f,fieldnames=self.COLUMNS).writeheader()
 
     def append(self, record: dict[str,Any]) -> None:
         sanitized={k:clip(str(record.get(k,'')),1200 if k in ('comments','ai_summary') else 300) for k in self.COLUMNS}
+        # Titles/comments are untrusted web content. Excel/WPS can interpret
+        # formula-like CSV cells as executable expressions when opened.
+        for field in ('title','comments','ai_summary','note'):
+            value=sanitized[field]
+            if value and value[0] in ('=','+','-','@'):
+                sanitized[field]="'"+value
         sanitized['url'] = safe_url(sanitized['url'])
         with self.path.open('a',encoding='utf-8-sig',newline='') as f:
             csv.DictWriter(f,fieldnames=self.COLUMNS).writerow(sanitized)
@@ -234,6 +242,7 @@ class BrowserWatcher:
         self.output_dir=output_dir or data_dir()
         self.launch_kwargs=launch_kwargs or {}
         self._last_frames: list[str] = []
+        self._frame_dir_name = 'frames'
 
     def emit(self, kind: str, **fields: Any) -> None:
         self.publish(kind,fields)
@@ -275,7 +284,7 @@ class BrowserWatcher:
                 return
             if rect['width']<90 or rect['height']<90:
                 return
-            directory=self.output_dir/'frames'
+            directory=self.output_dir/self._frame_dir_name
             directory.mkdir(parents=True,exist_ok=True)
             filename=f'video-{index:03d}-progress-{mark:02d}.png'
             page.screenshot(path=str(directory/filename),clip=rect,timeout=3000)
@@ -408,6 +417,7 @@ class BrowserWatcher:
     def run(self) -> None:
         from playwright.sync_api import sync_playwright
         records=RecordStore(self.output_dir)
+        self._frame_dir_name=records.path.stem+'-frames'
         self.emit('started',csv=str(records.path))
         context=None
         try:
@@ -462,7 +472,7 @@ class BrowserWatcher:
                             'watched_s':str(round(elapsed,1)),
                             'comments':' | '.join(comments),
                             'ai_summary':summary,
-                            'frame_samples':' | '.join(self._last_frames),
+                            'frame_samples':' | '.join(self._frame_dir_name+'/'+name for name in self._last_frames),
                             'audio_status':player_audio,
                             'note':('页面无现成AI总结' if not summary else '读取页面已显示的AI总结') if status=='COMPLETE' else '未确认完整播放；内容未归属'}
                     records.append(record)
