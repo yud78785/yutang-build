@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { resolveRuntimePaths } from '../upstream/runtime-paths.mjs';
+import { ensureSharedLocation } from '../upstream/desktop/src/prepare-api-runtime.mjs';
 
 function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'yutang-runtime-profile-isolation-'));
@@ -65,4 +66,25 @@ test('browser profile and control defaults remain under the real home when no ov
   });
   assert.equal(paths.browserProfileDir, path.join(f.nativeHome, '.yutang-observer-isolated', 'cli-profile'));
   assert.equal(paths.browserControlDir, path.join(f.nativeHome, '.yutang-observer-isolated', 'control'));
+});
+
+
+test('packaged smoke shares its temporary memory and state without touching the native Windows home', async t => {
+  const f = fixture(t);
+  const result = await ensureSharedLocation({
+    env: {
+      DOUYIN_RUNTIME_LOCATION_FILE: f.locationFile,
+      DOUYIN_BROWSER_PROFILE_DIR: f.browserProfileDir,
+      DOUYIN_BROWSER_CONTROL_DIR: f.browserControlDir,
+    },
+    home: f.nativeHome,
+    resolve: resolveRuntimePaths,
+  });
+  assert.equal(result.paths.memoryDir, f.memoryDir);
+  assert.equal(result.paths.memoryDbPath, path.join(f.memoryDir, 'shared.sqlite'));
+  assert.equal(result.paths.stateDir, f.stateDir);
+  assert.equal(result.paths.browserProfileDir, f.browserProfileDir);
+  assert.equal(result.paths.browserControlDir, f.browserControlDir);
+  assert.equal(result.env.DEEPSEEK_SHARED_MEMORY_DB, path.join(f.memoryDir, 'shared.sqlite'));
+  assert.equal(fs.existsSync(path.join(f.nativeHome, '.yutang-observer-isolated')), false);
 });
