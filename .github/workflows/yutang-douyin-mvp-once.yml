@@ -1,0 +1,85 @@
+name: YuTang Douyin Read-only MVP - one-shot Windows EXE candidate
+
+on:
+  push:
+    branches:
+      - experiment/yutang-douyin-mvp-20261117
+    paths:
+      - douyin-watch/BUILD_ONCE.approved
+
+permissions:
+  contents: read
+concurrency:
+  group: yutang-douyin-mvp-once
+  cancel-in-progress: false
+
+jobs:
+  windows-portable:
+    if: >-
+      github.repository == 'yud78785/yutang-build' &&
+      github.ref == 'refs/heads/experiment/yutang-douyin-mvp-20261117' &&
+      github.actor == 'yud78785' &&
+      github.run_attempt == 1 &&
+      github.event.head_commit.message == 'build: yutang douyin portable MVP once'
+    runs-on: windows-2022
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: douyin-watch
+    steps:
+      - name: Checkout exact experimental source (no persisted Git credentials)
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - name: Require exact single-file once-only build marker
+        shell: pwsh
+        run: |
+          $paths = @(git diff-tree --no-commit-id --name-only -r HEAD | Where-Object { $_ -ne '' })
+          if ($paths.Count -ne 1 -or $paths[0] -ne 'douyin-watch/BUILD_ONCE.approved') { throw 'Unexpected marker commit changes' }
+          $actual = [System.IO.File]::ReadAllText((Join-Path $PWD 'BUILD_ONCE.approved'))
+          if ($actual -ne "BUILD_YUTANG_DOUYIN_MVP_ONCE`n") { throw 'Marker content mismatch' }
+          $parents = (git rev-list --parents -n 1 HEAD).Trim().Split(' ')
+          if ($parents.Count -ne 2) { throw 'Marker commit must have one parent' }
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned build dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check --requirement requirements-win.txt
+          python -m pip show playwright pyinstaller
+      - name: Run offline tests (real Microsoft Edge DOM test included)
+        shell: pwsh
+        run: |
+          $env:PYTHONPATH = "$PWD"
+          python app.py --self-test
+          if ($LASTEXITCODE -ne 0) { throw 'Self-test failed' }
+          python -m unittest discover -s tests -v
+          if ($LASTEXITCODE -ne 0) { throw 'Unittest failed' }
+          python app.py --browser-smoke
+          if ($LASTEXITCODE -ne 0) { throw 'Edge smoke failed' }
+      - name: Build one-file Windows GUI EXE
+        shell: pwsh
+        run: |
+          python -m PyInstaller --noconfirm --clean --onefile --windowed --name YuTangDouyinWatch --collect-all playwright --paths . app.py
+          if ($LASTEXITCODE -ne 0) { throw 'PyInstaller failed' }
+          if (!(Test-Path 'dist/YuTangDouyinWatch.exe')) { throw 'Missing EXE' }
+      - name: Validate exact packaged EXE without Douyin or internet
+        shell: pwsh
+        run: |
+          $exe = (Resolve-Path 'dist/YuTangDouyinWatch.exe').Path
+          $a = Start-Process -FilePath $exe -ArgumentList '--self-test' -PassThru -Wait
+          if ($a.ExitCode -ne 0) { throw "Packaged self-test exit $($a.ExitCode)" }
+          $b = Start-Process -FilePath $exe -ArgumentList '--browser-smoke' -PassThru -Wait
+          if ($b.ExitCode -ne 0) { throw "Packaged Edge smoke exit $($b.ExitCode)" }
+          Get-FileHash $exe -Algorithm SHA256 | Format-List
+          Get-Item $exe | Select-Object FullName,Length
+      - name: Upload isolated candidate, not a release
+        uses: actions/upload-artifact@v4
+        with:
+          name: YuTangDouyinWatch-Windows-Portable-${{ github.run_id }}
+          path: douyin-watch/dist/YuTangDouyinWatch.exe
+          if-no-files-found: error
+          retention-days: 14
