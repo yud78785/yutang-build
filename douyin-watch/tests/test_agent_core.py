@@ -2,8 +2,9 @@ import csv
 import tempfile
 import unittest
 import threading
+from unittest.mock import patch
 from pathlib import Path
-from agent_core import WatchConfig,RecordStore,watching_complete,verified_full_watch,is_live_or_unknown,video_identity,safe_url,clip,BrowserWatcher
+from agent_core import WatchConfig,RecordStore,watching_complete,verified_full_watch,is_live_or_unknown,video_identity,safe_url,clip,BrowserWatcher,PLAY_JS
 
 class CoreTest(unittest.TestCase):
  def test_configuration_whitelist(self):
@@ -33,6 +34,46 @@ class CoreTest(unittest.TestCase):
   self.assertFalse(verified_full_watch(near,before,9.6,True,0.25))
   self.assertFalse(verified_full_watch(near,before,8.1,True,9))
   self.assertFalse(verified_full_watch({'duration':None,'current_time':5},before,5,True,5))
+
+ def test_full_playback_sequence_and_fail_closed_seeks(self):
+  class FakeClock:
+   def __init__(self):
+    self.t=0.0
+   def monotonic(self):
+    return self.t
+   def wait(self,n):
+    self.t+=n
+    return False
+
+  class FakePage:
+   def __init__(self,times,paused=False):
+    self.times=list(times)
+    self.index=0
+    self.paused=paused
+   def evaluate(self,expr):
+    if expr==PLAY_JS:return 'PLAYING'
+    idx=min(self.index,len(self.times)-1)
+    value=self.times[idx]
+    self.index+=1
+    return {'found':True,'duration':10,'current_time':value,'paused':self.paused,
+     'ended':False,'src_key':'same','title':'视频','url':'https://www.douyin.com/video/1'}
+
+  def simulate(times,paused=False):
+   clk=FakeClock()
+   watcher=BrowserWatcher(WatchConfig(count=1,max_seconds_per_video=15,
+       capture_frames=False),threading.Event(),lambda *_:None)
+   watcher._sleep=clk.wait
+   page=FakePage(times,paused)
+   original={'found':True,'duration':10,'current_time':times[0],
+    'src_key':'same','title':'视频','url':'https://www.douyin.com/video/1'}
+   with patch('agent_core.time.monotonic',clk.monotonic):
+    status,elapsed,final=watcher._play_to_end(page,original,1)
+   return status
+
+  self.assertEqual(simulate([0,1,2,3,4,5,6,7,8,9,9.7]),'COMPLETE')
+  self.assertNotEqual(simulate([9.3,0.2,0.6,9.5,9.7]),'COMPLETE')
+  self.assertEqual(simulate([0,0.2,9.5]),'SEEK_DETECTED')
+  self.assertNotEqual(simulate([0,1,2,3,4,5,6,7,8,9.7],paused=True),'COMPLETE')
 
  def test_local_active_frame_sample_is_bounded_and_scoped(self):
   class FakePage:
