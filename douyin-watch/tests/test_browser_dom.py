@@ -1,6 +1,7 @@
 """Real Chromium local DOM simulation. Does not visit Douyin or external services."""
 import os
 import threading
+import tempfile
 import unittest
 from pathlib import Path
 from playwright.sync_api import sync_playwright
@@ -58,6 +59,21 @@ class BrowserDOMTests(unittest.TestCase):
   self.assertAlmostEqual(probe['duration'],9.6)
   self.assertEqual(len(self.page.evaluate(COMMENTS_JS,5)),2)
   self.assertIn('AI总结',self.page.evaluate(SUMMARY_JS))
+
+ def test_real_edge_crops_active_video_and_saves_only_local_png(self):
+  with tempfile.TemporaryDirectory() as temp:
+   w=BrowserWatcher(WatchConfig(count=1,capture_frames=True),threading.Event(),lambda *_:None,output_dir=Path(temp))
+   probe=w._probe(self.page)
+   rect=probe.get('frame_rect') or {}
+   self.assertGreaterEqual(rect.get('width',0),300)
+   self.assertGreaterEqual(rect.get('height',0),350)
+   w._capture_frame(self.page,1,10,probe)
+   image=Path(temp)/'frames'/'video-001-progress-10.png'
+   self.assertTrue(image.exists())
+   self.assertTrue(image.read_bytes().startswith(b'\x89PNG\r\n\x1a\n'))
+   self.page.evaluate("document.querySelector('[data-e2e=video-desc]').textContent='视频切换了'")
+   w._capture_frame(self.page,1,50,probe)
+   self.assertFalse((Path(temp)/'frames'/'video-001-progress-50.png').exists())
 
  def test_arrow_down_actually_changes_active_video(self):
   w=BrowserWatcher(WatchConfig(count=2),threading.Event(),lambda *_:None)

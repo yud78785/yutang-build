@@ -29,6 +29,8 @@ class App:
         self.count=tk.StringVar(value='8')
         self.timeout=tk.StringVar(value='180')
         self.comments=tk.BooleanVar(value=True)
+        self.frames=tk.BooleanVar(value=True)
+        self.close_requested=False
         self.stat=tk.StringVar(value='未启动')
         self.progress=tk.StringVar(value='视频进度：—')
         self._build()
@@ -49,6 +51,7 @@ class App:
         tk.Spinbox(form,from_=15,to=300,increment=15,width=7,textvariable=self.timeout).grid(row=1,column=3,sticky='w')
         form.columnconfigure(1,weight=1)
         ttk.Checkbutton(form,text='读取可见评论（不发表或点赞）',variable=self.comments).grid(row=2,column=0,columnspan=4,sticky='w',pady=6)
+        ttk.Checkbutton(form,text='仅本机保存视频画面样本（每条最多3张；不采集音频）',variable=self.frames).grid(row=3,column=0,columnspan=4,sticky='w',pady=6)
         buttons=ttk.Frame(frame);buttons.pack(fill='x',pady=12)
         self.start_button=ttk.Button(buttons,text='打开 Edge 并开始',command=self.start)
         self.start_button.pack(side='left')
@@ -77,13 +80,15 @@ class App:
         if self.worker and self.worker.is_alive():return
         try: config=WatchConfig(url=self.url.get().strip(),count=int(self.count.get()),
                                 max_seconds_per_video=int(self.timeout.get()),
-                                read_comments=self.comments.get())
+                                read_comments=self.comments.get(),
+                                capture_frames=self.frames.get())
         except (ValueError,TypeError) as e:
             messagebox.showerror('参数错误',str(e));return
         self.stop_event=threading.Event()
         def publish(kind,payload):self.bus.put((kind,payload))
         watcher=BrowserWatcher(config,self.stop_event,publish)
-        self.worker=threading.Thread(target=watcher.run,daemon=True,name='douyin-watcher')
+        # A daemon worker can be killed before Edge and Playwright close on window exit.
+        self.worker=threading.Thread(target=watcher.run,daemon=False,name='douyin-watcher')
         self.start_button.configure(state='disabled')
         self.stop_button.configure(state='normal')
         self.stat.set('浏览器启动中…')
@@ -118,6 +123,8 @@ class App:
                     self.progress.set(f'视频进度：{data["current"]}s / {d}（程序已等待 {data["elapsed"]}s）')
                 elif kind=='record':
                     self._log(f'记录 #{data["index"]} {data["status"]} | 可见评论 {data["comments"]} 条 | 页面AI总结 {"有" if data["ai_summary"] else "未取得"}')
+                elif kind=='frame':
+                    self._log(f'第 {data["index"]} 条：保存本地画面 {data["mark"]}%（{data["filename"]}）')
                 elif kind=='error':
                     self.stat.set('需检查：'+data['message']);self._log('⚠ '+data['message'])
                 elif kind=='done':
@@ -130,17 +137,34 @@ class App:
         self.root.after(120,self._poll)
 
     def on_close(self):
-        self.stop_event.set()
         if self.worker and self.worker.is_alive():
-            if not messagebox.askyesno('正在运行','本次自动浏览尚未停止，确定关闭程序？\n建议先点击“停止并关闭本次 Edge”。'):
+            if self.close_requested:
                 return
+            if not messagebox.askyesno('正在运行','本次自动浏览尚未停止。先停止并等待本次 Edge 关闭，然后退出？'):
+                return
+            self.close_requested=True
+            self.stop()
+            self._wait_for_browser_cleanup()
+            return
+        self.root.destroy()
+
+    def _wait_for_browser_cleanup(self):
+        # Keep Tk's event loop alive while the non-daemon worker closes Edge.
+        # Never call join() on the UI thread.
+        if self.worker and self.worker.is_alive():
+            self.root.after(200,self._wait_for_browser_cleanup)
+            return
         self.root.destroy()
 
 
 def self_test() -> None:
-    from agent_core import (WatchConfig,watching_complete,is_live_or_unknown,
+    from agent_core import (WatchConfig,watching_complete,verified_full_watch,is_live_or_unknown,
                              video_identity,safe_url,clip)
     assert WatchConfig(count=1).count == 1
+    assert WatchConfig().capture_frames is True
+    assert verified_full_watch({'duration':10,'current_time':9.5},{'duration':10,'current_time':8},9.5,True,9)
+    assert not verified_full_watch({'duration':10,'current_time':9.5},{'duration':10,'current_time':8},9.5,False,9)
+
     try: WatchConfig(url='https://example.com')
     except ValueError: pass
     else: raise AssertionError('external URL accepted')
