@@ -70,7 +70,7 @@ class BrowserDOMTests(unittest.TestCase):
    w._capture_frame(self.page,1,10,probe)
    image=Path(temp)/'frames'/'video-001-progress-10.png'
    self.assertTrue(image.exists())
-   self.assertTrue(image.read_bytes().startswith(b'\\x89PNG\\r\\n\\x1a\\n'))
+   self.assertTrue(image.read_bytes().startswith(b'\x89PNG\r\n\x1a\n'))
    self.page.evaluate("document.querySelector('[data-e2e=video-desc]').textContent='视频切换了'")
    w._capture_frame(self.page,1,50,probe)
    self.assertFalse((Path(temp)/'frames'/'video-001-progress-50.png').exists())
