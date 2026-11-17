@@ -345,8 +345,9 @@ class BrowserWatcher:
     def _comments(self,page:Any) -> list[str]:
         if not self.config.read_comments: return []
         # Opening a read-only comment panel is allowed. No typing/submitting.
-        selectors=['[data-e2e="feed-comment-icon"]','button[aria-label*="评论"]',
-                   '[aria-label="评论"]','[data-e2e="comment-icon"]']
+        # Only known comment-panel OPEN controls. Broad "评论" selectors may match submit buttons.
+        selectors=['[data-e2e="feed-comment-icon"]','[data-e2e="comment-icon"]',
+                   'button[aria-label="打开评论"]','button[aria-label="查看评论"]']
         for sel in selectors:
             try:
                 loc=page.locator(sel).first
