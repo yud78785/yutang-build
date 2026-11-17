@@ -13,6 +13,7 @@ on:
       - tools/windows147-update-patched/**
       - tests/windows147-update-transaction.test.mjs
       - tests/windows147-update-trust.test.mjs
+      - tests/windows147-packaged-smoke-env.test.mjs
       - tests/windows-upstream-filename-fix.test.mjs
       - tools/apply_openrouter_desktop_patch.mjs
       - tests/openrouter-production-compat.test.mjs
@@ -197,7 +198,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          node --test tests/windows147-update-trust.test.mjs
+          node --test tests/windows147-update-trust.test.mjs tests/windows147-packaged-smoke-env.test.mjs
           if ($LASTEXITCODE -ne 0) { throw 'YU TANG UPDATE TRUST AND HEALTH ROLLBACK TESTS FAILED' }
 
       - name: Run YuTang update transaction crash recovery tests
