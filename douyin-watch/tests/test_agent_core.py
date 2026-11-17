@@ -104,6 +104,42 @@ class CoreTest(unittest.TestCase):
    disabled._capture_frame(p,2,10,p.evaluate(None))
    self.assertEqual(len(p.calls),1)
 
+ def test_sessions_keep_separate_csv_and_frames_and_escape_formulas(self):
+  class FakePage:
+   def evaluate(self,js):
+    return {'found':True,'src_key':'123','title':'clip',
+            'url':'https://www.douyin.com/video/123','area_active':True,
+            'frame_rect':{'x':0,'y':0,'width':320,'height':240}}
+   def screenshot(self,**kwargs):
+    Path(kwargs['path']).write_bytes(b'FAKE_EVIDENCE')
+  with tempfile.TemporaryDirectory() as temp:
+   out=Path(temp)
+   first=RecordStore(out)
+   first.append({'index':1,'status':'COMPLETE','title':'=HYPERLINK("https://evil.example")',
+                 'comments':'+SUM(1,2)','ai_summary':'@SUM(1,2)','note':'-formula'})
+   original=first.path.read_bytes()
+   second=RecordStore(out)
+   self.assertNotEqual(first.path,second.path)
+   self.assertEqual(first.path.read_bytes(),original)
+   row=next(csv.DictReader(first.path.open(encoding='utf-8-sig',newline='')))
+   self.assertTrue(row['title'].startswith("'="))
+   self.assertTrue(row['comments'].startswith("'+"))
+   self.assertTrue(row['ai_summary'].startswith("'@"))
+   self.assertTrue(row['note'].startswith("'-"))
+   clips=[]
+   page=FakePage()
+   for store in (first,second):
+    w=BrowserWatcher(WatchConfig(count=1),threading.Event(),lambda *_:None,output_dir=out)
+    w._frame_dir_name=store.path.stem+'-frames'
+    w._capture_frame(page,1,10,page.evaluate(None))
+    self.assertEqual(len(w._last_frames),1)
+    image=out/w._frame_dir_name/w._last_frames[0]
+    self.assertTrue(image.exists())
+    clips.append(image)
+   self.assertNotEqual(clips[0],clips[1])
+   self.assertTrue(clips[0].exists())
+   self.assertTrue(clips[1].exists())
+
  def test_clip_and_url(self):
   self.assertEqual(clip(' a  \n b  '),'a b')
   self.assertEqual(safe_url('javascript:alert(1)'),'')
