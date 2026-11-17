@@ -60,9 +60,9 @@ export function patchText(file, source) {
 });`);
   if (file === 'tests/friend-auto-prepare.test.mjs') {
     let result = replaceOnce(source,
-      'const create = (chat = service, extra = {}) => { const coordinator = new FriendInteractions({ stateDir, getChat: () => chat, getShare: () => share, modelReady: () => true, startChat: async (value, { signal }) => { calls.start++; return value.start({ schedule: false, signal }); }, ...extra }); coordinators.push(coordinator); return coordinator; };',
-      'const create = (chat = service, extra = {}) => { const coordinator = new FriendInteractions({ stateDir, getChat: () => chat, getShare: () => share, modelReady: () => true, startChat: async (value, { signal }) => { calls.start++; return value.start({ schedule: false, signal }); }, ...extra }); fs.writeFileSync(coordinator.policyFile, JSON.stringify({ version: 1, enabled: true })); coordinators.push(coordinator); return coordinator; };',
-      'auto prepare explicit opt in');
+      "  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'douyin-auto-prepare-')), calls = { prepare: 0, start: 0, model: 0, sent: 0 }; let present = true;",
+      "  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'douyin-auto-prepare-')), calls = { prepare: 0, start: 0, model: 0, sent: 0 }; let present = true;\n  fs.writeFileSync(path.join(stateDir, 'friend-interactions-policy.json'), JSON.stringify({ version: 1, enabled: true }));",
+      'auto prepare unit fixture explicit opt in');
     return replaceOnce(result,
       "const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'douyin-auto-prepare-edge-')), controlDirectory = path.join(stateDir, 'control'); fs.mkdirSync(controlDirectory);",
       "const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'douyin-auto-prepare-edge-')), controlDirectory = path.join(stateDir, 'control'); fs.mkdirSync(controlDirectory); fs.writeFileSync(path.join(stateDir, 'friend-interactions-policy.json'), JSON.stringify({ version: 1, enabled: true }));",

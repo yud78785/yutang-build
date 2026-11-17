@@ -22,15 +22,14 @@ test('missing friend policy test proves disabled state and zero actions', () => 
   assert.ok(patched.includes('f.shared.enabled, false'));
 });
 
-test('auto-prepare unit and Edge test fixtures explicitly opt in', () => {
-  const helper = 'const create = (chat = service, extra = {}) => { const coordinator = new FriendInteractions({ stateDir, getChat: () => chat, getShare: () => share, modelReady: () => true, startChat: async (value, { signal }) => { calls.start++; return value.start({ schedule: false, signal }); }, ...extra }); coordinators.push(coordinator); return coordinator; };';
+test('auto-prepare unit and Edge fixtures explicitly opt in', () => {
+  const unit = "  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'douyin-auto-prepare-')), calls = { prepare: 0, start: 0, model: 0, sent: 0 }; let present = true;";
   const edge = "const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'douyin-auto-prepare-edge-')), controlDirectory = path.join(stateDir, 'control'); fs.mkdirSync(controlDirectory);";
-  const patched = patchText('tests/friend-auto-prepare.test.mjs', helper + '\n' + edge);
+  const patched = patchText('tests/friend-auto-prepare.test.mjs', unit + '\\n' + edge);
   assert.ok(patched.includes('friend-interactions-policy.json'));
   assert.ok(patched.includes('enabled: true'));
-  assert.ok(patched.includes('fs.writeFileSync(path.join(stateDir'));
+  assert.ok(patched.includes('douyin-auto-prepare-'));
 });
-
 test('chat starting recovery fixture explicitly opts in', () => {
   const source = "  let starts=0;const friend=new FriendInteractions({stateDir,getChat:()=>service,getShare:()=>({state:()=>({enabled:true}),configure:async()=>{}}),modelReady:()=>true,startChat:async chat=>{starts++;return chat.start({schedule:false});}});";
   const patched = patchText('tests/chat-starting-recovery.test.mjs', source);
