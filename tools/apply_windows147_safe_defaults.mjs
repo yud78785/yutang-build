@@ -11,6 +11,7 @@ const ORIGINAL = {
   'tests/friend-auto-prepare.test.mjs': 'b3947d922993120361d507b5b2afcc7bd3390c5b',
   'tests/friend-chat-share-isolation.test.mjs': '58deaee9f8a1e00cc9fb49cdb6229bf1b4cf4f3b',
   'tests/chat-starting-recovery.test.mjs': 'b38ad6c0ab98ff830672c3ae16770d247e0d67eb',
+  'autonomous-watch.mjs': '7d69508238232651a7965872493142d58bf47bce',
 };
 const blobSha = value => createHash('sha1').update('blob ' + Buffer.byteLength(value) + '\0').update(value).digest('hex');
 const sha256 = value => createHash('sha256').update(value).digest('hex');
@@ -64,6 +65,11 @@ function patchVerifier(source) {
   );
 }
 export function patchText(file, source) {
+  if (file === 'autonomous-watch.mjs') return replaceOnce(
+    source,
+    "      if (readyWork(state) || isLivePreview(state)||isLiveRoom(state)) return current;",
+    "      if (state.video?.id && state.video.readyState < 2 && state.video.paused === true) {\n        current = await this.execute('douyin_play');\n        continue;\n      }\n      if (readyWork(state) || isLivePreview(state)||isLiveRoom(state)) return current;",
+    'prime paused unready video before readiness wait');
   if (file === 'friend-interactions.mjs') return replaceOnce(source, 'const defaults = () => ({ version: 1, enabled: true });', 'const defaults = () => ({ version: 1, enabled: false });', 'friend default');
   if (file === 'tests/friend-interactions.test.mjs') return replaceTest(source, 'const f = fixture(t, { missingPolicy: true });', `test('missing friend policy defaults off without actions', async t => {
   const f = fixture(t, { missingPolicy: true });
@@ -111,7 +117,10 @@ export async function apply(root) {
   const launcher = await fs.readFile(path.join(root, 'browser-launcher.mjs'), 'utf8');
   if (!launcher.includes('entry.adopted') || !launcher.includes('entry.release =') || !launcher.includes('pauseAll')) throw new Error('PREPARE_PAGE_PAUSE_GUARD_MISSING');
   const core = await fs.readFile(path.join(root, 'core.mjs'), 'utf8');
+  const autonomousWatch = await fs.readFile(path.join(root, 'autonomous-watch.mjs'), 'utf8');
   if (!core.includes('this.page=await adoptSharedPreparePage')) throw new Error('CORE_PREPARE_PAGE_ADOPTION_MISSING');
+  if (!autonomousWatch.includes('state.video?.id && state.video.readyState < 2 && state.video.paused === true') ||
+      !autonomousWatch.includes("current = await this.execute('douyin_play')")) throw new Error('PREPARE_PAGE_UNREADY_VIDEO_PRIMING_NOT_PROVEN');
   const openrouter = JSON.parse(await fs.readFile(path.join(root, 'openrouter-desktop-patch-receipt.json'), 'utf8'));
   const update = JSON.parse(await fs.readFile(path.join(root, 'windows-update-trust-patch-receipt.json'), 'utf8'));
   if (openrouter.upstreamCommit !== BASE || update.upstreamCommit !== BASE) throw new Error('PRIOR_SOURCE_RECEIPT_MISMATCH');
@@ -149,6 +158,7 @@ export async function apply(root) {
     scheduledAutonomousWatchDefaultEnabled: false,
     preparePageStartsPaused: true,
     prepareAdoptionPathVerified: true,
+    preparePageUnreadyVideoPrimedBeforeWait: true,
     uiExplainsExplicitWatchOptIn: true,
     realModelCalled: false,
     realMessageSent: false,

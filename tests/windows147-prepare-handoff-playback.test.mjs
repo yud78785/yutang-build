@@ -103,7 +103,7 @@ test('prepare page is adopted, Edge video resumes, and production visual input r
   const video = page.locator('video');
   await video.waitFor({ state: 'attached', timeout: 5000 });
   assert.equal(await video.evaluate(element => element.paused), true, 'Prepare page must start paused.');
-  assert.ok(await video.evaluate(element => element.readyState >= 2), 'Prepared media must have a decoded current frame.');
+  const preparedReadyState = await video.evaluate(element => element.readyState);
   assert.equal(await page.evaluate(() => window.name), 'deepseek-douyin-launcher');
 
   const decisionProvider = async ({ messages, signal }) => {
@@ -165,6 +165,7 @@ test('prepare page is adopted, Edge video resumes, and production visual input r
       browser: 'Microsoft Edge',
       source: 'synthetic-local-mp4',
       preparePageStartsPaused: true,
+      preparedReadyStateBeforeStart: preparedReadyState,
       preparePageAdopted: true,
       playbackResumed: true,
       sampledFrames,

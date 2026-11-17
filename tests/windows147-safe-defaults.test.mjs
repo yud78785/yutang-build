@@ -67,6 +67,14 @@ test('packaged verifier asserts UI and API default off before explicit opt in', 
   assert.ok(patched.includes("getAttribute('aria-checked'), 'false'"));
   assert.ok(patched.includes("friendMasterDefaultEnabled: checks.status['/api/interactions/state'].policy.enabled"));
 });
+test('autonomous startup plays a paused unready video before waiting for its first decoded frame', () => {
+  const source = "      if (readyWork(state) || isLivePreview(state)||isLiveRoom(state)) return current;";
+  const patched = patchText('autonomous-watch.mjs', source);
+  assert.ok(patched.includes('state.video?.id && state.video.readyState < 2 && state.video.paused === true'));
+  assert.ok(patched.includes("current = await this.execute('douyin_play')"));
+  assert.ok(patched.includes('continue;'));
+});
+
 test('patcher fails closed when source anchor is ambiguous', () => {
   const anchor = 'const defaults = () => ({ version: 1, enabled: true });';
   assert.throws(() => patchText('friend-interactions.mjs', anchor + '\n' + anchor), /ANCHOR_MISMATCH/);
