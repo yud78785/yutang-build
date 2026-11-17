@@ -74,8 +74,18 @@ PROBE_JS = r"""() => {
   }
   const href = location.href.split('?')[0].split('#')[0];
   const link = area?.querySelector('a[href*="/video/"]')?.href || href;
-  const source = v.currentSrc || v.src || v.poster || '';
+  // Media loading can change currentSrc, title and page URL without changing video.
+  // A stable DOM node key plus explicit /video/ ID allow guarded comparisons.
+  let registry=window.__YuTangWatchNodesV1;
+  if(!registry || !registry.nodes){
+    registry={nodes:new WeakMap(),next:1};
+    window.__YuTangWatchNodesV1=registry;
+  }
+  let playerKey=registry.nodes.get(v);
+  if(!playerKey){playerKey='player-'+registry.next++;registry.nodes.set(v,playerKey);}
+  const source = v.currentSrc || v.src || '';
   function hash(s) {let x=2166136261;for(let i=0;i<s.length;i++){x^=s.charCodeAt(i);x=Math.imul(x,16777619)}return (x>>>0).toString(16)}
+  const idMatch=location.pathname.match(/^\/video\/(\d{8,})(?:\/|$)/);
   const d = Number(v.duration), t = Number(v.currentTime);
   const vr=v.getBoundingClientRect();
   const rx=Math.max(0,Math.floor(vr.left)), ry=Math.max(0,Math.floor(vr.top));
@@ -83,7 +93,9 @@ PROBE_JS = r"""() => {
   const rh=Math.max(0,Math.min(innerHeight-ry,Math.floor(vr.bottom)-ry));
   return {found:true,title:title || document.title || '',url:String(link).split('?')[0],
     frame_rect:{x:rx,y:ry,width:rw,height:rh},
-    page_title:document.title,src_key:hash(source),duration:Number.isFinite(d)?d:null,
+    page_title:document.title,src_key:source?hash(source):'',
+    player_key:playerKey,video_id:idMatch?idMatch[1]:'',
+    duration:Number.isFinite(d)?d:null,
     current_time:Number.isFinite(t)?t:0,paused:!!v.paused,ended:!!v.ended,
     muted:!!v.muted,volume:Number(v.volume),
     ready_state:v.readyState,area_active:!!v.closest('[data-e2e="feed-active-video"]')};
@@ -99,8 +111,10 @@ PLAY_JS = r"""async () => {
    return score(b)-score(a);
  })[0];
  if(!v) return 'NO_VIDEO';
+ // Never seek an already playing Douyin video: resets can trigger SPA transitions
+ // and a user's genuine playback is stronger evidence than an autoplay promise.
+ if(!v.paused && !v.ended)return 'ALREADY_PLAYING';
  try {
-   if (Number.isFinite(v.duration) && v.currentTime > 2) v.currentTime=0;
    const result=await Promise.race([
      v.play().then(()=> 'PLAYING').catch(()=> 'GESTURE_REQUIRED'),
      new Promise(resolve=>setTimeout(()=>resolve('PLAY_PENDING'),2500))
@@ -175,6 +189,47 @@ def clip(text: str, n: int = 300) -> str:
 def video_identity(probe: dict[str, Any]) -> str:
     # Source/key may be reused for cached/preloaded players. Include title and URL.
     return '|'.join(str(probe.get(k) or '') for k in ('src_key','title','url'))
+
+
+def confirmed_video_change(previous: dict[str, Any], current: dict[str, Any],
+                           after_navigation: bool = False) -> bool:
+    """Require actual media-change evidence, not dynamic title/URL churn.
+
+    A single-page app can update its URL, title, and initial media source while
+    still displaying the same video. For watched content require corroborated
+    source/player changes plus a media-time reset; after an intentional Next
+    action, source and title change together also suffices.
+    """
+    if not previous.get('found', True) or not current.get('found'):
+        return False
+    prev_id=str(previous.get('video_id') or '')
+    curr_id=str(current.get('video_id') or '')
+    if prev_id and curr_id:
+        if prev_id!=curr_id:
+            return True
+        # This is an explicit fixed /video/ page; playlist metadata changed,
+        # but the URL's current video ID did not.
+        return False
+    player_a=str(previous.get('player_key') or '')
+    player_b=str(current.get('player_key') or '')
+    player_changed=bool(player_a and player_b and player_a!=player_b)
+    src_a=str(previous.get('src_key') or '')
+    src_b=str(current.get('src_key') or '')
+    source_changed=bool(src_a and src_b and src_a!=src_b)
+    title_a=str(previous.get('title') or '').strip()
+    title_b=str(current.get('title') or '').strip()
+    title_changed=bool(title_a and title_b and title_a!=title_b)
+    try:
+        old_time=float(previous.get('current_time') or 0)
+        new_time=float(current.get('current_time') or 0)
+        time_reset=math.isfinite(old_time) and math.isfinite(new_time) and old_time-new_time>1.25
+    except (TypeError,ValueError,OverflowError):
+        time_reset=False
+    if after_navigation:
+        return bool((source_changed and (title_changed or time_reset or player_changed)) or
+                    (player_changed and title_changed))
+    return bool((source_changed and title_changed and time_reset) or
+                (source_changed and player_changed and time_reset))
 
 
 def watching_complete(last: dict[str, Any], previous: dict[str, Any],
@@ -276,7 +331,7 @@ class BrowserWatcher:
             return
         try:
             current=self._probe(page)
-            if not current.get('found') or video_identity(current)!=video_identity(expected):
+            if not current.get('found') or confirmed_video_change(expected,current):
                 return
             rect=current.get('frame_rect') or {}
             if any(not isinstance(rect.get(k),(int,float)) or not math.isfinite(rect[k])
@@ -300,7 +355,9 @@ class BrowserWatcher:
         except Exception:
             play_result='UNKNOWN'
         if play_result=='GESTURE_REQUIRED':
-            self.emit('status',message='浏览器禁止自动播放，尝试手动点视频画面一次。')
+            self.emit('status',message='浏览器禁止自动播放；可以在 Edge 里手动点一下视频。')
+        elif play_result=='ALREADY_PLAYING':
+            self.emit('status',message='检测到视频已经播放；继续观察，不会自动跳进度。')
         previous=original
         self._last_frames=[]
         frame_marks=set()
@@ -323,7 +380,7 @@ class BrowserWatcher:
             if not current.get('found'):
                 if elapsed>12:return 'VIDEO_LOST',elapsed,previous
                 self._sleep(1); continue
-            if video_identity(current)!=video_identity(original):
+            if confirmed_video_change(previous,current):
                 return 'VIDEO_CHANGED',elapsed,current
             t=float(current.get('current_time') or 0)
             dur=current.get('duration')
@@ -395,7 +452,6 @@ class BrowserWatcher:
         except Exception: return []
 
     def _next_video(self,page:Any,old:dict[str,Any]) -> bool:
-        before=video_identity(old)
         try: page.keyboard.press('Escape')
         except Exception: pass
         for action in ('ArrowDown','wheel','PageDown'):
@@ -409,7 +465,7 @@ class BrowserWatcher:
                 if self._sleep(0.75): return False
                 try:
                     p=self._probe(page)
-                    if p.get('found') and video_identity(p)!=before:
+                    if p.get('found') and confirmed_video_change(old,p,after_navigation=True):
                         return True
                 except Exception: pass
         return False
@@ -450,12 +506,12 @@ class BrowserWatcher:
                     if status=='COMPLETE':
                         try:
                             before_content=self._probe(page)
-                            if video_identity(before_content)!=video_identity(final):
+                            if confirmed_video_change(final,before_content):
                                 status='VIDEO_CHANGED_BEFORE_COMMENTS'
                             else:
                                 comments=self._comments(page)
                                 after_content=self._probe(page)
-                                if video_identity(after_content)!=video_identity(final):
+                                if confirmed_video_change(before_content,after_content):
                                     comments=[];status='VIDEO_CHANGED_DURING_COMMENTS'
                                 else:
                                     summary=clip(page.evaluate(SUMMARY_JS),1200)
