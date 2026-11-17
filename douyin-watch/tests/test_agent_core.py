@@ -1,8 +1,9 @@
 import csv
 import tempfile
 import unittest
+import threading
 from pathlib import Path
-from agent_core import WatchConfig,RecordStore,watching_complete,is_live_or_unknown,video_identity,safe_url,clip
+from agent_core import WatchConfig,RecordStore,watching_complete,verified_full_watch,is_live_or_unknown,video_identity,safe_url,clip,BrowserWatcher
 
 class CoreTest(unittest.TestCase):
  def test_configuration_whitelist(self):
@@ -24,6 +25,44 @@ class CoreTest(unittest.TestCase):
    self.assertNotIn('SECRET',raw)
    self.assertIn('https://www.douyin.com/video/123',raw)
    self.assertIn('你好 世界',raw)
+ def test_verified_full_watch_refuses_near_end_start(self):
+  near={'duration':10,'current_time':9.6,'ended':False}
+  before={'duration':10,'current_time':8.8}
+  self.assertTrue(verified_full_watch(near,before,9.6,True,9))
+  self.assertFalse(verified_full_watch(near,before,9.6,False,9))
+  self.assertFalse(verified_full_watch(near,before,9.6,True,0.25))
+  self.assertFalse(verified_full_watch(near,before,8.1,True,9))
+  self.assertFalse(verified_full_watch({'duration':None,'current_time':5},before,5,True,5))
+
+ def test_local_active_frame_sample_is_bounded_and_scoped(self):
+  class FakePage:
+   def __init__(self,identity):
+    self.identity=identity;self.calls=[]
+   def evaluate(self,js):
+    return {'found':True,'src_key':self.identity,'title':'测试视频',
+     'url':'https://www.douyin.com/video/123','area_active':True,
+     'frame_rect':{'x':15,'y':20,'width':300,'height':350}}
+   def screenshot(self,**kwargs):
+    self.calls.append(kwargs)
+    Path(kwargs['path']).write_bytes(b'FAKE_LOCAL_TEST_ONLY')
+  with tempfile.TemporaryDirectory() as tmp:
+   events=[]
+   p=FakePage('same')
+   w=BrowserWatcher(WatchConfig(count=1),threading.Event(),lambda kind,payload:events.append((kind,payload)),output_dir=Path(tmp))
+   expected=p.evaluate(None)
+   w._capture_frame(p,1,10,expected)
+   w._capture_frame(p,1,99,expected)
+   self.assertEqual(len(p.calls),1)
+   self.assertEqual(p.calls[0]['clip'],expected['frame_rect'])
+   self.assertEqual(w._last_frames,['video-001-progress-10.png'])
+   self.assertTrue((Path(tmp)/'frames'/w._last_frames[0]).exists())
+   p.identity='changed'
+   w._capture_frame(p,1,50,expected)
+   self.assertEqual(len(p.calls),1)
+   disabled=BrowserWatcher(WatchConfig(capture_frames=False),threading.Event(),lambda *_:None,output_dir=Path(tmp))
+   disabled._capture_frame(p,2,10,p.evaluate(None))
+   self.assertEqual(len(p.calls),1)
+
  def test_clip_and_url(self):
   self.assertEqual(clip(' a  \n b  '),'a b')
   self.assertEqual(safe_url('javascript:alert(1)'),'')
