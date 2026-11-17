@@ -76,7 +76,12 @@ PROBE_JS = r"""() => {
   const source = v.currentSrc || v.src || v.poster || '';
   function hash(s) {let x=2166136261;for(let i=0;i<s.length;i++){x^=s.charCodeAt(i);x=Math.imul(x,16777619)}return (x>>>0).toString(16)}
   const d = Number(v.duration), t = Number(v.currentTime);
+  const vr=v.getBoundingClientRect();
+  const rx=Math.max(0,Math.floor(vr.left)), ry=Math.max(0,Math.floor(vr.top));
+  const rw=Math.max(0,Math.min(innerWidth-rx,Math.floor(vr.right)-rx));
+  const rh=Math.max(0,Math.min(innerHeight-ry,Math.floor(vr.bottom)-ry));
   return {found:true,title:title || document.title || '',url:String(link).split('?')[0],
+    frame_rect:{x:rx,y:ry,width:rw,height:rh},
     page_title:document.title,src_key:hash(source),duration:Number.isFinite(d)?d:null,
     current_time:Number.isFinite(t)?t:0,paused:!!v.paused,ended:!!v.ended,
     muted:!!v.muted,volume:Number(v.volume),
@@ -264,18 +269,19 @@ class BrowserWatcher:
             current=self._probe(page)
             if not current.get('found') or video_identity(current)!=video_identity(expected):
                 return
-            selector='[data-e2e="feed-active-video"] video' if current.get('area_active') else 'video'
-            elems=page.locator(selector)
-            for n in range(min(elems.count(),8)):
-                elem=elems.nth(n)
-                if not elem.is_visible(): continue
-                directory=self.output_dir/'frames'
-                directory.mkdir(parents=True,exist_ok=True)
-                filename=f'video-{index:03d}-progress-{mark:02d}.png'
-                elem.screenshot(path=str(directory/filename),timeout=3000)
-                self._last_frames.append(filename)
-                self.emit('frame',index=index,mark=mark,filename=filename)
+            rect=current.get('frame_rect') or {}
+            if any(not isinstance(rect.get(k),(int,float)) or not math.isfinite(rect[k])
+                   for k in ('x','y','width','height')):
                 return
+            if rect['width']<90 or rect['height']<90:
+                return
+            directory=self.output_dir/'frames'
+            directory.mkdir(parents=True,exist_ok=True)
+            filename=f'video-{index:03d}-progress-{mark:02d}.png'
+            page.screenshot(path=str(directory/filename),clip=rect,timeout=3000)
+            self._last_frames.append(filename)
+            self.emit('frame',index=index,mark=mark,filename=filename)
+            return
         except Exception as e:
             self.emit('status',message='画面取样未成功：'+clip(str(e),100))
 
