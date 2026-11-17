@@ -144,10 +144,11 @@ class CoreTest(unittest.TestCase):
  def test_local_active_frame_sample_is_bounded_and_scoped(self):
   class FakePage:
    def __init__(self,identity):
-    self.identity=identity;self.calls=[]
+    self.identity=identity;self.calls=[];self.title='测试视频';self.t=6.0
    def evaluate(self,js):
-    return {'found':True,'src_key':self.identity,'title':'测试视频',
+    return {'found':True,'src_key':self.identity,'title':self.title,
      'url':'https://www.douyin.com/video/123','area_active':True,
+     'current_time':self.t,
      'frame_rect':{'x':15,'y':20,'width':300,'height':350}}
    def screenshot(self,**kwargs):
     self.calls.append(kwargs)
@@ -163,9 +164,14 @@ class CoreTest(unittest.TestCase):
    self.assertEqual(p.calls[0]['clip'],expected['frame_rect'])
    self.assertEqual(w._last_frames,['video-001-progress-10.png'])
    self.assertTrue((Path(tmp)/'frames'/w._last_frames[0]).exists())
-   p.identity='changed'
+   # A CDN source change ALONE is not a proven next video.
+   p.identity='cdn-rotated'
    w._capture_frame(p,1,50,expected)
-   self.assertEqual(len(p.calls),1)
+   self.assertEqual(len(p.calls),2)
+   # A different title and source with a real time reset IS a new video.
+   p.identity='changed';p.title='下一条视频';p.t=0.0
+   w._capture_frame(p,1,85,expected)
+   self.assertEqual(len(p.calls),2)
    disabled=BrowserWatcher(WatchConfig(capture_frames=False),threading.Event(),lambda *_:None,output_dir=Path(tmp))
    disabled._capture_frame(p,2,10,p.evaluate(None))
    self.assertEqual(len(p.calls),1)
