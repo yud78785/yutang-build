@@ -353,7 +353,7 @@ class BrowserWatcher:
                             frame_marks.add(mark)
                             self._capture_frame(page,index,mark,original)
                             break
-            if verified_full_watch(current,previous,max_progress,saw_start,elapsed) and not current.get('paused'):
+            if verified_full_watch(current,previous,max_progress,saw_start,elapsed) and (not current.get('paused') or current.get('ended')):
                 return 'COMPLETE',elapsed,current
             if is_live_or_unknown(current) and elapsed >= 15:
                 return 'UNKNOWN_DURATION',elapsed,current
