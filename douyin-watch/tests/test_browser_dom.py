@@ -96,6 +96,59 @@ class BrowserDOMTests(unittest.TestCase):
   after=self.page.evaluate(PROBE_JS)
   self.assertFalse(confirmed_video_change(before,after))
 
+ def test_real_edge_comments_tab_readonly_and_never_submits(self):
+  # Reproduces the actually observed Douyin "Comments" role=tab UI.
+  # A dangerous comment-submit button must never receive a click.
+  self.page.set_content("""<!doctype html><html><body>
+   <div role="tablist">
+     <button role="tab" id="comments-tab" aria-label="Comments" aria-selected="false">Comments</button>
+     <button role="tab" id="ai-tab" aria-label="AI抖音">AI抖音</button>
+   </div>
+   <section id="panel" hidden>
+      <div data-e2e="comment-item">第三集开始上价值了</div>
+      <div data-e2e="comment-content">这句话太对了有能力就要承担责任</div>
+   </section>
+   <form>
+     <input id="draft-comment">
+     <button type="submit" id="unsafe-submit" aria-label="评论">发表评论</button>
+   </form>
+   <script>
+     window.tabClicks=0;window.submitClicks=0;
+     document.getElementById('comments-tab').addEventListener('click',()=>{
+       window.tabClicks++;
+       document.getElementById('panel').hidden=false;
+       document.getElementById('comments-tab').setAttribute('aria-selected','true');
+     });
+     document.querySelector('form').addEventListener('submit',(ev)=>{
+       ev.preventDefault();window.submitClicks++;
+     });
+   </script>
+   </body></html>""")
+  w=BrowserWatcher(WatchConfig(count=1),threading.Event(),lambda *_:None)
+  items=w._comments(self.page)
+  self.assertEqual(len(items),2)
+  self.assertTrue(any('上价值' in x for x in items))
+  self.assertTrue(any('承担责任' in x for x in items))
+  self.assertEqual(self.page.evaluate('window.tabClicks'),1)
+  self.assertEqual(self.page.evaluate('window.submitClicks'),0)
+  self.assertEqual(self.page.locator('#draft-comment').input_value(),'')
+  # A selected tab should not be clicked again on a read-only recheck.
+  self.assertEqual(len(w._comments(self.page)),2)
+  self.assertEqual(self.page.evaluate('window.tabClicks'),1)
+  self.assertEqual(self.page.evaluate('window.submitClicks'),0)
+
+ def test_comment_submit_is_ignored_when_no_safe_tab_exists(self):
+  self.page.set_content("""<!doctype html><html><body>
+    <form><button id="send-comment" type="submit" aria-label="评论">评论</button></form>
+    <script>
+      window.submitted=0;
+      document.querySelector('form').addEventListener('submit',(e)=>{e.preventDefault();window.submitted++});
+    </script>
+   </body></html>""")
+  w=BrowserWatcher(WatchConfig(count=1),threading.Event(),lambda *_:None)
+  self.assertEqual(w._comments(self.page),[])
+  self.assertEqual(self.page.evaluate('window.submitted'),0)
+
  def test_arrow_down_actually_changes_active_video(self):
   w=BrowserWatcher(WatchConfig(count=2),threading.Event(),lambda *_:None)
   before=w._probe(self.page)
