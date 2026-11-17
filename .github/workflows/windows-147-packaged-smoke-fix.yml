@@ -7,6 +7,7 @@ on:
       - experiment/windows-147-shortcut-handle-integration-20261114
       - experiment/windows-147-shortcut-pin-20261114
       - experiment/windows-147-safe-defaults-final-20261117
+      - experiment/windows-147-native-profile-smoke-isolation-fix-20261117
     paths:
       - .github/workflows/windows-147-packaged-smoke-fix.yml
       - tools/apply_windows147_update_trust_patch.mjs
@@ -63,7 +64,8 @@ jobs:
             'refs/heads/experiment/windows-147-update-recovery-20261114',
             'refs/heads/experiment/windows-147-shortcut-handle-integration-20261114',
             'refs/heads/experiment/windows-147-shortcut-pin-20261114',
-            'refs/heads/experiment/windows-147-safe-defaults-final-20261117'
+            'refs/heads/experiment/windows-147-safe-defaults-final-20261117',
+            'refs/heads/experiment/windows-147-native-profile-smoke-isolation-fix-20261117'
           )
           if ($allowedRefs -cnotcontains $env:GITHUB_REF) { throw 'WRONG_FIX_BRANCH' }
           if ($env:RUNNER_OS -cne 'Windows') { throw 'WINDOWS_RUNNER_REQUIRED' }
@@ -606,7 +608,8 @@ jobs:
             'refs/heads/experiment/windows-147-update-recovery-20261114',
             'refs/heads/experiment/windows-147-shortcut-handle-integration-20261114',
             'refs/heads/experiment/windows-147-shortcut-pin-20261114',
-            'refs/heads/experiment/windows-147-safe-defaults-final-20261117'
+            'refs/heads/experiment/windows-147-safe-defaults-final-20261117',
+            'refs/heads/experiment/windows-147-native-profile-smoke-isolation-fix-20261117'
           )
           if ($allowedRefs -cnotcontains $env:GITHUB_REF) { throw 'WRONG_FIX_BRANCH' }
           if ($env:RUNNER_OS -cne 'Windows') { throw 'WINDOWS_RUNNER_REQUIRED' }
