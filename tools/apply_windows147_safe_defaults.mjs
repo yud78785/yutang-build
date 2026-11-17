@@ -65,11 +65,18 @@ function patchVerifier(source) {
   );
 }
 export function patchText(file, source) {
-  if (file === 'autonomous-watch.mjs') return replaceOnce(
-    source,
-    "      if (readyWork(state) || isLivePreview(state)||isLiveRoom(state)) return current;",
-    "      if (state.video?.id && state.video.readyState < 2 && state.video.paused === true) {\n        current = await this.execute('douyin_play');\n        continue;\n      }\n      if (readyWork(state) || isLivePreview(state)||isLiveRoom(state)) return current;",
-    'prime paused unready video before readiness wait');
+  if (file === 'autonomous-watch.mjs') {
+    let result = replaceOnce(
+      source,
+      "  async readyAtStartup(current) {\n    const deadline = this.now() + 30_000;",
+      "  async readyAtStartup(current) {\n    const deadline = this.now() + 30_000;\n    let playbackPrimed = false;",
+      'track one startup playback priming attempt');
+    return replaceOnce(
+      result,
+      "      if (readyWork(state) || isLivePreview(state)||isLiveRoom(state)) return current;",
+      "      if (state.video?.id && !playbackPrimed && (state.video.paused === true || state.video.readyState < 2)) {\n        playbackPrimed = true;\n        current = await this.execute('douyin_play');\n        continue;\n      }\n      if (readyImagePost(state) || (readyVideo(state) && state.video.paused === false) || isLivePreview(state) || isLiveRoom(state)) return current;",
+      'resume paused or unready video before readiness');
+  }
   if (file === 'friend-interactions.mjs') return replaceOnce(source, 'const defaults = () => ({ version: 1, enabled: true });', 'const defaults = () => ({ version: 1, enabled: false });', 'friend default');
   if (file === 'tests/friend-interactions.test.mjs') return replaceTest(source, 'const f = fixture(t, { missingPolicy: true });', `test('missing friend policy defaults off without actions', async t => {
   const f = fixture(t, { missingPolicy: true });
@@ -145,8 +152,10 @@ export async function apply(root) {
     changed.push({ file, originalSourceSha256: sha256(original), patchedSha256: sha256(patched) });
   }
   const autonomousWatch = await fs.readFile(path.join(root, 'autonomous-watch.mjs'), 'utf8');
-  if (!autonomousWatch.includes('state.video?.id && state.video.readyState < 2 && state.video.paused === true') ||
-      !autonomousWatch.includes("current = await this.execute('douyin_play')")) throw new Error('PREPARE_PAGE_UNREADY_VIDEO_PRIMING_NOT_PROVEN');
+  if (!autonomousWatch.includes('let playbackPrimed = false;') ||
+      !autonomousWatch.includes('state.video?.id && !playbackPrimed && (state.video.paused === true || state.video.readyState < 2)') ||
+      !autonomousWatch.includes("current = await this.execute('douyin_play')") ||
+      !autonomousWatch.includes('readyVideo(state) && state.video.paused === false')) throw new Error('PREPARE_PAGE_PAUSED_VIDEO_RESUME_NOT_PROVEN');
   const friend = await fs.readFile(path.join(root, 'friend-interactions.mjs'), 'utf8');
   const ui = await fs.readFile(uiPath, 'utf8');
   const verifier = await fs.readFile(verifierPath, 'utf8');
@@ -162,7 +171,7 @@ export async function apply(root) {
     scheduledAutonomousWatchDefaultEnabled: false,
     preparePageStartsPaused: true,
     prepareAdoptionPathVerified: true,
-    preparePageUnreadyVideoPrimedBeforeWait: true,
+    preparePagePausedVideoResumedBeforeReady: true,
     uiExplainsExplicitWatchOptIn: true,
     realModelCalled: false,
     realMessageSent: false,

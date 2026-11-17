@@ -70,11 +70,13 @@ test('packaged verifier asserts UI and API default off before explicit opt in', 
   assert.ok(patched.includes("getAttribute('aria-checked'), 'false'"));
   assert.ok(patched.includes("friendMasterDefaultEnabled: checks.status['/api/interactions/state'].policy.enabled"));
 });
-test('autonomous startup plays a paused unready video before waiting for its first decoded frame', () => {
-  const source = "      if (readyWork(state) || isLivePreview(state)||isLiveRoom(state)) return current;";
+test('autonomous startup resumes a paused video and primes an unready video before accepting readiness', () => {
+  const source = "  async readyAtStartup(current) {\n    const deadline = this.now() + 30_000;\n      if (readyWork(state) || isLivePreview(state)||isLiveRoom(state)) return current;";
   const patched = patchText('autonomous-watch.mjs', source);
-  assert.ok(patched.includes('state.video?.id && state.video.readyState < 2 && state.video.paused === true'));
+  assert.ok(patched.includes('let playbackPrimed = false;'));
+  assert.ok(patched.includes('state.video?.id && !playbackPrimed && (state.video.paused === true || state.video.readyState < 2)'));
   assert.ok(patched.includes("current = await this.execute('douyin_play')"));
+  assert.ok(patched.includes('readyVideo(state) && state.video.paused === false'));
   assert.ok(patched.includes('continue;'));
 });
 

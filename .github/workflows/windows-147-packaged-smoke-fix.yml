@@ -469,7 +469,7 @@ jobs:
               $safeDefaults.friendInteractionsDefaultEnabled -ne $false -or
               $safeDefaults.scheduledAutonomousWatchDefaultEnabled -ne $false -or
               $safeDefaults.preparePageStartsPaused -ne $true -or
-              $safeDefaults.preparePageUnreadyVideoPrimedBeforeWait -ne $true -or
+              $safeDefaults.preparePagePausedVideoResumedBeforeReady -ne $true -or
               $safeDefaults.prepareAdoptionPathVerified -ne $true -or
               $safeDefaults.uiExplainsExplicitWatchOptIn -ne $true -or
               $safeDefaults.realModelCalled -ne $false -or

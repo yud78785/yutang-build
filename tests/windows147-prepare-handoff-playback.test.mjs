@@ -147,7 +147,7 @@ test('prepare page is adopted, Edge video resumes, and production visual input r
   assert.ok(sampledFrames >= 2, 'Edge must provide multiple sampled frames.');
   assert.ok(imageParts >= 1, 'Model input must contain at least one sampled image.');
   assert.equal(imageDataValid, true, 'Model input must contain valid JPEG data URLs.');
-  assert.ok(playbackAtModel && playbackAtModel.paused === false && playbackAtModel.readyState >= 2 && playbackAtModel.time > 0, 'Playback must be active when visual evidence reaches the model adapter.');
+  assert.ok(playbackAtModel && playbackAtModel.paused === false && playbackAtModel.readyState >= 2 && playbackAtModel.time > 0, `Playback must be active when visual evidence reaches the model adapter: ${JSON.stringify(playbackAtModel)}`);
   assert.equal(playbackAtModel.name, 'deepseek-douyin-api');
   assert.equal(await video.evaluate(element => element.paused), true, 'The bounded stop path must pause the adopted video.');
   assert.equal(await page.evaluate(() => window.name), 'deepseek-douyin-api');
