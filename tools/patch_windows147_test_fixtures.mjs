@@ -10,7 +10,8 @@ import { pathToFileURL } from 'node:url';
 const UPSTREAM_COMMIT = '9c49833078f4b4d18b9211ef86d024e7f2e15739';
 const EXPECTED = Object.freeze({
   'desktop/tests/api-process.test.mjs': 'a01780f2a1b9cab09033f1951f24e4b79f3fd21e',
-  'desktop/tests/prepare-api-runtime.test.mjs': 'de91301f76cafabffeab1e090ec911fd433547ab'
+  'desktop/tests/prepare-api-runtime.test.mjs': 'de91301f76cafabffeab1e090ec911fd433547ab',
+  'tests/shared-browser-pages.test.mjs': 'bc9cf63be10786149bb32e6cdab5d0fbeedb81a1'
 });
 const sha256 = value => createHash('sha256').update(value).digest('hex');
 const gitBlobSha1 = value => createHash('sha1').update(Buffer.from('blob ' + value.length + '\0')).update(value).digest('hex');
@@ -117,6 +118,13 @@ export function patchPrepareApiRuntimeTest(source) {
   return source;
 }
 
+export function patchSharedBrowserPagesTest(source) {
+  return once(source,
+    "const controller=new BrowserController({source:'dsh',videoLimits:{stateDir:directory,state:()=>({allowed})}});",
+    "const controller=new BrowserController({source:'dsh',controlDirectory:directory,videoLimits:{stateDir:directory,state:()=>({allowed})}});",
+    'shared browser close test uses its temporary control directory');
+}
+
 export async function applyTestFixturePatches(root) {
   const base = path.resolve(root);
   const upstreamCommit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: base, encoding: 'utf8' }).trim();
@@ -132,7 +140,9 @@ export async function applyTestFixturePatches(root) {
     const source = original.toString('utf8');
     const patched = relative.endsWith('api-process.test.mjs')
       ? patchApiProcessTest(source)
-      : patchPrepareApiRuntimeTest(source);
+      : relative.endsWith('prepare-api-runtime.test.mjs')
+        ? patchPrepareApiRuntimeTest(source)
+        : patchSharedBrowserPagesTest(source);
     const output = Buffer.from(patched, 'utf8');
     if (sha256(output) === sha256(original)) throw new Error('TEST_FIXTURE_PATCH_DID_NOT_CHANGE_SOURCE: ' + relative);
     await fs.writeFile(filename, output, { flag: 'w' });
