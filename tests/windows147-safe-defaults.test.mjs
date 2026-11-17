@@ -51,12 +51,22 @@ test('setup UI explains prepare page remains paused until explicit watch opt-in'
   assert.ok(patched.includes('明确开启自主观看'));
 });
 
-test('packaged verifier keeps default-off assertion and records observed state', () => {
-  const source = "  assert.equal(checks.status['/api/interactions/state'].policy.enabled, false);\n  const receipt = { renderer: { friendMasterDefaultEnabled:true } };";
+test('packaged verifier asserts UI and API default off before explicit opt in', () => {
+  const label = '允许好友互动';
+  const source = [
+    `  await page.getByRole('switch', { name: '${label}', exact: true }).waitFor();`,
+    `  if (!(await readStatus('/api/interactions/state')).policy.enabled) { await page.getByRole('switch', { name: '${label}', exact: true }).click(); await until(async () => (await readStatus('/api/interactions/state')).policy.enabled === true); }`,
+    `  await until(async () => (await readStatus('/api/interactions/state')).policy.enabled === true);`,
+    `  await until(async () => await page.getByRole('switch', { name: '${label}', exact: true }).getAttribute('aria-checked') === 'true');`,
+    `  assert.equal(await page.getByRole('switch', { name: '${label}', exact: true }).getAttribute('aria-checked'), 'true');`,
+    "  assert.equal(checks.status['/api/interactions/state'].policy.enabled, false);",
+    '  const receipt = { renderer: { friendMasterDefaultEnabled:true } };'
+  ].join('\\n');
   const patched = patchText('desktop/scripts/verify-packaged-api.mjs', source);
+  assert.ok(patched.includes('assert.equal(friendMasterDefaultEnabled, false'));
+  assert.ok(patched.includes("getAttribute('aria-checked'), 'false'"));
   assert.ok(patched.includes("friendMasterDefaultEnabled: checks.status['/api/interactions/state'].policy.enabled"));
 });
-
 test('patcher fails closed when source anchor is ambiguous', () => {
   const anchor = 'const defaults = () => ({ version: 1, enabled: true });';
   assert.throws(() => patchText('friend-interactions.mjs', anchor + '\n' + anchor), /ANCHOR_MISMATCH/);

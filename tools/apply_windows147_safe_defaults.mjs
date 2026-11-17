@@ -37,11 +37,27 @@ function patchUi(source) {
   return source.slice(0, close + 4) + '\n    <p className="muted">打开抖音会先进入准备页，视频保持暂停；连接模型后，在业务设置中明确开启自主观看，程序接管准备页后才会播放。</p>' + source.slice(close + 4);
 }
 function patchVerifier(source) {
-  if (!source.includes("assert.equal(checks.status['/api/interactions/state'].policy.enabled, false);")) {
-    throw new Error('PACKAGED_VERIFIER_DOES_NOT_ASSERT_DEFAULT_OFF');
-  }
+  const label = '允许好友互动';
+  const before = [
+    `  await page.getByRole('switch', { name: '${label}', exact: true }).waitFor();`,
+    `  if (!(await readStatus('/api/interactions/state')).policy.enabled) { await page.getByRole('switch', { name: '${label}', exact: true }).click(); await until(async () => (await readStatus('/api/interactions/state')).policy.enabled === true); }`,
+    `  await until(async () => (await readStatus('/api/interactions/state')).policy.enabled === true);`,
+    `  await until(async () => await page.getByRole('switch', { name: '${label}', exact: true }).getAttribute('aria-checked') === 'true');`,
+    `  assert.equal(await page.getByRole('switch', { name: '${label}', exact: true }).getAttribute('aria-checked'), 'true');`,
+  ].join('\\n');
+  const after = [
+    `  await page.getByRole('switch', { name: '${label}', exact: true }).waitFor();`,
+    `  const friendMasterDefaultEnabled = (await readStatus('/api/interactions/state')).policy.enabled;`,
+    `  assert.equal(friendMasterDefaultEnabled, false, 'Friend interaction master switch must default off.');`,
+    `  assert.equal(await page.getByRole('switch', { name: '${label}', exact: true }).getAttribute('aria-checked'), 'false');`,
+    `  await page.getByRole('switch', { name: '${label}', exact: true }).click();`,
+    `  await until(async () => (await readStatus('/api/interactions/state')).policy.enabled === true);`,
+    `  await until(async () => await page.getByRole('switch', { name: '${label}', exact: true }).getAttribute('aria-checked') === 'true');`,
+    `  assert.equal(await page.getByRole('switch', { name: '${label}', exact: true }).getAttribute('aria-checked'), 'true');`,
+  ].join('\\n');
+  let result = replaceOnce(source, before, after, 'packaged verifier proves default off before explicit opt in');
   return replaceOnce(
-    source,
+    result,
     'friendMasterDefaultEnabled:true',
     "friendMasterDefaultEnabled: checks.status['/api/interactions/state'].policy.enabled",
     'packaged receipt records actual default-off status'
@@ -123,7 +139,7 @@ export async function apply(root) {
   const verifier = await fs.readFile(verifierPath, 'utf8');
   if (!friend.includes('const defaults = () => ({ version: 1, enabled: false });')) throw new Error('FRIEND_INTERACTIONS_DEFAULT_OFF_NOT_PROVEN');
   if (!ui.includes('视频保持暂停') || !ui.includes('明确开启自主观看')) throw new Error('PREPARE_PAGE_DISCLOSURE_NOT_PROVEN');
-  if (!verifier.includes("assert.equal(checks.status['/api/interactions/state'].policy.enabled, false);") || !verifier.includes("friendMasterDefaultEnabled: checks.status['/api/interactions/state'].policy.enabled")) throw new Error('PACKAGED_DEFAULT_OFF_ASSERTION_MISSING');
+  if (!verifier.includes('assert.equal(friendMasterDefaultEnabled, false') || !verifier.includes("assert.equal(checks.status['/api/interactions/state'].policy.enabled, false);") || !verifier.includes("friendMasterDefaultEnabled: checks.status['/api/interactions/state'].policy.enabled")) throw new Error('PACKAGED_DEFAULT_OFF_ASSERTION_MISSING');
   const receipt = {
     schema: 'yutang.windows147-safe-defaults.v1',
     status: 'PASS_EXACT_SOURCE_SAFE_DEFAULTS_AND_PREPARE_DISCLOSURE',
