@@ -281,6 +281,73 @@ class CoreTest(unittest.TestCase):
   self.assertEqual(opened.timeout,4000)
   self.assertTrue(any('新打开' in p.get('message','') for k,p in events if k=='status'))
 
+ def test_v4_next_tab_handoff_never_inspects_offsite_page(self):
+  class Page:
+   def __init__(self,url,probe):
+    self.url=url;self.probe=probe;self.evals=0;self.timeout=None
+   def is_closed(self):return False
+   def set_default_timeout(self,ms):self.timeout=ms
+   def evaluate(self,js):
+    self.evals+=1
+    if 'offsite.example' in self.url: raise AssertionError('Offsite DOM inspected')
+    return dict(self.probe)
+  class Context:
+   def __init__(self,pages):self.pages=pages
+  old={'found':True,'video_id':'7512345678901234567','src_key':'a',
+       'title':'视频一','current_time':10.0}
+  new={'found':True,'video_id':'7512345678901234568','src_key':'b',
+       'title':'视频二','current_time':0.0}
+  prior=Page('https://www.douyin.com/video/7512345678901234567',old)
+  offsite=Page('https://offsite.example/private?secret=1',new)
+  recent=Page('https://www.douyin.com/video/7512345678901234568',new)
+  w=BrowserWatcher(WatchConfig(),threading.Event(),lambda *_:None)
+  with patch.object(w,'_next_video',side_effect=AssertionError('Should not swipe when another tab exists')):
+   selected=w._next_video_or_tab(Context([prior,offsite,recent]),prior,old)
+  self.assertIs(selected[0],recent)
+  self.assertEqual(selected[1]['video_id'],new['video_id'])
+  self.assertEqual(offsite.evals,0)
+  self.assertEqual(recent.timeout,4000)
+
+ def test_v4_handoff_rejects_same_video_or_missing_site(self):
+  class Page:
+   def __init__(self,url,probe,closed=False):
+    self.url=url;self.probe=probe;self.closed=closed;self.evals=0
+   def is_closed(self):return self.closed
+   def evaluate(self,js):self.evals+=1;return dict(self.probe)
+  class Context:
+   def __init__(self,pages):self.pages=pages
+  original={'found':True,'video_id':'7512345678901234567',
+            'src_key':'a','title':'标题','current_time':8.0}
+  same={**original,'src_key':'new-cdn','title':'相同视频标题'}
+  old=Page('https://www.douyin.com/video/7512345678901234567',original)
+  duplicate=Page('https://www.douyin.com/video/7512345678901234567',same)
+  hostile=Page('https://www.douyin.com.evil.example/video/7512345678901234568',original)
+  closed=Page('https://www.douyin.com/video/7512345678901234568',original,closed=True)
+  w=BrowserWatcher(WatchConfig(),threading.Event(),lambda *_:None)
+  with patch.object(w,'_next_video',return_value=False):
+   selected=w._next_video_or_tab(Context([old,hostile,duplicate,closed]),old,original)
+  self.assertIsNone(selected)
+  self.assertEqual(hostile.evals,0)
+  self.assertEqual(closed.evals,0)
+
+ def test_v4_same_tab_arrow_navigation_still_works(self):
+  class Page:
+   def __init__(self,url,probe):self.url=url;self.probe=probe
+   def is_closed(self):return False
+   def evaluate(self,js):return dict(self.probe)
+  class Context:
+   def __init__(self,pages):self.pages=pages
+  old={'found':True,'video_id':'7512345678901234567','src_key':'a','title':'一','current_time':9}
+  new={'found':True,'video_id':'7512345678901234568','src_key':'b','title':'二','current_time':0}
+  page=Page('https://www.douyin.com/',old)
+  w=BrowserWatcher(WatchConfig(),threading.Event(),lambda *_:None)
+  def advance(p,old):p.probe=new;return True
+  with patch.object(w,'_next_video',side_effect=advance) as nav:
+   result=w._next_video_or_tab(Context([page]),page,old)
+  self.assertIs(result[0],page)
+  self.assertEqual(result[1]['video_id'],new['video_id'])
+  self.assertEqual(nav.call_count,1)
+
  def test_clip_and_url(self):
   self.assertEqual(clip(' a  \n b  '),'a b')
   self.assertEqual(safe_url('javascript:alert(1)'),'')

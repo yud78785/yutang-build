@@ -525,6 +525,50 @@ class BrowserWatcher:
             if attempt<2 and self._sleep(0.5): return []
         return []
 
+    def _next_opened_douyin_tab(self,context:Any,page:Any,old:dict[str,Any]) -> tuple[Any,dict[str,Any]] | None:
+        """Only hand off to a *different confirmed video* in this Edge profile."""
+        if self.stop.is_set():
+            return None
+        try:
+            pages=list(context.pages)
+        except Exception:
+            return None
+        for candidate in reversed(pages):
+            if self.stop.is_set():
+                return None
+            if candidate is page:
+                continue
+            try:
+                # Filter the URL before evaluating any untrusted page DOM.
+                if candidate.is_closed() or not safe_url(candidate.url):
+                    continue
+                probe=self._probe(candidate)
+                if not probe.get('found'):
+                    continue
+                if not confirmed_video_change(old,probe,after_navigation=True):
+                    continue
+                candidate.set_default_timeout(4000)
+                self.emit('status',message='接续专用 Edge 中另一条已确认的抖音视频。')
+                return candidate,probe
+            except Exception:
+                continue
+        return None
+
+    def _next_video_or_tab(self,context:Any,page:Any,old:dict[str,Any]) -> tuple[Any,dict[str,Any]] | None:
+        """Prefer an explicit new tab; fall back to one bounded navigation attempt."""
+        opened=self._next_opened_douyin_tab(context,page,old)
+        if opened is not None:
+            return opened
+        try:
+            if not page.is_closed() and safe_url(page.url) and self._next_video(page,old):
+                probe=self._probe(page)
+                if probe.get('found') and confirmed_video_change(old,probe,after_navigation=True):
+                    return page,probe
+        except Exception:
+            pass
+        # The user may have opened a new tab during the navigation attempt.
+        return self._next_opened_douyin_tab(context,page,old)
+
     def _next_video(self,page:Any,old:dict[str,Any]) -> bool:
         try: page.keyboard.press('Escape')
         except Exception: pass
@@ -581,8 +625,15 @@ class BrowserWatcher:
                 for i in (range(1,self.config.count+1) if current else ()):
                     if self.stop.is_set(): break
                     if i>1:
-                        current=self._probe(page)
-                        if not current.get('found'): break
+                        try:
+                            latest=self._probe(page)
+                        except Exception:
+                            self.emit('error',message='选中的抖音页面已关闭或无法读取，保留现场并停止。')
+                            break
+                        if not latest.get('found') or confirmed_video_change(current,latest):
+                            self.emit('error',message='切换后无法确认同一视频，停止以避免错误归属。')
+                            break
+                        current=latest
                     self.emit('video',index=i,title=clip(current.get('title',''),100),url=safe_url(current.get('url','')))
                     status,elapsed,final=self._play_to_end(page,current,i)
                     if self.stop.is_set():break
@@ -623,12 +674,23 @@ class BrowserWatcher:
                     self.emit('record',index=i,status=status,title=title,
                               comments=len(comments),ai_summary=bool(summary))
                     if status not in ('COMPLETE','PREVIEW_VERIFIED'):
-                        self.emit('error',message='没有确认完整播放或内容归属（'+status+'），已停止，不自动跳过该视频。')
+                        # A failed video remains FAILED in CSV and diagnostics.
+                        # Continue only if the user opened a different confirmed
+                        # Douyin video tab; never retry or skip the failed one silently.
+                        recovered=(self._next_opened_douyin_tab(context,page,final)
+                                   if i < self.config.count else None)
+                        if recovered is not None:
+                            page,current=recovered
+                            self.emit('status',message='上一条未完成已记为异常；继续查看新打开的另一条视频。')
+                            continue
+                        self.emit('error',message='未能确认播放或内容归属（'+status+'），已保留失败证据并停止。')
                         break
                     if i < self.config.count:
-                        if not self._next_video(page,final):
-                            self.emit('error',message='无法确认切换到新视频，停止以避免重复播放和误记。')
+                        next_selection=self._next_video_or_tab(context,page,final)
+                        if next_selection is None:
+                            self.emit('error',message='无法确认切换到新视频，保留 Edge 现场并停止。')
                             break
+                        page,current=next_selection
                 self.emit('done',message='本轮采集结束。记录：'+str(records.path))
                 self._hold_browser_until_user_stops(page)
         except Exception as e:
