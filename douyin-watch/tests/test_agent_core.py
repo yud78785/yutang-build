@@ -213,6 +213,49 @@ class CoreTest(unittest.TestCase):
    self.assertTrue(clips[0].exists())
    self.assertTrue(clips[1].exists())
 
+ def test_v2_preview_is_not_full_completion(self):
+  class Clock:
+   def __init__(self): self.t=0.0
+   def monotonic(self): return self.t
+   def wait(self,seconds): self.t+=seconds;return False
+  class Page:
+   def __init__(self): self.i=0
+   def evaluate(self,expression):
+    if expression==PLAY_JS:return 'PLAYING'
+    t=min(self.i,8)
+    self.i+=1
+    return {'found':True,'duration':2267.9,'current_time':float(t),
+      'paused':False,'ready_state':4,'src_key':'media-a','player_key':'p1',
+      'title':'长视频','url':'https://www.douyin.com/video/7512345678901234567'}
+  clk=Clock()
+  watcher=BrowserWatcher(WatchConfig(count=1,max_seconds_per_video=15,
+   watch_mode='preview',preview_seconds=4,capture_frames=False),
+   threading.Event(),lambda *_:None)
+  watcher._sleep=clk.wait
+  original={'found':True,'duration':2267.9,'current_time':0.0,'paused':False,
+   'ready_state':4,'src_key':'media-a','player_key':'p1',
+   'title':'长视频','url':'https://www.douyin.com/video/7512345678901234567'}
+  with patch('agent_core.time.monotonic',clk.monotonic):
+   status,elapsed,final=watcher._play_to_end(Page(),original,1)
+  self.assertEqual(status,'PREVIEW_VERIFIED')
+  self.assertGreaterEqual(final['observed_playback_s'],4.0)
+  self.assertLess(elapsed,15)
+  self.assertNotEqual(status,'COMPLETE')
+
+ def test_v2_hold_edge_until_explicit_stop(self):
+  stop=threading.Event()
+  events=[]
+  watcher=BrowserWatcher(WatchConfig(),stop,lambda kind,data:events.append((kind,data)))
+  class Page:
+   def is_closed(self): return False
+  worker=threading.Thread(target=watcher._hold_browser_until_user_stops,args=(Page(),))
+  worker.start()
+  self.assertTrue(worker.is_alive())
+  self.assertTrue(any(k=='status' for k,_ in events))
+  stop.set()
+  worker.join(2)
+  self.assertFalse(worker.is_alive())
+
  def test_clip_and_url(self):
   self.assertEqual(clip(' a  \n b  '),'a b')
   self.assertEqual(safe_url('javascript:alert(1)'),'')

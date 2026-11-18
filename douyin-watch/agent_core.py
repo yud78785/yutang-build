@@ -587,7 +587,7 @@ class BrowserWatcher:
                             'ai_summary':summary,
                             'frame_samples':' | '.join(self._frame_dir_name+'/'+name for name in self._last_frames),
                             'audio_status':player_audio,
-                            'note':('页面无现成AI总结' if not summary else '读取页面已显示的AI总结') if status in ('COMPLETE','PREVIEW_VERIFIED') else '未确认播放；内容未归属'}
+                            'note':(('仅验证预览，未完整观看；' if status=='PREVIEW_VERIFIED' else '已确认完整观看；')+('页面无现成AI总结' if not summary else '读取页面已显示的AI总结')) if status in ('COMPLETE','PREVIEW_VERIFIED') else '未确认播放；内容未归属'}
                     records.append(record)
                     self.emit('record',index=i,status=status,title=title,
                               comments=len(comments),ai_summary=bool(summary))
