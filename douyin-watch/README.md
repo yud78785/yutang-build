@@ -62,3 +62,11 @@ pyinstaller --noconfirm --clean --onefile --windowed --name YuTangDouyinWatch --
 - 上一条播放失败时仍写入失败的 CSV/诊断结果；**只有用户已打开另一条确实不同的视频标签页**，才接续下一条，不无限重试、也不将失败记为成功。
 - 跳转前只用域名白名单筛选：站外标签页不执行 DOM、截图或脚本检查。
 - 这是 v4 源码更改，v3 的 Windows 通过记录不可直接沿用，仍须独立 Windows EXE 与真实抖音现场验收。
+
+
+## 云端 Windows 真实抖音网站一次性探针
+
+- 新候选增加显式命令行 `--live-probe --probe-json live-douyin-probe.json`，只用于一次性受控验收，正常双击仍打开 GUI。
+- 与独立资料目录隔离，访问真实 `https://www.douyin.com/`，使用生产的 BrowserWatcher 只观察最多一条公开视频：可见视频、实际媒体前进及只读评论数量。每条最多 25 秒，首次找视频最多 18 秒；若网络、登录或风控阻止，按未通过证据报告，不尝试绕过。
+- 打包的 EXE 在 Windows 2022 执行真实网站探针；结果为有限字段的本地 JSON，不含 Cookie、账号、网页文本、标题、评论正文或真实用户资料，临时 Edge profile/CSV 在退出后删除。
+- 此探针使用 CI 的无头 Edge（headless Edge），**不能代表用户本机的可见 Edge 启动、真实评论、音画理解已经通过**。本机仍需单独实测。

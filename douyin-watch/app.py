@@ -223,7 +223,13 @@ def main():
     ap=argparse.ArgumentParser()
     ap.add_argument('--self-test',action='store_true',help='offline packaged EXE smoke test')
     ap.add_argument('--browser-smoke',action='store_true',help='launch a local Edge DOM smoke test; no internet')
+    ap.add_argument('--live-probe',action='store_true',help='one bounded real Douyin site probe in isolated Edge')
+    ap.add_argument('--probe-json',default='live-douyin-probe.json',help='safe diagnostic summary output file')
     args=ap.parse_args()
+    if args.live_probe:
+        from live_site_probe import run_live_site_probe
+        run_live_site_probe(Path(args.probe_json))
+        return
     if args.browser_smoke:
         browser_smoke();return
     if args.self_test:

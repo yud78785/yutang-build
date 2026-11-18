@@ -616,8 +616,15 @@ class BrowserWatcher:
                 context=playwright.chromium.launch_persistent_context(str(profile),**options)
                 page=context.pages[0] if context.pages else context.new_page()
                 page.set_default_timeout(4000)
-                try: page.goto(self.config.url,wait_until='domcontentloaded',timeout=45000)
-                except Exception as e: self.emit('status',message='网页加载可能受限：'+clip(str(e),150))
+                try:
+                    navigation=page.goto(self.config.url,wait_until='domcontentloaded',timeout=45000)
+                    code=navigation.status if navigation else None
+                    self.emit('navigation',http_status=code if isinstance(code,int) else None,
+                              douyin_origin=bool(safe_url(page.url)))
+                except Exception as e:
+                    self.emit('navigation',http_status=None,
+                              douyin_origin=bool(safe_url(page.url)))
+                    self.emit('status',message='网页加载可能受限：'+clip(str(e),150))
                 page,current=self._find_live_video(context,page)
                 if not current:
                     self._diagnostics.finish_video(0,'NO_VIDEO',180,0)
@@ -672,7 +679,8 @@ class BrowserWatcher:
                     try: self._diagnostics.save()
                     except Exception: self.emit('status',message='本地诊断记录写入失败，观看 CSV 已单独保存。')
                     self.emit('record',index=i,status=status,title=title,
-                              comments=len(comments),ai_summary=bool(summary))
+                              comments=len(comments),ai_summary=bool(summary),
+                              observed_playback_s=round(float(final.get('observed_playback_s') or 0),2))
                     if status not in ('COMPLETE','PREVIEW_VERIFIED'):
                         # A failed video remains FAILED in CSV and diagnostics.
                         # Continue only if the user opened a different confirmed
