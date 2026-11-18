@@ -38,7 +38,8 @@ PROBE_JS = r"""() => {
       s.visibility !== 'hidden' && parseFloat(s.opacity || '1') > 0.05 &&
       r.bottom > 0 && r.right > 0 && r.top < innerHeight && r.left < innerWidth;
   }
-  const videos = Array.from(document.querySelectorAll('video')).filter(visible);
+  const allVideos=Array.from(document.querySelectorAll('video'));
+  const videos = allVideos.filter(visible);
   let winner = null, best = -Infinity;
   for (const v of videos) {
     const r = v.getBoundingClientRect();
@@ -49,6 +50,8 @@ PROBE_JS = r"""() => {
     if (score > best) { best = score; winner = v; }
   }
   if (!winner) return {found:false, page_title:document.title,
+    video_elements_total:allVideos.length,video_elements_visible:videos.length,
+    document_ready:document.readyState,page_visible:document.visibilityState==='visible',
     login_hint: /扫码登录|登录后|立即登录|验证码/.test(document.body?.innerText || '')};
   const v = winner;
   const area = v.closest('[data-e2e="feed-active-video"]') || v.closest('article') || v.parentElement;
@@ -102,6 +105,8 @@ PROBE_JS = r"""() => {
     muted:!!v.muted,volume:Number(v.volume),
     ready_state:v.readyState,network_state:v.networkState,
     page_visible:document.visibilityState==='visible',
+    video_elements_total:allVideos.length,video_elements_visible:videos.length,
+    document_ready:document.readyState,
     area_active:!!v.closest('[data-e2e="feed-active-video"]')};
 }"""
 
@@ -330,8 +335,10 @@ class BrowserWatcher:
         """
         started=time.monotonic()
         last_notice=-20
+        last_snapshot=-10
         while not self.stop.is_set() and time.monotonic()-started<limit:
             try:
+                saw_eligible_page=False
                 # A video that the user opened in another tab outranks the
                 # initial Douyin home tab. The newest page comes first.
                 for candidate in reversed(list(context.pages)):
@@ -341,14 +348,26 @@ class BrowserWatcher:
                         video=self._probe(candidate)
                     except Exception:
                         continue
+                    saw_eligible_page=True
+                    if self._diagnostics is not None:
+                        self._diagnostics.observe(0,time.monotonic()-started,video)
                     if not video.get('found'):
                         continue
                     if candidate is not initial_page:
                         self.emit('status',message='已识别新打开的抖音视频标签页，切换到该页观察。')
                     try: candidate.set_default_timeout(4000)
                     except Exception: pass
+                    if self._diagnostics is not None:
+                        try: self._diagnostics.save()
+                        except OSError: pass
                     return candidate,video
                 elapsed=int(time.monotonic()-started)
+                if self._diagnostics is not None and elapsed-last_snapshot>=6:
+                    if not saw_eligible_page:
+                        self._diagnostics.observe(0,elapsed,{})
+                    try: self._diagnostics.save()
+                    except OSError: pass
+                    last_snapshot=elapsed
                 if elapsed-last_notice>=10:
                     self.emit('status',message='等待抖音视频：可在专用 Edge 里打开一个公开视频标签页。')
                     last_notice=elapsed
@@ -403,6 +422,7 @@ class BrowserWatcher:
         last_media_time=0.0
         stalled_at=start
         stalled_value=max_progress
+        last_diagnostic_save=start
         def finish(status,elapsed,probe):
             return status,elapsed,{**probe,'observed_playback_s':round(observed_seconds,2),
                 'advancing_samples':advancing_samples}
@@ -417,6 +437,10 @@ class BrowserWatcher:
                 current={}
             if self._diagnostics is not None:
                 self._diagnostics.observe(index,elapsed,current)
+                if now-last_diagnostic_save>=6:
+                    try: self._diagnostics.save()
+                    except OSError: pass
+                    last_diagnostic_save=now
             if not current.get('found'):
                 if elapsed>12:return finish('VIDEO_LOST',elapsed,previous)
                 self._sleep(1); continue
@@ -603,6 +627,10 @@ class BrowserWatcher:
         self._frame_dir_name=records.path.stem+'-frames'
         diag_path=records.path.with_name(records.path.stem+'-diagnostics.json')
         self._diagnostics=SessionDiagnostics(diag_path)
+        # Create a readable receipt before the browser starts; the UI can copy
+        # it even if Edge launch hangs, while later snapshots remain atomic.
+        try: self._diagnostics.save()
+        except OSError: pass
         self.emit('started',csv=str(records.path),diagnostics=str(diag_path))
         context=None
         try:
@@ -619,9 +647,16 @@ class BrowserWatcher:
                 try:
                     navigation=page.goto(self.config.url,wait_until='domcontentloaded',timeout=45000)
                     code=navigation.status if navigation else None
+                    self._diagnostics.record_navigation(code if isinstance(code,int) else None,
+                                                        bool(safe_url(page.url)))
+                    try: self._diagnostics.save()
+                    except OSError: pass
                     self.emit('navigation',http_status=code if isinstance(code,int) else None,
                               douyin_origin=bool(safe_url(page.url)))
                 except Exception as e:
+                    self._diagnostics.record_navigation(None,bool(safe_url(page.url)))
+                    try: self._diagnostics.save()
+                    except OSError: pass
                     self.emit('navigation',http_status=None,
                               douyin_origin=bool(safe_url(page.url)))
                     self.emit('status',message='网页加载可能受限：'+clip(str(e),150))

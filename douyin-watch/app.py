@@ -5,6 +5,8 @@ reads *visible webpage text*. It never claims to understand inaccessible frames.
 """
 from __future__ import annotations
 import argparse
+import hashlib
+import json
 import os
 import queue
 import sys
@@ -14,6 +16,21 @@ from pathlib import Path
 from tkinter import messagebox, ttk
 
 from agent_core import WatchConfig, BrowserWatcher, data_dir
+from session_diagnostics import safe_share_summary
+
+
+def executable_sha256() -> str:
+    """Hash the exact running packaged EXE, not the source checkout."""
+    if not getattr(sys,'frozen',False):
+        return 'SOURCE_ONLY'
+    digest=hashlib.sha256()
+    try:
+        with Path(sys.executable).open('rb') as src:
+            for block in iter(lambda:src.read(1024*1024),b''):
+                digest.update(block)
+        return digest.hexdigest()
+    except OSError:
+        return 'UNVERIFIED'
 
 
 class App:
@@ -67,6 +84,7 @@ class App:
         self.stop_button.pack(side='left',padx=10)
         ttk.Button(buttons,text='打开观看记录',command=self.open_records).pack(side='left')
         ttk.Button(buttons,text='现场诊断',command=self.open_diagnostics).pack(side='left',padx=(10,0))
+        ttk.Button(buttons,text='复制脱敏诊断',command=self.copy_diagnostics).pack(side='left',padx=(8,0))
         ttk.Separator(frame,orient='horizontal').pack(fill='x',pady=8)
         ttk.Label(frame,textvariable=self.stat,font=('Microsoft YaHei UI',11,'bold')).pack(anchor='w')
         ttk.Label(frame,textvariable=self.progress).pack(anchor='w',pady=(4,9))
@@ -95,6 +113,7 @@ class App:
         except (ValueError,TypeError) as e:
             messagebox.showerror('参数错误',str(e));return
         self.stop_event=threading.Event()
+        self.diagnostics_path=None
         def publish(kind,payload):self.bus.put((kind,payload))
         watcher=BrowserWatcher(config,self.stop_event,publish)
         # A daemon worker can be killed before Edge and Playwright close on window exit.
@@ -125,6 +144,21 @@ class App:
             if os.name=='nt': os.startfile(str(target))
             else: self._log('诊断文件位置：'+str(target))
         except Exception as e: messagebox.showerror('打开失败',str(e))
+
+    def copy_diagnostics(self):
+        """Explicit user action only: copy a strict allowlist, no raw JSON."""
+        target=self.diagnostics_path
+        if target is None or not target.is_file():
+            messagebox.showinfo('诊断生成中','启动后会自动保存本地诊断；稍后再点复制。')
+            return
+        try:
+            document=json.loads(target.read_text(encoding='utf-8'))
+            summary=safe_share_summary(document,executable_sha256())
+            self.root.clipboard_clear()
+            self.root.clipboard_append(summary)
+            self._log('已复制脱敏诊断。可以直接粘贴到聊天；不会自动发送。')
+        except (OSError,ValueError,TypeError):
+            messagebox.showerror('复制失败','本地诊断文件无法读取或校验；请先点“现场诊断”查看文件。')
 
     def _poll(self):
         try:

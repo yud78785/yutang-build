@@ -1,5 +1,8 @@
 """No-GUI tests: closing the window must not kill Playwright before Edge cleanup."""
+import json
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 from app import App
 
@@ -73,6 +76,43 @@ class AppLifecycleTests(unittest.TestCase):
         app.worker.running=False
         app.on_close()
         self.assertEqual(app.root.destroyed,1)
+
+
+class OneClickShareTests(unittest.TestCase):
+    def test_copy_only_sanitized_values_and_packaged_exe_sha(self):
+        class ClipboardRoot:
+            def __init__(self): self.data=''
+            def clipboard_clear(self): self.data=''
+            def clipboard_append(self,txt): self.data+=txt
+        with tempfile.TemporaryDirectory() as root:
+            path=Path(root)/'diag.json'
+            path.write_text(json.dumps({'schema':'yutang.douyin.diagnostics.v1',
+                'navigation':{'http_status':200,'douyin_origin':True},
+                'samples':[{'visible_video':False,'video_elements_total':0,
+                            'page_title':'SECRET','video_id':'7512345678901234567'}],
+                'outcomes':[]}),encoding='utf-8')
+            app=App.__new__(App)
+            app.root=ClipboardRoot()
+            app.diagnostics_path=path
+            events=[]
+            app._log=events.append
+            with patch('app.executable_sha256',return_value='b'*64):
+                app.copy_diagnostics()
+            self.assertIn('EXE_SHA256='+'b'*64,app.root.data)
+            self.assertIn('VISIBLE_VIDEO=NO',app.root.data)
+            self.assertNotIn('SECRET',app.root.data)
+            self.assertNotIn('7512345678901234567',app.root.data)
+            self.assertTrue(events)
+
+    def test_copy_before_started_does_not_touch_clipboard(self):
+        app=App.__new__(App)
+        app.diagnostics_path=None
+        class ClipboardRoot:
+            def clipboard_clear(self):raise AssertionError('clipboard should not be touched')
+        app.root=ClipboardRoot()
+        with patch('app.messagebox.showinfo') as popup:
+            app.copy_diagnostics()
+        self.assertEqual(popup.call_count,1)
 
 
 if __name__=='__main__':
