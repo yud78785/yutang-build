@@ -1,0 +1,122 @@
+name: YuTang Douyin real public site - one-shot packaged EXE canary
+on:
+  push:
+    branches:
+      - experiment/douyin-real-site-probe-20261118
+    paths:
+      - douyin-watch/QA_REAL_SITE_ONCE.approved
+permissions:
+  contents: read
+concurrency:
+  group: yutang-douyin-real-site-20261118-once
+  cancel-in-progress: false
+jobs:
+  windows-2022-evidence:
+    if: >-
+      github.repository == 'yud78785/yutang-build' &&
+      github.ref == 'refs/heads/experiment/douyin-real-site-probe-20261118' &&
+      github.actor == 'yud78785' &&
+      github.run_attempt == 1 &&
+      github.event.head_commit.message == 'test: yutang douyin real site once'
+    runs-on: windows-2022
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: douyin-watch
+    steps:
+      - name: Checkout exact isolated source without persisted credentials
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - name: Check one-file marker and exact content
+        shell: pwsh
+        run: |
+          $paths = @(git diff-tree --no-commit-id --name-only -r HEAD | Where-Object { $_ -ne '' })
+          if ($paths.Count -ne 1 -or $paths[0] -ne 'douyin-watch/QA_REAL_SITE_ONCE.approved') {
+            throw "Unexpected changed paths: $($paths -join ',')"
+          }
+          $expected = "BUILD_YUTANG_DOUYIN_REAL_SITE_ONCE`n"
+          $actual = [System.IO.File]::ReadAllText((Join-Path $PWD 'QA_REAL_SITE_ONCE.approved')).Replace("`r`n","`n")
+          if ($actual -ne $expected) { throw 'Marker bytes mismatch' }
+          $parents = (git rev-list --parents -n 1 HEAD).Trim().Split(' ')
+          if ($parents.Count -ne 2) { throw 'Expected exactly one parent' }
+          if (!(Test-Path 'tests/test_app_lifecycle.py')) { throw 'Missing lifecycle test' }
+          if (!(Test-Path 'tests/test_browser_dom.py')) { throw 'Missing Edge browser test' }
+          if (!(Test-Path 'tests/test_agent_core.py')) { throw 'Missing playback tests' }
+          if (!(Test-Path 'tests/test_session_diagnostics.py')) { throw 'Missing local diagnostics regressions' }
+          if (!(Test-Path 'tests/test_agent_core.py')) { throw 'Missing tab handoff regressions' }
+          if (!(Test-Path 'session_diagnostics.py')) { throw 'Missing privacy-limited diagnostics implementation' }
+          if (!(Test-Path 'live_site_probe.py')) { throw 'Missing real site probe' }
+          if (!(Test-Path 'tests/test_live_site_probe.py')) { throw 'Missing live site probe safety tests' }
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned packaging dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check -r requirements-win.txt
+          if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed' }
+      - name: Run offline self-test, regressions, and real Edge DOM smoke
+        shell: pwsh
+        run: |
+          $env:PYTHONPATH = "$PWD"
+          python app.py --self-test
+          if ($LASTEXITCODE -ne 0) { throw 'Self-test failed' }
+          python -m unittest discover -s tests -v
+          if ($LASTEXITCODE -ne 0) { throw 'Regressions failed' }
+          python app.py --browser-smoke
+          if ($LASTEXITCODE -ne 0) { throw 'Real Edge DOM smoke failed' }
+      - name: Package exact source as one-file Windows candidate
+        shell: pwsh
+        run: |
+          python -m PyInstaller --noconfirm --clean --onefile --windowed --name YuTangDouyinWatch --collect-all playwright --paths . app.py
+          if ($LASTEXITCODE -ne 0) { throw 'PyInstaller failed' }
+          if (!(Test-Path 'dist/YuTangDouyinWatch.exe')) { throw 'Candidate EXE missing' }
+      - name: Verify packaged EXE without visiting Douyin
+        shell: pwsh
+        run: |
+          $exe = (Resolve-Path 'dist/YuTangDouyinWatch.exe').Path
+          $a = Start-Process -FilePath $exe -ArgumentList '--self-test' -PassThru -Wait
+          if ($a.ExitCode -ne 0) { throw "Packaged self-test failed: $($a.ExitCode)" }
+          $b = Start-Process -FilePath $exe -ArgumentList '--browser-smoke' -PassThru -Wait
+          if ($b.ExitCode -ne 0) { throw "Packaged Edge smoke failed: $($b.ExitCode)" }
+          Get-FileHash $exe -Algorithm SHA256 | Format-List
+          Get-Item $exe | Select-Object FullName,Length
+      - name: Probe real public Douyin once using the packaged EXE
+        shell: pwsh
+        timeout-minutes: 3
+        run: |
+          $exe = (Resolve-Path 'dist/YuTangDouyinWatch.exe').Path
+          $candidateHash = (Get-FileHash -Algorithm SHA256 $exe).Hash
+          Write-Host "PACKAGED_LIVE_PROBE_EXE_SHA256=$candidateHash"
+          $process = Start-Process -FilePath $exe -ArgumentList '--live-probe --probe-json live-douyin-probe.json' -WorkingDirectory $PWD.Path -PassThru
+          try {
+            Wait-Process -Id $process.Id -Timeout 145 -ErrorAction Stop
+          } catch {
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+            throw 'Real public site probe timed out; no PASS'
+          }
+          $process.Refresh()
+          if ($process.ExitCode -ne 0) { throw "Probe process failed with exit code $($process.ExitCode)" }
+          if (!(Test-Path 'live-douyin-probe.json')) { throw 'No live-site JSON evidence produced' }
+          $probe = Get-Content 'live-douyin-probe.json' -Raw -Encoding UTF8 | ConvertFrom-Json
+          if ($probe.schema -ne 'yutang.douyin.live_site.v1') { throw 'Probe schema mismatch' }
+          $allowed = @('PUBLIC_VIDEO_PLAYBACK_OBSERVED','VISIBLE_VIDEO_BUT_PLAYBACK_NOT_VERIFIED',
+                       'HTTP_RESTRICTED_OR_ERROR','PAGE_RESPONDED_NO_VISIBLE_VIDEO','SITE_OR_BROWSER_UNVERIFIED')
+          if ($probe.classification -notin $allowed) { throw 'Unexpected probe classification' }
+          Write-Host "REAL_DOUYIN_CLASSIFICATION=$($probe.classification)"
+          Write-Host "REAL_DOUYIN_PLAYBACK_CONFIRMED=$($probe.real_public_playback_observed)"
+          Write-Host "REAL_DOUYIN_HTTP_STATUS=$($probe.http_status)"
+          Write-Host "REAL_DOUYIN_OBSERVED_SECONDS=$($probe.observed_playback_s)"
+          Write-Host 'Real site probe does not establish real desktop UI or audio comprehension.'
+      - name: Upload packaged candidate and limited real-site evidence (never release)
+        uses: actions/upload-artifact@v4
+        with:
+          name: YuTangDouyinWatch-RealSiteCanary-Windows-2022-${{ github.run_id }}
+          path: |
+            douyin-watch/dist/YuTangDouyinWatch.exe
+            douyin-watch/live-douyin-probe.json
+          if-no-files-found: error
+          retention-days: 14
