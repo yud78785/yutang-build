@@ -1,0 +1,78 @@
+name: YuTang public Douyin video - one-shot cloud browser probe
+on:
+  push:
+    branches:
+      - experiment/douyin-public-video-cloud-canary-20261119
+    paths:
+      - douyin-cloud/QA_PUBLIC_VIDEO_ONCE.approved
+permissions:
+  contents: read
+concurrency:
+  group: yutang-public-video-cloud-20261119-once
+  cancel-in-progress: false
+jobs:
+  public-video-observation:
+    if: >-
+      github.repository == 'yud78785/yutang-build' &&
+      github.ref == 'refs/heads/experiment/douyin-public-video-cloud-canary-20261119' &&
+      github.actor == 'yud78785' &&
+      github.run_attempt == 1 &&
+      github.event.head_commit.message == 'test: yutang cloud public video once'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - name: Checkout exact source without persistent credentials
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - name: Verify one-shot trigger marker and source
+        shell: bash
+        run: |
+          set -euo pipefail
+          changed=$(git diff-tree --no-commit-id --name-only -r HEAD)
+          test "$changed" = 'douyin-cloud/QA_PUBLIC_VIDEO_ONCE.approved'
+          printf 'BUILD_YUTANG_CLOUD_PUBLIC_VIDEO_ONCE\n' | cmp - douyin-cloud/QA_PUBLIC_VIDEO_ONCE.approved
+          test -f douyin-cloud/public_video_canary.py
+          test -f douyin-cloud/tests/test_public_video_canary.py
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run isolated cloud probe contract tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m unittest discover -s douyin-cloud/tests -v
+      - name: Install pinned Playwright and check preinstalled Chrome
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check 'playwright==1.58.0'
+          command -v google-chrome
+          google-chrome --version
+      - name: Probe exactly one indexed public Douyin video, no download
+        shell: bash
+        timeout-minutes: 3
+        run: |
+          set -euo pipefail
+          python douyin-cloud/public_video_canary.py --out douyin-cloud/cloud-public-video-receipt.json
+          python - <<'PY'
+          import json
+          with open('douyin-cloud/cloud-public-video-receipt.json', encoding='utf-8') as handle:
+              data=json.load(handle)
+          assert data['schema']=='yutang.cloud.public_video_probe.v1'
+          assert data['public_video_id']=='7708352061931622655'
+          assert data['comments_read'] is False
+          assert data['ai_vision_or_audio_understood'] is False
+          print('ONE_SHOT_PUBLIC_VIDEO_CLASSIFICATION='+data['classification'])
+          print('ONE_SHOT_PUBLIC_VIDEO_REAL_PLAYBACK='+str(data['real_public_playback_observed']))
+          PY
+      - name: Upload sanitized observation only, never video or cookies
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: YuTangDouyinCloudPublicVideo-20261119
+          path: douyin-cloud/cloud-public-video-receipt.json
+          if-no-files-found: warn
+          retention-days: 14
