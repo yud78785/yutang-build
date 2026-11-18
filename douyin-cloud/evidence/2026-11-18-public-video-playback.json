@@ -1,0 +1,21 @@
+{
+  "schema": "yutang.cloud.public_video_probe.v1",
+  "public_video_id": "7708352061931622655",
+  "cloud_runner": "github-ubuntu-chrome-headless",
+  "upstream_method_repo": "xiaoke949/douyin-guest-dl",
+  "upstream_method_commit": "853553ee6cd57b4a5f753a25b440468d5f72e4fb",
+  "http_status": 200,
+  "douyin_origin": true,
+  "detail_response_seen": true,
+  "media_element_max_count": 2,
+  "visible_media_element_max_count": 1,
+  "sample_count": 21,
+  "observed_playback_s": 15.99,
+  "advancing_samples": 16,
+  "real_public_playback_observed": true,
+  "classification": "PUBLIC_VIDEO_PLAYBACK_OBSERVED",
+  "error_code": null,
+  "comments_read": false,
+  "ai_vision_or_audio_understood": false,
+  "limitations": "Cloud-only headless test; no user-desktop playback or audio proven."
+}
