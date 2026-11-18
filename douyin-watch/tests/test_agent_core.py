@@ -256,6 +256,31 @@ class CoreTest(unittest.TestCase):
   worker.join(2)
   self.assertFalse(worker.is_alive())
 
+ def test_v3_rebinds_new_douyin_tab_without_inspecting_offsite_content(self):
+  class FakePage:
+   def __init__(self,url,found):
+    self.url=url;self.found=found;self.evals=0;self.timeout=None
+   def is_closed(self): return False
+   def set_default_timeout(self,t): self.timeout=t
+   def evaluate(self,js):
+    self.evals+=1
+    if 'offsite.example' in self.url: raise AssertionError('Offsite DOM inspected')
+    return {'found':self.found,'paused':False,'duration':10,'current_time':2}
+  class Context:
+   def __init__(self,pages): self.pages=pages
+  home=FakePage('https://www.douyin.com/',False)
+  other=FakePage('https://offsite.example/private?token=SECRET',True)
+  opened=FakePage('https://www.douyin.com/video/7512345678901234567',True)
+  events=[]
+  watcher=BrowserWatcher(WatchConfig(),threading.Event(),lambda k,p:events.append((k,p)))
+  selected,probe=watcher._find_live_video(Context([home,other,opened]),home,limit=2)
+  self.assertIs(selected,opened)
+  self.assertTrue(probe['found'])
+  self.assertEqual(other.evals,0)
+  self.assertEqual(opened.evals,1)
+  self.assertEqual(opened.timeout,4000)
+  self.assertTrue(any('新打开' in p.get('message','') for k,p in events if k=='status'))
+
  def test_clip_and_url(self):
   self.assertEqual(clip(' a  \n b  '),'a b')
   self.assertEqual(safe_url('javascript:alert(1)'),'')

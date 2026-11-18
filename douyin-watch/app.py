@@ -33,6 +33,7 @@ class App:
         self.comments=tk.BooleanVar(value=True)
         self.frames=tk.BooleanVar(value=True)
         self.close_requested=False
+        self.diagnostics_path=None
         self.stat=tk.StringVar(value='未启动')
         self.progress=tk.StringVar(value='视频进度：—')
         self._build()
@@ -65,6 +66,7 @@ class App:
         self.stop_button=ttk.Button(buttons,text='停止并关闭本次 Edge',command=self.stop,state='disabled')
         self.stop_button.pack(side='left',padx=10)
         ttk.Button(buttons,text='打开观看记录',command=self.open_records).pack(side='left')
+        ttk.Button(buttons,text='现场诊断',command=self.open_diagnostics).pack(side='left',padx=(10,0))
         ttk.Separator(frame,orient='horizontal').pack(fill='x',pady=8)
         ttk.Label(frame,textvariable=self.stat,font=('Microsoft YaHei UI',11,'bold')).pack(anchor='w')
         ttk.Label(frame,textvariable=self.progress).pack(anchor='w',pady=(4,9))
@@ -114,12 +116,24 @@ class App:
             else: self._log('观看记录目录：'+str(folder))
         except Exception as e: messagebox.showerror('打开失败',str(e))
 
+    def open_diagnostics(self):
+        target=self.diagnostics_path
+        if target is None or not target.exists():
+            target=data_dir()
+            target.mkdir(parents=True,exist_ok=True)
+        try:
+            if os.name=='nt': os.startfile(str(target))
+            else: self._log('诊断文件位置：'+str(target))
+        except Exception as e: messagebox.showerror('打开失败',str(e))
+
     def _poll(self):
         try:
             for _ in range(100):
                 kind,data=self.bus.get_nowait()
                 if kind=='started':
+                    self.diagnostics_path=Path(data['diagnostics'])
                     self._log('记录文件：'+data['csv'])
+                    self._log('本地诊断：'+str(self.diagnostics_path))
                 elif kind=='status':
                     self.stat.set(data['message']);self._log(data['message'])
                 elif kind=='video':
@@ -138,6 +152,8 @@ class App:
                     self.stat.set('需检查：'+data['message']);self._log('⚠ '+data['message'])
                 elif kind=='done':
                     self._log(data['message'])
+                elif kind=='diagnostics':
+                    self._log('诊断已保存：'+data['path']+'（不会自动上传）')
                 elif kind=='finished':
                     self._log('本次浏览器会话已结束。')
                     self.start_button.configure(state='normal')

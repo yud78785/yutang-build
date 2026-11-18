@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urlsplit, urlunsplit
 from playback_evidence import media_advance, preview_verified, frame_fraction
+from session_diagnostics import SessionDiagnostics
 
 APP_NAME = "YuTangDouyinWatch"
 DEFAULT_URL = "https://www.douyin.com/"
@@ -99,7 +100,9 @@ PROBE_JS = r"""() => {
     duration:Number.isFinite(d)?d:null,
     current_time:Number.isFinite(t)?t:0,paused:!!v.paused,ended:!!v.ended,
     muted:!!v.muted,volume:Number(v.volume),
-    ready_state:v.readyState,area_active:!!v.closest('[data-e2e="feed-active-video"]')};
+    ready_state:v.readyState,network_state:v.networkState,
+    page_visible:document.visibilityState==='visible',
+    area_active:!!v.closest('[data-e2e="feed-active-video"]')};
 }"""
 
 PLAY_JS = r"""async () => {
@@ -307,6 +310,7 @@ class BrowserWatcher:
         self.launch_kwargs=launch_kwargs or {}
         self._last_frames: list[str] = []
         self._frame_dir_name = 'frames'
+        self._diagnostics: SessionDiagnostics | None = None
 
     def emit(self, kind: str, **fields: Any) -> None:
         self.publish(kind,fields)
@@ -318,21 +322,40 @@ class BrowserWatcher:
     def _probe(page: Any) -> dict[str,Any]:
         return page.evaluate(PROBE_JS)
 
-    def _wait_first_video(self, page: Any, limit: int=180) -> dict[str,Any] | None:
+    def _find_live_video(self,context:Any,initial_page:Any,limit:int=180) -> tuple[Any,dict[str,Any] | None]:
+        """Pick the newest *dedicated* Douyin tab with a visible video.
+
+        Only inspect URL metadata for offsite tabs; never evaluate their DOM.
+        Browser tabs are limited to this independent Edge profile.
+        """
         started=time.monotonic()
         last_notice=-20
-        while not self.stop.is_set() and time.monotonic()-started < limit:
+        while not self.stop.is_set() and time.monotonic()-started<limit:
             try:
-                p=self._probe(page)
-                if p.get('found'): return p
+                # A video that the user opened in another tab outranks the
+                # initial Douyin home tab. The newest page comes first.
+                for candidate in reversed(list(context.pages)):
+                    try:
+                        if candidate.is_closed() or not safe_url(candidate.url):
+                            continue
+                        video=self._probe(candidate)
+                    except Exception:
+                        continue
+                    if not video.get('found'):
+                        continue
+                    if candidate is not initial_page:
+                        self.emit('status',message='已识别新打开的抖音视频标签页，切换到该页观察。')
+                    try: candidate.set_default_timeout(4000)
+                    except Exception: pass
+                    return candidate,video
                 elapsed=int(time.monotonic()-started)
-                if elapsed-last_notice >= 10:
-                    self.emit('status',message=('请在打开的 Edge 里手动完成登录并进入一条视频；无需提供密码。' if p.get('login_hint') else '正在等待网页出现可见视频；你可在 Edge 中手动打开一条视频。'))
+                if elapsed-last_notice>=10:
+                    self.emit('status',message='等待抖音视频：可在专用 Edge 里打开一个公开视频标签页。')
                     last_notice=elapsed
-            except Exception as e:
-                self.emit('status',message='页面正在加载：'+clip(str(e),100))
+            except Exception:
+                self.emit('status',message='浏览器页面正在切换，继续等待。')
             self._sleep(2)
-        return None
+        return initial_page,None
 
     def _capture_frame(self,page:Any,index:int,mark:int,expected:dict[str,Any]) -> None:
         """At most three local images per video. Never upload, inspect other tabs or capture login pages."""
@@ -392,6 +415,8 @@ class BrowserWatcher:
                 current=self._probe(page)
             except Exception:
                 current={}
+            if self._diagnostics is not None:
+                self._diagnostics.observe(index,elapsed,current)
             if not current.get('found'):
                 if elapsed>12:return finish('VIDEO_LOST',elapsed,previous)
                 self._sleep(1); continue
@@ -532,7 +557,9 @@ class BrowserWatcher:
         from playwright.sync_api import sync_playwright
         records=RecordStore(self.output_dir)
         self._frame_dir_name=records.path.stem+'-frames'
-        self.emit('started',csv=str(records.path))
+        diag_path=records.path.with_name(records.path.stem+'-diagnostics.json')
+        self._diagnostics=SessionDiagnostics(diag_path)
+        self.emit('started',csv=str(records.path),diagnostics=str(diag_path))
         context=None
         try:
             with sync_playwright() as playwright:
@@ -547,9 +574,10 @@ class BrowserWatcher:
                 page.set_default_timeout(4000)
                 try: page.goto(self.config.url,wait_until='domcontentloaded',timeout=45000)
                 except Exception as e: self.emit('status',message='网页加载可能受限：'+clip(str(e),150))
-                current=self._wait_first_video(page)
+                page,current=self._find_live_video(context,page)
                 if not current:
-                    self.emit('error',message='未找到可见视频，Edge 保持打开以便手动检查。')
+                    self._diagnostics.finish_video(0,'NO_VIDEO',180,0)
+                    self.emit('error',message='未找到可见视频；诊断记录将保存在本地，Edge 保持打开以便检查。')
                 for i in (range(1,self.config.count+1) if current else ()):
                     if self.stop.is_set(): break
                     if i>1:
@@ -589,6 +617,9 @@ class BrowserWatcher:
                             'audio_status':player_audio,
                             'note':(('仅验证预览，未完整观看；' if status=='PREVIEW_VERIFIED' else '已确认完整观看；')+('页面无现成AI总结' if not summary else '读取页面已显示的AI总结')) if status in ('COMPLETE','PREVIEW_VERIFIED') else '未确认播放；内容未归属'}
                     records.append(record)
+                    self._diagnostics.finish_video(i,status,elapsed,float(final.get('observed_playback_s') or 0))
+                    try: self._diagnostics.save()
+                    except Exception: self.emit('status',message='本地诊断记录写入失败，观看 CSV 已单独保存。')
                     self.emit('record',index=i,status=status,title=title,
                               comments=len(comments),ai_summary=bool(summary))
                     if status not in ('COMPLETE','PREVIEW_VERIFIED'):
@@ -607,4 +638,10 @@ class BrowserWatcher:
             if context:
                 try: context.close()
                 except Exception: pass
+            if self._diagnostics is not None:
+                try:
+                    self._diagnostics.save()
+                    self.emit('diagnostics',path=str(self._diagnostics.path))
+                except Exception:
+                    self.emit('status',message='诊断文件保存失败；不会影响原有观看记录。')
             self.emit('finished')
