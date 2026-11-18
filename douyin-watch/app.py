@@ -26,7 +26,9 @@ class App:
         self.stop_event=threading.Event()
         self.worker=None
         self.url=tk.StringVar(value='https://www.douyin.com/')
-        self.count=tk.StringVar(value='8')
+        self.count=tk.StringVar(value='3')
+        self.watch_mode=tk.StringVar(value='preview')
+        self.preview_seconds=tk.StringVar(value='8')
         self.timeout=tk.StringVar(value='180')
         self.comments=tk.BooleanVar(value=True)
         self.frames=tk.BooleanVar(value=True)
@@ -50,8 +52,13 @@ class App:
         ttk.Label(form,text='单条等待上限（秒）').grid(row=1,column=2,sticky='e',padx=(12,4))
         tk.Spinbox(form,from_=15,to=300,increment=15,width=7,textvariable=self.timeout).grid(row=1,column=3,sticky='w')
         form.columnconfigure(1,weight=1)
-        ttk.Checkbutton(form,text='读取可见评论（不发表或点赞）',variable=self.comments).grid(row=2,column=0,columnspan=4,sticky='w',pady=6)
-        ttk.Checkbutton(form,text='仅本机保存视频画面样本（每条最多3张；不采集音频）',variable=self.frames).grid(row=3,column=0,columnspan=4,sticky='w',pady=6)
+        ttk.Label(form,text='观看方式').grid(row=2,column=0,sticky='w',pady=4)
+        ttk.Radiobutton(form,text='验证预览（推荐）',variable=self.watch_mode,value='preview').grid(row=2,column=1,sticky='w')
+        ttk.Radiobutton(form,text='完整观看',variable=self.watch_mode,value='full').grid(row=2,column=2,sticky='w')
+        ttk.Label(form,text='预览实播秒数').grid(row=3,column=0,sticky='w',pady=4)
+        tk.Spinbox(form,from_=3,to=30,width=7,textvariable=self.preview_seconds).grid(row=3,column=1,sticky='w',padx=8)
+        ttk.Checkbutton(form,text='读取可见评论（不发表或点赞）',variable=self.comments).grid(row=4,column=0,columnspan=4,sticky='w',pady=6)
+        ttk.Checkbutton(form,text='仅本机保存视频画面样本（每条最多3张；不采集音频）',variable=self.frames).grid(row=5,column=0,columnspan=4,sticky='w',pady=6)
         buttons=ttk.Frame(frame);buttons.pack(fill='x',pady=12)
         self.start_button=ttk.Button(buttons,text='打开 Edge 并开始',command=self.start)
         self.start_button.pack(side='left')
@@ -81,7 +88,8 @@ class App:
         try: config=WatchConfig(url=self.url.get().strip(),count=int(self.count.get()),
                                 max_seconds_per_video=int(self.timeout.get()),
                                 read_comments=self.comments.get(),
-                                capture_frames=self.frames.get())
+                                capture_frames=self.frames.get(),
+                                watch_mode=self.watch_mode.get(),preview_seconds=int(self.preview_seconds.get()))
         except (ValueError,TypeError) as e:
             messagebox.showerror('参数错误',str(e));return
         self.stop_event=threading.Event()
@@ -120,7 +128,8 @@ class App:
                     self._log(f'第 {data["index"]} 条：{data["title"][:120]}')
                 elif kind=='progress':
                     dur=data.get('duration');d='未知' if dur is None else str(round(dur,1))+'s'
-                    self.progress.set(f'视频进度：{data["current"]}s / {d}（程序已等待 {data["elapsed"]}s）')
+                    mode='预览' if data.get('mode')=='preview' else '完整观看'
+                    self.progress.set(f'{mode}：播放器 {data["current"]}s / {d}；实际推进 {data.get("observed",0)}s；等待 {data["elapsed"]}s')
                 elif kind=='record':
                     self._log(f'记录 #{data["index"]} {data["status"]} | 可见评论 {data["comments"]} 条 | 页面AI总结 {"有" if data["ai_summary"] else "未取得"}')
                 elif kind=='frame':

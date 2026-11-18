@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urlsplit, urlunsplit
+from playback_evidence import media_advance, preview_verified, frame_fraction
 
 APP_NAME = "YuTangDouyinWatch"
 DEFAULT_URL = "https://www.douyin.com/"
@@ -160,6 +161,8 @@ class WatchConfig:
     max_seconds_per_video: int = 180
     read_comments: bool = True
     capture_frames: bool = True
+    watch_mode: str = 'full'  # compatibility; GUI uses preview by default
+    preview_seconds: int = 8
 
     def __post_init__(self) -> None:
         u = urlsplit(self.url)
@@ -169,6 +172,10 @@ class WatchConfig:
             raise ValueError('视频数量应在 1 到 50 之间')
         if not 15 <= self.max_seconds_per_video <= MAX_PLAY_SECONDS:
             raise ValueError('每条最长等待应在 15 到 300 秒之间')
+        if self.watch_mode not in ('preview','full'):
+            raise ValueError('观看方式必须为 preview 或 full')
+        if not 3 <= self.preview_seconds <= 30:
+            raise ValueError('预览验证时间须为 3 到 30 秒')
 
 
 def data_dir() -> Path:
@@ -361,6 +368,9 @@ class BrowserWatcher:
         elif play_result=='ALREADY_PLAYING':
             self.emit('status',message='检测到视频已经播放；继续观察，不会自动跳进度。')
         previous=original
+        observed_seconds=0.0
+        advancing_samples=0
+        last_evidence_at=time.monotonic()
         self._last_frames=[]
         frame_marks=set()
         saw_start=False
@@ -370,20 +380,28 @@ class BrowserWatcher:
         last_media_time=0.0
         stalled_at=start
         stalled_value=max_progress
+        def finish(status,elapsed,probe):
+            return status,elapsed,{**probe,'observed_playback_s':round(observed_seconds,2),
+                'advancing_samples':advancing_samples}
         while not self.stop.is_set():
             now=time.monotonic()
             elapsed=now-start
             if elapsed >= self.config.max_seconds_per_video:
-                return 'TIME_LIMIT',elapsed,previous
+                return finish('TIME_LIMIT',elapsed,previous)
             try:
                 current=self._probe(page)
             except Exception:
                 current={}
             if not current.get('found'):
-                if elapsed>12:return 'VIDEO_LOST',elapsed,previous
+                if elapsed>12:return finish('VIDEO_LOST',elapsed,previous)
                 self._sleep(1); continue
             if confirmed_video_change(previous,current):
-                return 'VIDEO_CHANGED',elapsed,current
+                return finish('VIDEO_CHANGED',elapsed,current)
+            advance=media_advance(previous,current,now-last_evidence_at)
+            last_evidence_at=now
+            if advance>0:
+                observed_seconds+=advance
+                advancing_samples+=1
             t=float(current.get('current_time') or 0)
             dur=current.get('duration')
             if isinstance(dur,(int,float)) and math.isfinite(dur) and dur>=1.5:
@@ -400,7 +418,7 @@ class BrowserWatcher:
                     if t >= last_media_time:
                         max_plausible_step=max(1.25,(now-last_checked)*2.5+0.8)
                         if t-last_media_time > max_plausible_step:
-                            return 'SEEK_DETECTED',elapsed,current
+                            return finish('SEEK_DETECTED',elapsed,current)
                     elif last_media_time-t >= 0.6:
                         # Accept a natural loop but never borrow progress from the
                         # previous loop unless the observed near-end threshold is met.
@@ -414,17 +432,22 @@ class BrowserWatcher:
                     last_checked=now
                     max_progress=max(max_progress,t)
                 if self.config.capture_frames and not current.get('paused') and saw_start:
-                    fraction=t/dur
+                    fraction=frame_fraction(t,dur,observed_seconds,self.config.preview_seconds,self.config.watch_mode)
                     for mark in (10,50,85):
                         threshold=mark/100.0
                         if mark not in frame_marks and threshold<=fraction<threshold+0.2:
                             frame_marks.add(mark)
                             self._capture_frame(page,index,mark,original)
                             break
-            if verified_full_watch(current,previous,max_progress,saw_start,elapsed) and (not current.get('paused') or current.get('ended')):
-                return 'COMPLETE',elapsed,current
+            if self.config.watch_mode=='preview' and preview_verified(
+                    observed_seconds,self.config.preview_seconds,advancing_samples):
+                return finish('PREVIEW_VERIFIED',elapsed,current)
+            if (self.config.watch_mode=='full' and
+                    verified_full_watch(current,previous,max_progress,saw_start,observed_seconds) and
+                    (not current.get('paused') or current.get('ended'))):
+                return finish('COMPLETE',elapsed,current)
             if is_live_or_unknown(current) and elapsed >= 15:
-                return 'UNKNOWN_DURATION',elapsed,current
+                return finish('UNKNOWN_DURATION',elapsed,current)
             if t > stalled_value+0.3:
                 stalled_value=t;stalled_at=now
             elif (isinstance(dur,(int,float)) and math.isfinite(dur) and dur>1.5
@@ -433,12 +456,13 @@ class BrowserWatcher:
                 # because the NEW loop has not yet exceeded the old maximum time.
                 stalled_value=t;stalled_at=now
             if now-stalled_at>12:
-                return 'PLAYBACK_STALLED',elapsed,current
+                return finish('PLAYBACK_STALLED',elapsed,current)
             if int(elapsed)%5==0:
-                self.emit('progress',elapsed=round(elapsed,1),current=round(t,1),duration=dur)
+                self.emit('progress',elapsed=round(elapsed,1),current=round(t,1),duration=dur,
+                          observed=round(observed_seconds,1),mode=self.config.watch_mode)
             previous=current
             self._sleep(1)
-        return 'STOPPED',time.monotonic()-start,previous
+        return finish('STOPPED',time.monotonic()-start,previous)
 
     def _comments(self,page:Any) -> list[str]:
         if not self.config.read_comments: return []
@@ -495,6 +519,15 @@ class BrowserWatcher:
                 except Exception: pass
         return False
 
+    def _hold_browser_until_user_stops(self,page:Any) -> None:
+        if self.stop.is_set():return
+        self.emit('status',message='本轮采集结束，Edge 保持打开；点击“停止并关闭本次 Edge”才关闭。')
+        while not self.stop.wait(0.5):
+            try:
+                if page.is_closed():break
+            except Exception:
+                break
+
     def run(self) -> None:
         from playwright.sync_api import sync_playwright
         records=RecordStore(self.output_dir)
@@ -516,9 +549,8 @@ class BrowserWatcher:
                 except Exception as e: self.emit('status',message='网页加载可能受限：'+clip(str(e),150))
                 current=self._wait_first_video(page)
                 if not current:
-                    self.emit('error',message='未找到可见视频。请检查抖音访问/登录或在 Edge 打开视频后重试。')
-                    return
-                for i in range(1,self.config.count+1):
+                    self.emit('error',message='未找到可见视频，Edge 保持打开以便手动检查。')
+                for i in (range(1,self.config.count+1) if current else ()):
                     if self.stop.is_set(): break
                     if i>1:
                         current=self._probe(page)
@@ -528,7 +560,7 @@ class BrowserWatcher:
                     if self.stop.is_set():break
                     # Never associate comments with an unverified or changed video.
                     comments=[];summary=''
-                    if status=='COMPLETE':
+                    if status in ('COMPLETE','PREVIEW_VERIFIED'):
                         try:
                             before_content=self._probe(page)
                             if confirmed_video_change(final,before_content):
@@ -550,23 +582,24 @@ class BrowserWatcher:
                             'index':i,'status':status,'title':title,
                             'url':safe_url(final.get('url') or current.get('url') or page.url),
                             'duration_s':str(round(final.get('duration') or 0,1)),
-                            'watched_s':str(round(elapsed,1)),
+                            'watched_s':str(round(float(final.get('observed_playback_s') or 0),1)),
                             'comments':' | '.join(comments),
                             'ai_summary':summary,
                             'frame_samples':' | '.join(self._frame_dir_name+'/'+name for name in self._last_frames),
                             'audio_status':player_audio,
-                            'note':('页面无现成AI总结' if not summary else '读取页面已显示的AI总结') if status=='COMPLETE' else '未确认完整播放；内容未归属'}
+                            'note':('页面无现成AI总结' if not summary else '读取页面已显示的AI总结') if status in ('COMPLETE','PREVIEW_VERIFIED') else '未确认播放；内容未归属'}
                     records.append(record)
                     self.emit('record',index=i,status=status,title=title,
                               comments=len(comments),ai_summary=bool(summary))
-                    if status!='COMPLETE':
+                    if status not in ('COMPLETE','PREVIEW_VERIFIED'):
                         self.emit('error',message='没有确认完整播放或内容归属（'+status+'），已停止，不自动跳过该视频。')
                         break
                     if i < self.config.count:
                         if not self._next_video(page,final):
                             self.emit('error',message='无法确认切换到新视频，停止以避免重复播放和误记。')
                             break
-                self.emit('done',message='本次观看结束。记录：'+str(records.path))
+                self.emit('done',message='本轮采集结束。记录：'+str(records.path))
+                self._hold_browser_until_user_stops(page)
         except Exception as e:
             self.emit('error',message='浏览器启动或运行失败：'+clip(str(e),330))
             self.emit('done',message='可查看日志目录：'+str(records.path))

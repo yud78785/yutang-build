@@ -37,3 +37,12 @@ pyinstaller --noconfirm --clean --onefile --windowed --name YuTangDouyinWatch --
 下载 CI ZIP 后 EXE 的 `--self-test` 必须 PASS 才算包装成功。**云端 Windows 构建成功不代表真实抖音播放通过**；真实功能需要用户电脑上的 Edge 现场验证。
 
 源码参考：抖音帮助页 `https://www.douyin.com/help` 对 ↓ 切视频的说明；只读检测优先使用 `[data-e2e="feed-active-video"]` 和真正活动的 `<video>`。零调用外部大模型；不需要提供 API Key。
+
+
+## v2 证据化观看模式
+
+- GUI 默认选择「验证预览」：必须在同一视频上观察到至少两次有效媒体时间前进、累计至少 8 秒，才能记录 `PREVIEW_VERIFIED`；这不是“完整看完”。
+- 「完整观看」为单独模式，必须观察媒体时钟持续推进至接近结尾（不得把等待、跳播或首尾误配算成看完）。
+- `watched_s` 改为媒体进度的保守累计，不再是后台等待的秒数。长视频例如 2267 秒不需要先等到结束才取得预览、评论或下一条。
+- 每轮结束保留专用 Edge 供用户检查；由「停止并关闭本次 Edge」主动关闭。所有互动默认关闭，仍不包括大模型音视频理解。
+- 新分支必须重新完成 Windows 打包和现场抖音联网验收；旧候选不能算新版本通过。
