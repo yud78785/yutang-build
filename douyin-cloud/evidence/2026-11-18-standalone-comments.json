@@ -1,0 +1,20 @@
+{
+  "schema": "yutang.cloud.public_comments_probe.v1",
+  "public_video_id": "7708352061931622655",
+  "cloud_environment": "github-ubuntu-chrome-headless",
+  "correct_video_url": true,
+  "comment_panel_open_clicked": false,
+  "own_comment_response_seen": false,
+  "response_comment_text_count": 0,
+  "visible_dom_comment_count": 5,
+  "standalone_comment_panel_present": true,
+  "standalone_comment_panel_visible": true,
+  "comment_item_nodes": 5,
+  "login_hint": false,
+  "classification": "PUBLIC_VISIBLE_DOM_COMMENT_OBSERVED",
+  "public_comment_text_observed": true,
+  "comments_submitted": false,
+  "comment_text_or_usernames_persisted": false,
+  "user_login_or_cookies_used": false,
+  "limitations": "Counts only; no comment text retained, no AI interpretation or Windows desktop proof."
+}
