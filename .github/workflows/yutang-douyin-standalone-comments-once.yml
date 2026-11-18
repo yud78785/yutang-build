@@ -1,0 +1,76 @@
+name: YuTang public Douyin comments - one-shot cloud observation
+on:
+  push:
+    branches:
+      - experiment/douyin-standalone-comments-cloud-20261119
+    paths:
+      - douyin-cloud/QA_STANDALONE_COMMENTS_ONCE.approved
+permissions:
+  contents: read
+concurrency:
+  group: yutang-standalone-comments-cloud-20261119-once
+  cancel-in-progress: false
+jobs:
+  public-comment-observation:
+    if: >-
+      github.repository == 'yud78785/yutang-build' &&
+      github.ref == 'refs/heads/experiment/douyin-standalone-comments-cloud-20261119' &&
+      github.actor == 'yud78785' &&
+      github.run_attempt == 1 &&
+      github.event.head_commit.message == 'test: yutang standalone comments once'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - name: Checkout isolated source with no persisted credentials
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - name: Check one-shot marker exact bytes
+        shell: bash
+        run: |
+          set -euo pipefail
+          changed=$(git diff-tree --no-commit-id --name-only -r HEAD)
+          test "$changed" = 'douyin-cloud/QA_STANDALONE_COMMENTS_ONCE.approved'
+          printf 'BUILD_YUTANG_CLOUD_STANDALONE_COMMENTS_ONCE\n' | cmp - douyin-cloud/QA_STANDALONE_COMMENTS_ONCE.approved
+          test -f douyin-cloud/tests/test_public_comments_canary.py
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Test only the new comment evidence policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m unittest discover -s douyin-cloud/tests -p test_public_comments_canary.py -v
+      - name: Install fixed Playwright and confirm Chrome
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check 'playwright==1.58.0'
+          command -v google-chrome
+      - name: One video read-only public comment observation
+        shell: bash
+        timeout-minutes: 3
+        run: |
+          set -euo pipefail
+          python douyin-cloud/public_comments_canary.py --out douyin-cloud/cloud-standalone-comments-receipt.json
+          python - <<'PY'
+          import json
+          data=json.load(open('douyin-cloud/cloud-standalone-comments-receipt.json',encoding='utf-8'))
+          assert data['schema']=='yutang.cloud.public_comments_probe.v1'
+          assert data['public_video_id']=='7708352061931622655'
+          assert data['comments_submitted'] is False
+          assert data['comment_text_or_usernames_persisted'] is False
+          assert 'standalone_comment_panel_present' in data
+          print('YUTANG_CLOUD_PUBLIC_COMMENT_CLASSIFICATION='+data['classification'])
+          print('YUTANG_CLOUD_PUBLIC_COMMENT_OBSERVED='+str(data['public_comment_text_observed']))
+          PY
+      - name: Upload only bounded counts, never usernames or comment text
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: YuTangDouyinCloudStandaloneComments-20261119
+          path: douyin-cloud/cloud-standalone-comments-receipt.json
+          if-no-files-found: warn
+          retention-days: 14

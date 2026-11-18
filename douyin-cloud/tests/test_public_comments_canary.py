@@ -30,6 +30,16 @@ class CommentCanaryTests(unittest.TestCase):
         data=result(True,False,0,2,True)
         self.assertTrue(data['public_comment_text_observed'])
         self.assertEqual(data['classification'],'PUBLIC_VISIBLE_DOM_COMMENT_OBSERVED')
+    def test_standalone_autoload_comments_without_click(self):
+        data=result(True,False,0,2,False,panel_exists=True,panel_visible=True,item_nodes=2)
+        self.assertTrue(data['public_comment_text_observed'])
+        self.assertEqual(data['classification'],'PUBLIC_VISIBLE_DOM_COMMENT_OBSERVED')
+        self.assertEqual(data['comment_item_nodes'],2)
+    def test_standalone_panel_empty_is_not_pass(self):
+        data=result(True,False,0,0,False,panel_exists=True,panel_visible=True,login_hint=True)
+        self.assertFalse(data['public_comment_text_observed'])
+        self.assertEqual(data['classification'],'STANDALONE_COMMENT_PANEL_EMPTY')
+        self.assertTrue(data['login_hint'])
     def test_never_persist_comment_text_or_names(self):
         data=result(True,True,1,2,True)
         self.assertNotIn('SECRET',json.dumps(data))
