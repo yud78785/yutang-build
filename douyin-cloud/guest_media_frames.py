@@ -121,6 +121,15 @@ def collect_media(detail:Any)->tuple[list[str],float|None]:
     return urls,duration
 
 
+def safe_media_length(raw:Any)->int:
+    if not isinstance(raw,str) or not raw.isdigit():
+        raise ValueError("MEDIA_LENGTH_UNKNOWN")
+    value=int(raw)
+    if value<=0 or value>MAX_MEDIA_BYTES:
+        raise ValueError("MEDIA_SIZE_OUT_OF_RANGE")
+    return value
+
+
 def extract_frame(media:bytes,second:float)->bytes:
     if not media or len(media)>MAX_MEDIA_BYTES:
         raise ValueError("MEDIA_SIZE_OUT_OF_RANGE")
@@ -219,8 +228,7 @@ async def run(output_dir:Path)->dict[str,Any]:
                 media_status=response.status
                 media_type=(response.headers.get("content-type","").split(";")[0].lower())
                 length=response.headers.get("content-length")
-                if length and length.isdigit() and int(length)>MAX_MEDIA_BYTES:
-                    raise ValueError("MEDIA_EXCEEDS_40MB_LIMIT")
+                safe_media_length(length)
                 if media_status!=200 or media_type not in ("video/mp4","application/octet-stream","video/quicktime"):
                     raise ValueError("MEDIA_RESPONSE_NOT_ALLOWED")
                 body=await response.body()
@@ -245,7 +253,7 @@ async def run(output_dir:Path)->dict[str,Any]:
         text=str(exc)
         if text in ("NO_TARGET_MEDIA_URLS","TARGET_MEDIA_NOT_PLAYING_IN_GUEST_SESSION",
                     "CHALLENGE_OR_RISK_CONTROL_PRESENT","MEDIA_EXCEEDS_40MB_LIMIT",
-                    "MEDIA_RESPONSE_NOT_ALLOWED","MEDIA_SIZE_OUT_OF_RANGE",
+                    "MEDIA_RESPONSE_NOT_ALLOWED","MEDIA_SIZE_OUT_OF_RANGE","MEDIA_LENGTH_UNKNOWN",
                     "FFMPEG_FRAME_EXTRACTION_FAILED","FRAME_NOT_VALID_JPEG"):
             error_code=text
         elif error_code is None:

@@ -3,7 +3,7 @@ import sys
 import unittest
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-from guest_media_frames import collect_media,url_key,extract_frame,MAX_MEDIA_BYTES
+from guest_media_frames import collect_media,url_key,extract_frame,safe_media_length,MAX_MEDIA_BYTES
 
 class GuestMediaFrameTests(unittest.TestCase):
     def test_choose_highest_bitrate_from_matching_detail(self):
@@ -20,6 +20,10 @@ class GuestMediaFrameTests(unittest.TestCase):
         self.assertEqual(url_key("https://"),"")
     def test_media_size_ceiling(self):
         self.assertEqual(MAX_MEDIA_BYTES,40_000_000)
+        self.assertEqual(safe_media_length("1000"),1000)
+        with self.assertRaises(ValueError):safe_media_length(None)
+        with self.assertRaises(ValueError):safe_media_length("unknown")
+        with self.assertRaises(ValueError):safe_media_length(str(MAX_MEDIA_BYTES+1))
     def test_frame_extractor_rejects_empty_or_oversized_input(self):
         with self.assertRaises(ValueError):extract_frame(b"",3.0)
         with self.assertRaises(ValueError):extract_frame(b"x"*(MAX_MEDIA_BYTES+1),3.0)
