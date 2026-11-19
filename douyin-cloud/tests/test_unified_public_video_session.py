@@ -23,6 +23,8 @@ class UnifiedSessionTests(unittest.TestCase):
         result=playback_summary([sample(x,target=False) for x in (0,1.1,2.2,3.3,4.4)])
         self.assertFalse(result["playback_observed"])
         self.assertEqual(result["target_media_samples"],0)
+        self.assertEqual(classify(200,True,True,result,{"visible_text_count":0},0,[]),
+                         "TARGET_MEDIA_IDENTITY_NOT_VERIFIED")
     def test_paused_or_seek_jump_not_playback(self):
         result=playback_summary([sample(0,paused=True),sample(1),sample(20),sample(20,paused=True)])
         self.assertFalse(result["playback_observed"])

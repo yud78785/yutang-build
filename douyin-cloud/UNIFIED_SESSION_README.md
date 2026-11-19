@@ -37,3 +37,5 @@ attempt to prove playback, visible comments and timestamped frames together.
 - The page's matching `aweme_detail` response supplies candidate video media URLs in memory. The selected HTML video element is accepted as the target only when its normalized current source host+path matches one candidate. Signed query strings are never written to logs or artifacts.
 - Media-clock progress from unrelated animations (including a login QR animation) cannot pass the playback gate.
 - Full login panel `[id^="login-full-panel"]`, trust-login save/cancel dialog, and English/Chinese login wording are detected. Screenshots are not captured while a login panel is visible. No login modal is dismissed, no credentials are supplied and no challenge is bypassed.
+
+- The report separates `target_media_source_matched` from `target_media_playback_verified`; a moving but unrelated `<video>` cannot be reported as the target work.

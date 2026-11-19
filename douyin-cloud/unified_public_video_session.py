@@ -25,12 +25,12 @@ UPSTREAM_FRAME_ANALYSIS_REFERENCE = "RanT711/video-parser@main"
 FRAME_TARGETS = (3.0, 8.0, 13.0)
 MAX_FRAMES = 3
 
-PLAYER_JS = """(targetUrls) => {
+PLAYER_JS = """(targetKeys) => {
   function key(raw) {
     try { const u=new URL(raw); return u.protocol==='https:' ? u.hostname.toLowerCase()+u.pathname : ''; }
     catch(e) { return ''; }
   }
-  const targets=new Set((Array.isArray(targetUrls)?targetUrls:[]).map(key).filter(Boolean));
+  const targets=new Set((Array.isArray(targetKeys)?targetKeys:[]).filter(x=>typeof x==='string' && x.length>0));
   const all=Array.from(document.querySelectorAll('video'));
   const visible=all.map((v,i)=>{
     const r=v.getBoundingClientRect(),s=getComputedStyle(v);
@@ -302,6 +302,10 @@ def classify(http_status: Any,origin: bool,detail_seen: bool,playback: dict[str,
         return "PUBLIC_VIDEO_UNAVAILABLE"
     if http in (401,403,429) or (http is not None and http>=500):
         return "HTTP_RESTRICTED_OR_ERROR"
+    if detail_seen and playback["target_media_samples"]==0:
+        return "TARGET_MEDIA_IDENTITY_NOT_VERIFIED"
+    if playback["target_media_samples"]>0 and not playback["playback_observed"]:
+        return "TARGET_MEDIA_PRESENT_NO_VERIFIED_PLAYBACK"
     if detail_seen:
         return "PUBLIC_VIDEO_METADATA_OBSERVED"
     if http is not None and 200<=http<400 and origin:
@@ -321,6 +325,7 @@ async def run_session(output_dir: Path) -> dict[str,Any]:
     comment_response_seen=False
     response_comment_count_value=0
     target_media_urls:list[str]=[]
+    target_media_keys:list[str]=[]
     target_media_duration_s:float | None=None
     error_code=None
     correct_video=False
@@ -352,6 +357,7 @@ async def run_session(output_dir: Path) -> dict[str,Any]:
                                 detail_seen=True
                                 urls,duration=extract_target_media(item)
                                 target_media_urls=list(dict.fromkeys(target_media_urls+urls))[:60]
+                                target_media_keys=list(dict.fromkeys(target_media_keys+[media_url_key(u) for u in urls if media_url_key(u)]))[:60]
                                 if duration is not None:
                                     target_media_duration_s=duration
                         except Exception:
@@ -422,7 +428,7 @@ async def run_session(output_dir: Path) -> dict[str,Any]:
                 # from an immediate empty/interstitial page. No retries/navigation.
                 for _ in range(31):
                     try:
-                        raw=await page.evaluate(PLAYER_JS,target_media_urls)
+                        raw=await page.evaluate(PLAYER_JS,target_media_keys)
                     except Exception:
                         raw={}
                     safe=safe_player_sample(raw)
@@ -485,7 +491,8 @@ async def run_session(output_dir: Path) -> dict[str,Any]:
         "detail_response_seen":bool(detail_seen),
         "target_media_url_count":min(len(target_media_urls),60),
         "target_media_duration_s":target_media_duration_s,
-        "target_media_identity_verified":playback["target_media_samples"]>0,
+        "target_media_source_matched":playback["target_media_samples"]>0,
+        "target_media_playback_verified":playback["playback_observed"],
         "page_diagnostics":latest_diagnostics,
         "page_diagnostic_snapshots":len(page_diagnostics),
         "request_failed_count":min(request_failed_count,100),
