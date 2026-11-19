@@ -199,6 +199,7 @@ async def run_session(output_dir: Path) -> dict[str,Any]:
     comment_response_seen=False
     response_comment_count_value=0
     error_code=None
+    correct_video=False
     tasks:set[asyncio.Task[Any]]=set()
     try:
         from playwright.async_api import async_playwright
