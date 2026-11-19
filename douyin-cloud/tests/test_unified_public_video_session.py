@@ -9,15 +9,20 @@ from unified_public_video_session import (
 )
 from unified_public_video_session import PUBLIC_VIDEO_ID
 
-def sample(t,paused=False,ready=4,visible=1,index=0):
+def sample(t,paused=False,ready=4,visible=1,index=0,target=True):
     return {"total":1,"visible":visible,"index":index,"media_time":t,
-            "paused":paused,"ready":ready,"cookie":"SECRET","title":"SECRET"}
+            "paused":paused,"ready":ready,"is_target_media":target,
+            "cookie":"SECRET","title":"SECRET"}
 
 class UnifiedSessionTests(unittest.TestCase):
     def test_playback_requires_multiple_real_advances(self):
         result=playback_summary([sample(x) for x in (0,1.1,2.2,3.3,4.4)])
         self.assertTrue(result["playback_observed"])
         self.assertEqual(result["advancing_samples"],4)
+    def test_playback_requires_target_media_identity(self):
+        result=playback_summary([sample(x,target=False) for x in (0,1.1,2.2,3.3,4.4)])
+        self.assertFalse(result["playback_observed"])
+        self.assertEqual(result["target_media_samples"],0)
     def test_paused_or_seek_jump_not_playback(self):
         result=playback_summary([sample(0,paused=True),sample(1),sample(20),sample(20,paused=True)])
         self.assertFalse(result["playback_observed"])
@@ -58,6 +63,30 @@ class UnifiedSessionTests(unittest.TestCase):
         self.assertIsNone(r["media_time"])
         self.assertIsNone(r["paused"])
         self.assertIsNone(r["ready"])
+    def test_extract_target_media_from_matching_aweme_detail(self):
+        from unified_public_video_session import extract_target_media,media_url_key
+        detail={"video":{"duration":15000,"play_addr":{"url_list":["https://v1.douyinvod.com/path.mp4?token=SECRET"]},
+            "bit_rate":[{"play_addr":{"url_list":["https://v2.douyinvod.com/high.mp4?token=SECRET"]}}]}}
+        urls,duration=extract_target_media(detail)
+        self.assertEqual(len(urls),2)
+        self.assertEqual(duration,15.0)
+        self.assertEqual(media_url_key(urls[0]),"v1.douyinvod.com/path.mp4")
+        self.assertNotIn("SECRET",json.dumps({"count":len(urls),"duration":duration}))
+    def test_extract_target_media_rejects_untrusted_and_empty_data(self):
+        from unified_public_video_session import extract_target_media
+        self.assertEqual(extract_target_media({"video":{"play_addr":{"url_list":["http://evil.test/a"]}}}),([],None))
+        self.assertEqual(extract_target_media({}),([],None))
+    def test_login_panel_detected_by_safe_flags(self):
+        from unified_public_video_session import safe_page_diagnostics
+        result=safe_page_diagnostics({"login_hint":True,"login_panel_present":True,
+             "login_dialog_present":False,"body_length_bucket":"1000-4999"})
+        self.assertTrue(result["login_hint"])
+        self.assertTrue(result["login_panel_present"])
+    def test_login_overlay_blocks_full_visual_acceptance(self):
+        result=classify(200,True,True,{"playback_observed":True},
+                        {"visible_text_count":5},0,[{"file":"frame_01.png"}],
+                        {"login_hint":True})
+        self.assertEqual(result,"PLAYBACK_AND_COMMENTS_LOGIN_OVERLAY_BLOCKED_FRAMES")
     def test_page_diagnostics_allowlist_excludes_raw_text(self):
         from unified_public_video_session import safe_page_diagnostics
         raw={"document_ready":"complete","title_mentions_douyin":True,

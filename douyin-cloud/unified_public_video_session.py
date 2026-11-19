@@ -25,21 +25,31 @@ UPSTREAM_FRAME_ANALYSIS_REFERENCE = "RanT711/video-parser@main"
 FRAME_TARGETS = (3.0, 8.0, 13.0)
 MAX_FRAMES = 3
 
-PLAYER_JS = """() => {
-  const all = Array.from(document.querySelectorAll('video'));
-  const visible = all.map((v,i) => {
-    const r=v.getBoundingClientRect(), s=getComputedStyle(v);
-    return {v,i,ok:r.width>=80 && r.height>=80 && r.bottom>0 && r.right>0 &&
-      r.left<innerWidth && r.top<innerHeight && s.display!=='none' && s.visibility!=='hidden'};
+PLAYER_JS = """(targetUrls) => {
+  function key(raw) {
+    try { const u=new URL(raw); return u.protocol==='https:' ? u.hostname.toLowerCase()+u.pathname : ''; }
+    catch(e) { return ''; }
+  }
+  const targets=new Set((Array.isArray(targetUrls)?targetUrls:[]).map(key).filter(Boolean));
+  const all=Array.from(document.querySelectorAll('video'));
+  const visible=all.map((v,i)=>{
+    const r=v.getBoundingClientRect(),s=getComputedStyle(v);
+    const ok=r.width>=80 && r.height>=80 && r.bottom>0 && r.right>0 &&
+      r.left<innerWidth && r.top<innerHeight && s.display!=='none' && s.visibility!=='hidden';
+    const src=v.currentSrc || v.src || '';
+    return {v,i,ok,match:targets.has(key(src)),src_host:(()=>{try{return new URL(src).hostname.toLowerCase()}catch(e){return ''}})()};
   }).filter(x=>x.ok);
-  const chosen=visible.find(x=>!x.v.paused && x.v.readyState>=2) || visible[0];
+  const chosen=visible.find(x=>x.match && !x.v.paused && x.v.readyState>=2) ||
+    visible.find(x=>x.match) ||
+    visible.find(x=>!x.v.paused && x.v.readyState>=2) || visible[0];
   const v=chosen && chosen.v;
   return {
-    total:all.length, visible:visible.length,
-    index:chosen ? chosen.i : null,
-    media_time:v && Number.isFinite(v.currentTime) ? v.currentTime : null,
-    paused:v ? !!v.paused : null,
-    ready:v ? v.readyState : null
+    total:all.length,visible:visible.length,index:chosen?chosen.i:null,
+    is_target_media:chosen?chosen.match:false,
+    media_host_is_douyin_vod:chosen?chosen.src_host.endsWith('douyinvod.com'):false,
+    media_time:v && Number.isFinite(v.currentTime)?v.currentTime:null,
+    duration_s:v && Number.isFinite(v.duration)?v.duration:null,
+    paused:v?!!v.paused:null,ready:v?v.readyState:null
   };
 }"""
 
@@ -75,17 +85,23 @@ COMMENT_JS = """() => {
 PAGE_DIAGNOSTICS_JS = """() => {
   const body=document.body?.innerText || '';
   const title=document.title || '';
+  const loginPanel=!!document.querySelector('[id^="login-full-panel"]');
+  const loginDialog=!!document.querySelector('.trust-login-dialog-button-confirm,.trust-login-dialog-button-cancel');
   const captcha=document.querySelectorAll('[id*="captcha" i],[class*="captcha" i],#uc-second-verify,iframe[src*="captcha"]').length;
   const ready=document.readyState;
-  const bucket=body.length===0 ? '0' : body.length<100 ? '1-99' :
-    body.length<1000 ? '100-999' : body.length<5000 ? '1000-4999' : '5000+';
+  const bucket=body.length===0?'0':body.length<100?'1-99':body.length<1000?'100-999':body.length<5000?'1000-4999':'5000+';
+  const loginHint=loginPanel || loginDialog ||
+    /扫码登录|登录后评论|请先登录|登录后观看|登录后查看|Log in to Douyin|Scan to Log In|Phone number|Enter code/i.test(body);
   return {
     document_ready:ready,
     title_mentions_douyin:/抖音|Douyin/i.test(title),
     title_verification_hint:/验证|验证码|访问受限|安全检查/.test(title),
     body_length_bucket:bucket,
-    challenge_hint:captcha>0 || /验证码|安全验证|访问频繁|操作过于频繁|验证后继续|滑动验证|环境异常/.test(body),
-    login_hint:/扫码登录|登录后评论|请先登录|登录后观看|登录后查看/.test(body),
+    challenge_hint:!!document.querySelector('#uc-second-verify,.second-verify-mask') ||
+      /验证码|安全验证|访问频繁|操作过于频繁|验证后继续|滑动验证|环境异常/.test(body),
+    login_hint:loginHint,
+    login_panel_present:loginPanel,
+    login_dialog_present:loginDialog,
     unavailable_hint:/作品不存在|已删除|暂时无法观看|内容不可用|视频不存在/.test(body),
     router_data_present:!!window._ROUTER_DATA || !!window.__INITIAL_STATE__ || !!document.querySelector('#RENDER_DATA'),
     og_video_present:!!document.querySelector('meta[property="og:video"],meta[property="og:video:url"]'),
@@ -111,6 +127,8 @@ def safe_page_diagnostics(raw: Any) -> dict[str,Any]:
         "body_length_bucket":bucket,
         "challenge_hint":value.get("challenge_hint") is True,
         "login_hint":value.get("login_hint") is True,
+        "login_panel_present":value.get("login_panel_present") is True,
+        "login_dialog_present":value.get("login_dialog_present") is True,
         "unavailable_hint":value.get("unavailable_hint") is True,
         "router_data_present":value.get("router_data_present") is True,
         "og_video_present":value.get("og_video_present") is True,
@@ -130,6 +148,44 @@ def finite(value: Any, upper: float) -> float | None:
     return round(number,2) if math.isfinite(number) and 0<=number<=upper else None
 
 
+def media_url_key(raw: Any) -> str:
+    """Normalize a target media URL in memory; never persist the signed URL."""
+    if not isinstance(raw,str):
+        return ""
+    try:
+        u=urlsplit(raw)
+        if u.scheme!="https" or not u.hostname:
+            return ""
+        return u.hostname.lower()+u.path
+    except Exception:
+        return ""
+
+
+def extract_target_media(detail: Any) -> tuple[list[str],float | None]:
+    """Collect target video's play_addr candidates from its own detail response."""
+    if not isinstance(detail,dict) or not isinstance(detail.get("video"),dict):
+        return [],None
+    video=detail["video"]
+    urls=[]
+    def add(value: Any) -> None:
+        if not isinstance(value,dict):
+            return
+        candidates=value.get("url_list")
+        if isinstance(candidates,list):
+            for item in candidates:
+                if isinstance(item,str) and media_url_key(item) and item not in urls:
+                    urls.append(item)
+    add(video.get("play_addr"))
+    bitrates=video.get("bit_rate")
+    if isinstance(bitrates,list):
+        for bitrate in bitrates[:30]:
+            if isinstance(bitrate,dict):
+                add(bitrate.get("play_addr"))
+    duration=finite(video.get("duration"),86_400_000)
+    duration_s=round(duration/1000,2) if duration is not None and duration>1000 else duration
+    return urls[:60],duration_s
+
+
 def safe_player_sample(raw: Any) -> dict[str,Any]:
     value=raw if isinstance(raw,dict) else {}
     def count(key: str) -> int | None:
@@ -140,6 +196,9 @@ def safe_player_sample(raw: Any) -> dict[str,Any]:
     return {
         "total":count("total"),"visible":count("visible"),
         "index":idx if type(idx) is int and 0<=idx<=200 else None,
+        "is_target_media":value.get("is_target_media") is True,
+        "media_host_is_douyin_vod":value.get("media_host_is_douyin_vod") is True,
+        "duration_s":finite(value.get("duration_s"),86400),
         "media_time":finite(value.get("media_time"),86400),
         "paused":value.get("paused") if type(value.get("paused")) is bool else None,
         "ready":ready if type(ready) is int and 0<=ready<=4 else None,
@@ -152,7 +211,8 @@ def playback_summary(raw_samples: list[Any]) -> dict[str,Any]:
     advancing=0
     for previous,current in zip(samples,samples[1:]):
         a,b=previous["media_time"],current["media_time"]
-        if (a is None or b is None or previous["paused"] is not False or
+        if (a is None or b is None or previous["is_target_media"] is not True or
+                current["is_target_media"] is not True or previous["paused"] is not False or
                 current["paused"] is not False or (previous["ready"] or 0)<2 or
                 (current["ready"] or 0)<2):
             continue
@@ -163,6 +223,7 @@ def playback_summary(raw_samples: list[Any]) -> dict[str,Any]:
     return {
         "sample_count":len(samples),
         "advancing_samples":advancing,
+        "target_media_samples":sum(1 for x in samples if x["is_target_media"]),
         "observed_playback_s":round(observed,2),
         "playback_observed":observed>=3.0 and advancing>=2,
         "visible_video_max":max((x["visible"] or 0 for x in samples),default=0),
@@ -215,23 +276,28 @@ def classify(http_status: Any,origin: bool,detail_seen: bool,playback: dict[str,
              comments: dict[str,Any],response_comment_count: int,frames: list[Any],
              diagnostics: dict[str,Any] | None=None) -> str:
     http=http_status if type(http_status) is int and 100<=http_status<=599 else None
+    diagnostics=diagnostics or {}
     has_comments=comments["visible_text_count"]>0 or response_comment_count>0
     frame_count=min(len(frames),MAX_FRAMES)
-    if playback["playback_observed"] and has_comments and frame_count>0:
+    login=diagnostics.get("login_hint") is True
+    if playback["playback_observed"] and has_comments and frame_count>0 and not login:
         return "PLAYBACK_COMMENTS_AND_FRAMES_OBSERVED"
+    if playback["playback_observed"] and has_comments and login:
+        return "PLAYBACK_AND_COMMENTS_LOGIN_OVERLAY_BLOCKED_FRAMES"
+    if has_comments and login:
+        return "COMMENTS_READ_LOGIN_GATE_BLOCKED_VIDEO"
     if playback["playback_observed"] and has_comments:
         return "PLAYBACK_AND_COMMENTS_OBSERVED"
-    if playback["playback_observed"] and frame_count>0:
+    if playback["playback_observed"] and frame_count>0 and not login:
         return "PLAYBACK_AND_FRAMES_OBSERVED"
     if playback["playback_observed"]:
         return "PLAYBACK_ONLY"
     if has_comments:
         return "COMMENTS_ONLY"
-    diagnostics=diagnostics or {}
+    if login:
+        return "PAGE_LOGIN_GATE"
     if diagnostics.get("challenge_hint") or diagnostics.get("title_verification_hint"):
         return "PAGE_CHALLENGE_OR_RISK_CONTROL"
-    if diagnostics.get("login_hint"):
-        return "PAGE_LOGIN_GATE"
     if diagnostics.get("unavailable_hint"):
         return "PUBLIC_VIDEO_UNAVAILABLE"
     if http in (401,403,429) or (http is not None and http>=500):
@@ -254,6 +320,8 @@ async def run_session(output_dir: Path) -> dict[str,Any]:
     detail_seen=False
     comment_response_seen=False
     response_comment_count_value=0
+    target_media_urls:list[str]=[]
+    target_media_duration_s:float | None=None
     error_code=None
     correct_video=False
     page_diagnostics=[]
@@ -272,6 +340,7 @@ async def run_session(output_dir: Path) -> dict[str,Any]:
 
                 async def observe_response(response: Any) -> None:
                     nonlocal detail_seen,comment_response_seen,response_comment_count_value
+                    nonlocal target_media_urls,target_media_duration_s
                     parts=urlsplit(response.url)
                     if parts.hostname not in ("www.douyin.com","douyin.com"):
                         return
@@ -281,6 +350,10 @@ async def run_session(output_dir: Path) -> dict[str,Any]:
                             item=body.get("aweme_detail") if isinstance(body,dict) else None
                             if isinstance(item,dict) and str(item.get("aweme_id"))==PUBLIC_VIDEO_ID:
                                 detail_seen=True
+                                urls,duration=extract_target_media(item)
+                                target_media_urls=list(dict.fromkeys(target_media_urls+urls))[:60]
+                                if duration is not None:
+                                    target_media_duration_s=duration
                         except Exception:
                             pass
                     if parts.path=="/aweme/v1/web/comment/list/":
@@ -349,14 +422,16 @@ async def run_session(output_dir: Path) -> dict[str,Any]:
                 # from an immediate empty/interstitial page. No retries/navigation.
                 for _ in range(31):
                     try:
-                        raw=await page.evaluate(PLAYER_JS)
+                        raw=await page.evaluate(PLAYER_JS,target_media_urls)
                     except Exception:
                         raw={}
                     safe=safe_player_sample(raw)
                     raw_samples.append(safe)
 
                     current=safe["media_time"]
-                    if (safe["paused"] is False and (safe["ready"] or 0)>=2 and
+                    login_blocked=bool(page_diagnostics and page_diagnostics[-1].get("login_hint"))
+                    if (safe["is_target_media"] is True and not login_blocked and
+                        safe["paused"] is False and (safe["ready"] or 0)>=2 and
                         safe["index"] is not None and current is not None and len(frame_records)<MAX_FRAMES):
                         for target in FRAME_TARGETS:
                             if target not in captured_targets and current>=target:
@@ -408,6 +483,9 @@ async def run_session(output_dir: Path) -> dict[str,Any]:
         "http_status":http_status if type(http_status) is int and 100<=http_status<=599 else None,
         "correct_video_url":bool(origin and correct_video),
         "detail_response_seen":bool(detail_seen),
+        "target_media_url_count":min(len(target_media_urls),60),
+        "target_media_duration_s":target_media_duration_s,
+        "target_media_identity_verified":playback["target_media_samples"]>0,
         "page_diagnostics":latest_diagnostics,
         "page_diagnostic_snapshots":len(page_diagnostics),
         "request_failed_count":min(request_failed_count,100),

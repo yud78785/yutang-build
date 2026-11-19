@@ -30,3 +30,10 @@ attempt to prove playback, visible comments and timestamped frames together.
 - No title or body text, HTML, cookie, media URL, screenshot of a challenge, account data or comment text is persisted.
 - The browser waits up to 30 seconds on the same URL without navigating, retrying, logging in or solving challenges. This is specifically to distinguish delayed rendering from a challenge or unavailable page.
 - If a risk-control/challenge hint is detected, the test stops at that observation; no bypass is attempted.
+
+
+## Target media identity and login gate
+
+- The page's matching `aweme_detail` response supplies candidate video media URLs in memory. The selected HTML video element is accepted as the target only when its normalized current source host+path matches one candidate. Signed query strings are never written to logs or artifacts.
+- Media-clock progress from unrelated animations (including a login QR animation) cannot pass the playback gate.
+- Full login panel `[id^="login-full-panel"]`, trust-login save/cancel dialog, and English/Chinese login wording are detected. Screenshots are not captured while a login panel is visible. No login modal is dismissed, no credentials are supplied and no challenge is bypassed.
