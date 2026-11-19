@@ -4,7 +4,7 @@ on:
     branches:
       - experiment/douyin-guest-media-frames-20261119
     paths:
-      - douyin-cloud/QA_GUEST_MEDIA_FRAMES_ONCE.approved
+      - douyin-cloud/QA_GUEST_MEDIA_FRAMES_RETRY_ONCE.approved
 permissions:
   contents: read
 concurrency:
@@ -17,7 +17,7 @@ jobs:
       github.ref == 'refs/heads/experiment/douyin-guest-media-frames-20261119' &&
       github.actor == 'yud78785' &&
       github.run_attempt == 1 &&
-      github.event.head_commit.message == 'test: yutang guest media frames once'
+      github.event.head_commit.message == 'test: yutang guest media frames once after ffmpeg install'
     runs-on: ubuntu-24.04
     timeout-minutes: 12
     steps:
@@ -31,8 +31,8 @@ jobs:
         run: |
           set -euo pipefail
           changed=$(git diff-tree --no-commit-id --name-only -r HEAD)
-          test "$changed" = 'douyin-cloud/QA_GUEST_MEDIA_FRAMES_ONCE.approved'
-          printf 'BUILD_YUTANG_GUEST_MEDIA_FRAMES_ONCE\n' | cmp - douyin-cloud/QA_GUEST_MEDIA_FRAMES_ONCE.approved
+          test "$changed" = 'douyin-cloud/QA_GUEST_MEDIA_FRAMES_RETRY_ONCE.approved'
+          printf 'BUILD_YUTANG_GUEST_MEDIA_FRAMES_RETRY_ONCE\n' | cmp - douyin-cloud/QA_GUEST_MEDIA_FRAMES_RETRY_ONCE.approved
           test -f douyin-cloud/guest_media_frames.py
           test -f douyin-cloud/tests/test_guest_media_frames.py
       - name: Set up Python
@@ -44,10 +44,12 @@ jobs:
         run: |
           set -euo pipefail
           python -m unittest discover -s douyin-cloud/tests -p test_guest_media_frames.py -v
-      - name: Install fixed Playwright and confirm ffmpeg
+      - name: Install pinned Playwright and ffmpeg
         shell: bash
         run: |
           set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg
           python -m pip install --disable-pip-version-check 'playwright==1.58.0'
           command -v google-chrome
           command -v ffmpeg
