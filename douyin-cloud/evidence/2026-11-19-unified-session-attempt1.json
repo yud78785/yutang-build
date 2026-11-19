@@ -1,0 +1,38 @@
+{
+  "schema": "yutang.cloud.unified_video_session.v1",
+  "public_video_id": "7708352061931622655",
+  "cloud_environment": "github-ubuntu-24.04-chrome-headless",
+  "source_url_host": "www.douyin.com",
+  "http_status": 200,
+  "correct_video_url": true,
+  "detail_response_seen": false,
+  "playback": {
+    "sample_count": 21,
+    "advancing_samples": 0,
+    "observed_playback_s": 0,
+    "playback_observed": false,
+    "visible_video_max": 0,
+    "video_element_max": 0
+  },
+  "comments": {
+    "panel_present": false,
+    "panel_visible": false,
+    "item_nodes": 0,
+    "visible_text_count": 0,
+    "login_hint": false,
+    "response_seen": false,
+    "response_text_count": 0,
+    "visible_comment_text_observed": false
+  },
+  "frames": [],
+  "frame_count": 0,
+  "classification": "PAGE_RESPONDED_NO_VERIFIED_PLAYBACK",
+  "error_code": null,
+  "comments_submitted": false,
+  "comment_text_or_usernames_persisted": false,
+  "media_downloaded": false,
+  "user_login_or_cookies_used": false,
+  "automated_visual_ai_analysis": false,
+  "automated_audio_transcription": false,
+  "limitations": "One public video in one cloud headless Chrome session. Frame files are retained for separate visual inspection; no full video or comment text is stored."
+}
