@@ -1,0 +1,85 @@
+name: YuTang guest media to three frames - one-shot cloud extraction
+on:
+  push:
+    branches:
+      - experiment/douyin-guest-media-frames-20261119
+    paths:
+      - douyin-cloud/QA_GUEST_MEDIA_FRAMES_ONCE.approved
+permissions:
+  contents: read
+concurrency:
+  group: yutang-guest-media-frames-20261119-once
+  cancel-in-progress: false
+jobs:
+  guest-media-frame-extraction:
+    if: >-
+      github.repository == 'yud78785/yutang-build' &&
+      github.ref == 'refs/heads/experiment/douyin-guest-media-frames-20261119' &&
+      github.actor == 'yud78785' &&
+      github.run_attempt == 1 &&
+      github.event.head_commit.message == 'test: yutang guest media frames once'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - name: Checkout exact isolated source without persisted credentials
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - name: Verify one-shot marker and scoped files
+        shell: bash
+        run: |
+          set -euo pipefail
+          changed=$(git diff-tree --no-commit-id --name-only -r HEAD)
+          test "$changed" = 'douyin-cloud/QA_GUEST_MEDIA_FRAMES_ONCE.approved'
+          printf 'BUILD_YUTANG_GUEST_MEDIA_FRAMES_ONCE\n' | cmp - douyin-cloud/QA_GUEST_MEDIA_FRAMES_ONCE.approved
+          test -f douyin-cloud/guest_media_frames.py
+          test -f douyin-cloud/tests/test_guest_media_frames.py
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run offline media provenance and size-limit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m unittest discover -s douyin-cloud/tests -p test_guest_media_frames.py -v
+      - name: Install fixed Playwright and confirm ffmpeg
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check 'playwright==1.58.0'
+          command -v google-chrome
+          command -v ffmpeg
+      - name: Fetch only browser-issued target media and extract three JPEGs in memory
+        shell: bash
+        timeout-minutes: 5
+        run: |
+          set -euo pipefail
+          python douyin-cloud/guest_media_frames.py --out-dir douyin-cloud/guest-media-artifacts
+          python - <<'PY'
+          import json,pathlib
+          root=pathlib.Path('douyin-cloud/guest-media-artifacts')
+          d=json.loads((root/'guest-media-frames-receipt.json').read_text(encoding='utf-8'))
+          assert d['schema']=='yutang.cloud.guest_media_frames.v1'
+          assert d['public_video_id']=='7708352061931622655'
+          assert d['media_file_persisted'] is False
+          assert d['media_uploaded'] is False
+          assert d['login_or_cookie_export'] is False
+          assert d['captcha_or_waf_bypass'] is False
+          assert d['frame_count']<=3
+          for frame in d['frames']:
+              p=root/frame['file']
+              assert p.is_file() and p.stat().st_size==frame['bytes']
+          print('YUTANG_GUEST_MEDIA_CLASSIFICATION='+d['classification'])
+          print('YUTANG_GUEST_MEDIA_FRAMES='+str(d['frame_count']))
+          print('YUTANG_GUEST_MEDIA_STATUS='+str(d['media_response_status']))
+          PY
+      - name: Upload only three JPEG samples and sanitized receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: YuTangDouyinGuestMediaFrames-20261119
+          path: douyin-cloud/guest-media-artifacts/
+          if-no-files-found: warn
+          retention-days: 14
