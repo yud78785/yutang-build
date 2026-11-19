@@ -1,0 +1,88 @@
+name: YuTang unified Douyin playback comments and frames - one-shot cloud session
+on:
+  push:
+    branches:
+      - experiment/douyin-unified-page-diagnostics-20261119
+    paths:
+      - douyin-cloud/QA_PAGE_DIAGNOSTICS_ONCE.approved
+permissions:
+  contents: read
+concurrency:
+  group: yutang-unified-page-diagnostics-20261119-once
+  cancel-in-progress: false
+jobs:
+  unified-public-video-session:
+    if: >-
+      github.repository == 'yud78785/yutang-build' &&
+      github.ref == 'refs/heads/experiment/douyin-unified-page-diagnostics-20261119' &&
+      github.actor == 'yud78785' &&
+      github.run_attempt == 1 &&
+      github.event.head_commit.message == 'test: yutang page diagnostics once'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - name: Checkout exact source without persistent credentials
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+      - name: Verify one-shot marker and expected files
+        shell: bash
+        run: |
+          set -euo pipefail
+          changed=$(git diff-tree --no-commit-id --name-only -r HEAD)
+          test "$changed" = 'douyin-cloud/QA_PAGE_DIAGNOSTICS_ONCE.approved'
+          printf 'BUILD_YUTANG_PAGE_DIAGNOSTICS_ONCE\n' | cmp - douyin-cloud/QA_PAGE_DIAGNOSTICS_ONCE.approved
+          test -f douyin-cloud/unified_public_video_session.py
+          test -f douyin-cloud/tests/test_unified_public_video_session.py
+          test -f douyin-cloud/evidence/2026-11-19-unified-session-attempt1.json
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run unified evidence and privacy contract tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m unittest discover -s douyin-cloud/tests -p test_unified_public_video_session.py -v
+      - name: Install pinned Playwright and confirm Chrome
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check 'playwright==1.58.0'
+          command -v google-chrome
+          google-chrome --version
+      - name: Run one unified public video session (no media download)
+        shell: bash
+        timeout-minutes: 3
+        run: |
+          set -euo pipefail
+          python douyin-cloud/unified_public_video_session.py --out-dir douyin-cloud/unified-artifacts
+          python - <<'PY'
+          import json, pathlib
+          root=pathlib.Path('douyin-cloud/unified-artifacts')
+          data=json.loads((root/'unified-session-receipt.json').read_text(encoding='utf-8'))
+          assert data['schema']=='yutang.cloud.unified_video_session.v1'
+          assert data['public_video_id']=='7708352061931622655'
+          assert data['comments_submitted'] is False
+          assert data['comment_text_or_usernames_persisted'] is False
+          assert data['media_downloaded'] is False
+          assert data['user_login_or_cookies_used'] is False
+          assert data['frame_count'] <= 3
+          for item in data['frames']:
+              path=root/item['file']
+              assert path.is_file()
+              assert path.stat().st_size==item['bytes']
+          print('YUTANG_UNIFIED_CLASSIFICATION='+data['classification'])
+          print('YUTANG_UNIFIED_PLAYBACK='+str(data['playback']['playback_observed']))
+          print('YUTANG_UNIFIED_COMMENTS='+str(data['comments']['visible_comment_text_observed']))
+          print('YUTANG_UNIFIED_FRAMES='+str(data['frame_count']))
+          PY
+      - name: Upload receipt and at most three visible frame crops (no full video)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: YuTangDouyinPageDiagnostics-20261119
+          path: douyin-cloud/unified-artifacts/
+          if-no-files-found: warn
+          retention-days: 14

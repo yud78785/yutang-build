@@ -22,3 +22,11 @@ attempt to prove playback, visible comments and timestamped frames together.
 - A successful workflow means the bounded test completed. Only a receipt
   classification `PLAYBACK_COMMENTS_AND_FRAMES_OBSERVED` establishes all
   three cloud observations in this same source/session.
+
+
+## Bounded page-state diagnostics after a unified-session failure
+
+- A later one-shot run can record only safe flags: document ready state, coarse body-text length bucket, title/login/challenge/unavailable hints, router/OG-video presence, script/media-source counts and aggregate failed-request/console/network error counts.
+- No title or body text, HTML, cookie, media URL, screenshot of a challenge, account data or comment text is persisted.
+- The browser waits up to 30 seconds on the same URL without navigating, retrying, logging in or solving challenges. This is specifically to distinguish delayed rendering from a challenge or unavailable page.
+- If a risk-control/challenge hint is detected, the test stops at that observation; no bypass is attempted.

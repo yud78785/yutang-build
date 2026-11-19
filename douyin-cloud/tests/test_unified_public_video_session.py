@@ -58,6 +58,36 @@ class UnifiedSessionTests(unittest.TestCase):
         self.assertIsNone(r["media_time"])
         self.assertIsNone(r["paused"])
         self.assertIsNone(r["ready"])
+    def test_page_diagnostics_allowlist_excludes_raw_text(self):
+        from unified_public_video_session import safe_page_diagnostics
+        raw={"document_ready":"complete","title_mentions_douyin":True,
+             "title_verification_hint":False,"body_length_bucket":"100-999",
+             "challenge_hint":True,"login_hint":False,"unavailable_hint":False,
+             "router_data_present":False,"og_video_present":False,
+             "script_count":20,"video_source_count":0,"captcha_node_count":1,
+             "body_text":"SECRET","title":"SECRET","cookie":"SECRET"}
+        result=safe_page_diagnostics(raw)
+        self.assertTrue(result["challenge_hint"])
+        self.assertEqual(result["video_source_count"],0)
+        self.assertNotIn("SECRET",json.dumps(result))
+    def test_page_diagnostics_reject_untrusted_values(self):
+        from unified_public_video_session import safe_page_diagnostics
+        result=safe_page_diagnostics({"document_ready":"SECRET","body_length_bucket":"SECRET",
+             "script_count":99999,"video_source_count":"SECRET","challenge_hint":"yes"})
+        self.assertEqual(result["document_ready"],"UNVERIFIED")
+        self.assertEqual(result["body_length_bucket"],"UNVERIFIED")
+        self.assertEqual(result["script_count"],500)
+        self.assertEqual(result["video_source_count"],0)
+        self.assertFalse(result["challenge_hint"])
+    def test_challenge_page_classification_is_explicit(self):
+        playback={"playback_observed":False}
+        comments={"visible_text_count":0}
+        self.assertEqual(classify(200,True,False,playback,comments,0,[],
+                         {"challenge_hint":True}),"PAGE_CHALLENGE_OR_RISK_CONTROL")
+        self.assertEqual(classify(200,True,False,playback,comments,0,[],
+                         {"login_hint":True}),"PAGE_LOGIN_GATE")
+        self.assertEqual(classify(200,True,False,playback,comments,0,[],
+                         {"unavailable_hint":True}),"PUBLIC_VIDEO_UNAVAILABLE")
     def test_frame_targets_are_at_most_three(self):
         from unified_public_video_session import MAX_FRAMES,FRAME_TARGETS
         self.assertEqual(MAX_FRAMES,3)

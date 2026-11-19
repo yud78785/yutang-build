@@ -72,6 +72,54 @@ COMMENT_JS = """() => {
 }"""
 
 
+PAGE_DIAGNOSTICS_JS = """() => {
+  const body=document.body?.innerText || '';
+  const title=document.title || '';
+  const captcha=document.querySelectorAll('[id*="captcha" i],[class*="captcha" i],#uc-second-verify,iframe[src*="captcha"]').length;
+  const ready=document.readyState;
+  const bucket=body.length===0 ? '0' : body.length<100 ? '1-99' :
+    body.length<1000 ? '100-999' : body.length<5000 ? '1000-4999' : '5000+';
+  return {
+    document_ready:ready,
+    title_mentions_douyin:/抖音|Douyin/i.test(title),
+    title_verification_hint:/验证|验证码|访问受限|安全检查/.test(title),
+    body_length_bucket:bucket,
+    challenge_hint:captcha>0 || /验证码|安全验证|访问频繁|操作过于频繁|验证后继续|滑动验证|环境异常/.test(body),
+    login_hint:/扫码登录|登录后评论|请先登录|登录后观看|登录后查看/.test(body),
+    unavailable_hint:/作品不存在|已删除|暂时无法观看|内容不可用|视频不存在/.test(body),
+    router_data_present:!!window._ROUTER_DATA || !!window.__INITIAL_STATE__ || !!document.querySelector('#RENDER_DATA'),
+    og_video_present:!!document.querySelector('meta[property="og:video"],meta[property="og:video:url"]'),
+    script_count:Math.min(500,document.scripts.length),
+    video_source_count:Math.min(200,document.querySelectorAll('video[src],video source[src]').length),
+    captcha_node_count:Math.min(50,captcha)
+  };
+}"""
+
+def safe_page_diagnostics(raw: Any) -> dict[str,Any]:
+    value=raw if isinstance(raw,dict) else {}
+    ready=value.get("document_ready")
+    bucket=value.get("body_length_bucket")
+    if bucket not in ("0","1-99","100-999","1000-4999","5000+"):
+        bucket="UNVERIFIED"
+    def count(key: str,maximum: int) -> int:
+        v=value.get(key)
+        return min(max(v,0),maximum) if type(v) is int else 0
+    return {
+        "document_ready":ready if ready in ("loading","interactive","complete") else "UNVERIFIED",
+        "title_mentions_douyin":value.get("title_mentions_douyin") is True,
+        "title_verification_hint":value.get("title_verification_hint") is True,
+        "body_length_bucket":bucket,
+        "challenge_hint":value.get("challenge_hint") is True,
+        "login_hint":value.get("login_hint") is True,
+        "unavailable_hint":value.get("unavailable_hint") is True,
+        "router_data_present":value.get("router_data_present") is True,
+        "og_video_present":value.get("og_video_present") is True,
+        "script_count":count("script_count",500),
+        "video_source_count":count("video_source_count",200),
+        "captcha_node_count":count("captcha_node_count",50),
+    }
+
+
 def finite(value: Any, upper: float) -> float | None:
     if value is None or isinstance(value, bool):
         return None
@@ -164,7 +212,8 @@ def safe_frame_record(name: Any,media_time: Any,digest: Any,size: Any) -> dict[s
 
 
 def classify(http_status: Any,origin: bool,detail_seen: bool,playback: dict[str,Any],
-             comments: dict[str,Any],response_comment_count: int,frames: list[Any]) -> str:
+             comments: dict[str,Any],response_comment_count: int,frames: list[Any],
+             diagnostics: dict[str,Any] | None=None) -> str:
     http=http_status if type(http_status) is int and 100<=http_status<=599 else None
     has_comments=comments["visible_text_count"]>0 or response_comment_count>0
     frame_count=min(len(frames),MAX_FRAMES)
@@ -178,6 +227,13 @@ def classify(http_status: Any,origin: bool,detail_seen: bool,playback: dict[str,
         return "PLAYBACK_ONLY"
     if has_comments:
         return "COMMENTS_ONLY"
+    diagnostics=diagnostics or {}
+    if diagnostics.get("challenge_hint") or diagnostics.get("title_verification_hint"):
+        return "PAGE_CHALLENGE_OR_RISK_CONTROL"
+    if diagnostics.get("login_hint"):
+        return "PAGE_LOGIN_GATE"
+    if diagnostics.get("unavailable_hint"):
+        return "PUBLIC_VIDEO_UNAVAILABLE"
     if http in (401,403,429) or (http is not None and http>=500):
         return "HTTP_RESTRICTED_OR_ERROR"
     if detail_seen:
@@ -200,6 +256,11 @@ async def run_session(output_dir: Path) -> dict[str,Any]:
     response_comment_count_value=0
     error_code=None
     correct_video=False
+    page_diagnostics=[]
+    request_failed_count=0
+    console_error_count=0
+    response_4xx_count=0
+    response_5xx_count=0
     tasks:set[asyncio.Task[Any]]=set()
     try:
         from playwright.async_api import async_playwright
@@ -242,6 +303,25 @@ async def run_session(output_dir: Path) -> dict[str,Any]:
                         task.add_done_callback(tasks.discard)
 
                 page.on("response",response_hook)
+                def request_failed(_: Any) -> None:
+                    nonlocal request_failed_count
+                    request_failed_count=min(100,request_failed_count+1)
+                def console_message(message: Any) -> None:
+                    nonlocal console_error_count
+                    if message.type=="error":
+                        console_error_count=min(100,console_error_count+1)
+                def response_status(response: Any) -> None:
+                    nonlocal response_4xx_count,response_5xx_count
+                    host=urlsplit(response.url).hostname
+                    if host not in ("www.douyin.com","douyin.com"):
+                        return
+                    if 400<=response.status<500:
+                        response_4xx_count=min(100,response_4xx_count+1)
+                    elif response.status>=500:
+                        response_5xx_count=min(100,response_5xx_count+1)
+                page.on("requestfailed",request_failed)
+                page.on("console",console_message)
+                page.on("response",response_status)
                 try:
                     response=await page.goto(PUBLIC_URL,wait_until="domcontentloaded",timeout=25000)
                     http_status=response.status if response else None
@@ -259,9 +339,15 @@ async def run_session(output_dir: Path) -> dict[str,Any]:
                         comment_samples.append(safe_comment_snapshot(await page.evaluate(COMMENT_JS)))
                     except Exception:
                         comment_samples.append(safe_comment_snapshot({}))
+                try:
+                    page_diagnostics.append(safe_page_diagnostics(await page.evaluate(PAGE_DIAGNOSTICS_JS)))
+                except Exception:
+                    page_diagnostics.append(safe_page_diagnostics({}))
 
                 captured_targets:set[float]=set()
-                for _ in range(21):
+                # One bounded 30-second wait helps distinguish delayed rendering
+                # from an immediate empty/interstitial page. No retries/navigation.
+                for _ in range(31):
                     try:
                         raw=await page.evaluate(PLAYER_JS)
                     except Exception:
@@ -288,11 +374,16 @@ async def run_session(output_dir: Path) -> dict[str,Any]:
                                 except Exception:
                                     pass
                                 break
-                    if len(comment_samples)<3 and _%7==6 and correct_video:
+                    if len(comment_samples)<5 and _%7==6 and correct_video:
                         try:
                             comment_samples.append(safe_comment_snapshot(await page.evaluate(COMMENT_JS)))
                         except Exception:
                             pass
+                    if _ in (9,19,29):
+                        try:
+                            page_diagnostics.append(safe_page_diagnostics(await page.evaluate(PAGE_DIAGNOSTICS_JS)))
+                        except Exception:
+                            page_diagnostics.append(safe_page_diagnostics({}))
                     await asyncio.sleep(1)
 
                 if tasks:
@@ -306,8 +397,9 @@ async def run_session(output_dir: Path) -> dict[str,Any]:
     playback=playback_summary(raw_samples)
     comments=max(comment_samples,key=lambda x:x["visible_text_count"],default=safe_comment_snapshot({}))
     frames=[x for x in frame_records[:MAX_FRAMES]]
+    latest_diagnostics=page_diagnostics[-1] if page_diagnostics else safe_page_diagnostics({})
     state=classify(http_status,origin,detail_seen,playback,comments,
-                   response_comment_count_value,frames)
+                   response_comment_count_value,frames,latest_diagnostics)
     return {
         "schema":SCHEMA,
         "public_video_id":PUBLIC_VIDEO_ID,
@@ -316,6 +408,12 @@ async def run_session(output_dir: Path) -> dict[str,Any]:
         "http_status":http_status if type(http_status) is int and 100<=http_status<=599 else None,
         "correct_video_url":bool(origin and correct_video),
         "detail_response_seen":bool(detail_seen),
+        "page_diagnostics":latest_diagnostics,
+        "page_diagnostic_snapshots":len(page_diagnostics),
+        "request_failed_count":min(request_failed_count,100),
+        "console_error_count":min(console_error_count,100),
+        "response_4xx_count":min(response_4xx_count,100),
+        "response_5xx_count":min(response_5xx_count,100),
         "playback":playback,
         "comments":{
             **comments,
