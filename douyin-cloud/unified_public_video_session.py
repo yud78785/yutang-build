@@ -345,7 +345,7 @@ async def run_session(output_dir: Path) -> dict[str,Any]:
 
                 async def observe_response(response: Any) -> None:
                     nonlocal detail_seen,comment_response_seen,response_comment_count_value
-                    nonlocal target_media_urls,target_media_duration_s
+                    nonlocal target_media_urls,target_media_keys,target_media_duration_s
                     parts=urlsplit(response.url)
                     if parts.hostname not in ("www.douyin.com","douyin.com"):
                         return
